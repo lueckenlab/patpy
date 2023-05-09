@@ -20,7 +20,7 @@ urls.Source = "https://github.com/lueckenlab/patient_representation"
 urls.Home-page = "https://github.com/lueckenlab/patient_representation"
 dependencies = [
     "anndata>=0.8",
-    "cloudpred  @ git@github.com:VladimirShitov/CloudPred.git"
+    "cloudpred  @ git@github.com:VladimirShitov/CloudPred.git",
     "matplotlib>=3.6",
     "mrvi>=0.1",
     "numpy>=1.23",
