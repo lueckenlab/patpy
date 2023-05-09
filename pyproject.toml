@@ -2,6 +2,9 @@
 build-backend = "hatchling.build"
 requires = ["hatchling"]
 
+[tool.hatch.metadata]
+allow-direct-references = true  # Allow installing packages from git repositories
+
 [project]
 name = "patient_representation"
 version = "0.0.1"
