@@ -7,10 +7,10 @@ allow-direct-references = true  # Allow installing packages from git repositorie
 
 [project]
 name = "patient_representation"
-version = "0.0.1"
+version = "0.0.2"
 description = "Representing patients or samples from single-cell data"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = "3.10"
 license = {file = "LICENSE"}
 authors = [
     {name = "Vladimir Shitov"},
@@ -31,6 +31,7 @@ dependencies = [
     "pilot @ git+ssh://git@github.com/CostaLab/PILOT.git",
     "SCellBOW>=1.2",
     "scipy>=1.10",
+    "scvi-tools~=0.19",
     "seaborn>=0.12",
     "torch>=1.13",
     "wassersteintsne>=1.1",
