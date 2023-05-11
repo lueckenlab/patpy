@@ -278,6 +278,7 @@ class MrVI(PatientsRepresentationMethod):
 
         self.model = None
         self.model_params = model_params
+        self.patient_representations = None
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
         """Train MrVI model
@@ -332,14 +333,16 @@ class MrVI(PatientsRepresentationMethod):
         if "X_mrvi_u" not in self.adata.obsm or force:
             self.adata.obsm["X_mrvi_u"] = self.model.get_latent_representation(give_z=False)
 
-        self.adata.uns[self.DISTANCES_UNS_KEY] = self.model.get_local_sample_representation(return_distances=True)
+        self.patient_representations = self.model.get_local_sample_representation(return_distances=True)
 
         if cells_mask is None:
-            sample_sample_distances = self.adata.uns[self.DISTANCES_UNS_KEY].mean(axis=0)
+            sample_sample_distances = self.patient_representations.mean(axis=0)
 
         else:
-            distance_matrices_subset = self.adata.uns[self.DISTANCES_UNS_KEY][cells_mask, :, :]
+            distance_matrices_subset = self.patient_representations[cells_mask, :, :]
             sample_sample_distances = distance_matrices_subset.mean(axis=0)
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = sample_sample_distances
 
         return sample_sample_distances
 
