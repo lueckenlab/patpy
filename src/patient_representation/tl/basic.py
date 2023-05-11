@@ -6,6 +6,7 @@ import mrvi
 import numpy as np
 import pandas as pd
 import PILOT as pt
+import scanpy as sc
 import SCellBOW as sb
 import scipy
 import seaborn as sns
@@ -105,15 +106,58 @@ class PatientsRepresentationMethod:
 
         return filtered_cell_types
 
+    def _get_data(self):
+        """Extract data from `self.layer`"""
+        if self.adata is None:
+            raise RuntimeError("adata is not yet set. Please, run prepare_anndata() method first")
+
+        if self.layer is None or self.layer == "X":
+            return self.adata.X
+
+        return self.adata.obsm[self.layer]
+
+    def _move_layer_to_X(self, adata: sc.AnnData) -> sc.AnnData:
+        """Some models require data to be stored in `adata.X`. This method moves `layer` to `.X`"""
+        if self.layer == "X" or self.layer is None:
+            # The data is already in correct slot
+            return adata
+
+        # Copy everything except from .var* to new adata, with correct layer in X
+        new_adata = sc.AnnData(
+            X=adata.obsm[self.layer],
+            obs=adata.obs,
+            obsm=adata.obsm,
+            layers=adata.layers,
+            uns=adata.uns,
+            obsp=adata.obsp,
+        )
+        new_adata.obsm["X_old"] = adata.X
+
+        return new_adata
+
     def _extract_metadata(self, columns) -> pd.DataFrame:
         """Return dataframe with requested `columns` in the correct rows order"""
         metadata = self.adata.obs[[self.sample_key, *columns]].drop_duplicates()
         metadata = metadata.set_index(self.sample_key)
         return metadata.loc[self.samples]
 
-    def __init__(self, sample_key, cells_type_key, seed=67):
+    def __init__(self, sample_key, cells_type_key, layer=None, seed=67):
+        """Initialize the model
+
+        Parameters
+        ----------
+        sample_key : str
+            Column in .obs containing sample IDs
+        cells_type_key : str
+            Column in .obs containing cell types
+        layer : Optional[str] = None
+            What to use as data in a model. If None or "X", `adata.X` is used. Otherwise, the corresponding key from `adata.obsm` will be used
+        seed : int = 67
+            Number to initialize pseudorandom generator
+        """
         self.sample_key = sample_key
         self.cells_type_key = cells_type_key
+        self.layer = layer
         self.seed = seed
 
         self.adata = None
@@ -336,7 +380,7 @@ class WassersteinTSNE(PatientsRepresentationMethod):
         else:
             raise TypeError(f"Type {type(matrix)} is not supported")
 
-    def __init__(self, sample_key, cells_type_key, replicate_key, seed=67):
+    def __init__(self, sample_key, cells_type_key, replicate_key, layer="X_scvi", seed=67):
         """Create Wasserstein distances embedding between samples
 
         Parameters
@@ -347,8 +391,12 @@ class WassersteinTSNE(PatientsRepresentationMethod):
         replicate_key : str
             Key in .obs that specifies some kind of replicate for the observations of a sample.
             Could be cell types. Corresponds to "sample" in the original WassersteinTSNE paper
+        layer : Optional[str]
+            Key in .obsm where the data is stored. We recommend using scVI or scANVI embedding
+        seed : int = 67
+            Number to initialize pseudorandom generator
         """
-        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, seed=seed)
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
         self.replicate_key = replicate_key
 
@@ -362,8 +410,8 @@ class WassersteinTSNE(PatientsRepresentationMethod):
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
 
-        self.data = pd.DataFrame(adata.X)
-        self.data.set_index([adata.obs[self.sample_key], adata.obs[self.replicate_key]], inplace=True)
+        self.data = pd.DataFrame(self._get_data())
+        self.data.set_index([self.adata.obs[self.sample_key], adata.obs[self.replicate_key]], inplace=True)
 
         self.model = WT.Dataset2Gaussians(self.data)
         self.distances_model = WT.GaussianWassersteinDistance(self.model)
@@ -529,7 +577,7 @@ class CloudPred(PatientsRepresentationMethod):
         for sample in self.samples:
             state = self.adata.obs.loc[self.adata.obs[self.sample_key] == sample, self.patient_state_col].values[0]
 
-            X = self.adata.X[self.adata.obs[self.sample_key] == sample, :].transpose()
+            X = self._get_data()[self.adata.obs[self.sample_key] == sample, :].transpose()
 
             state_dir_path = self.data_dir / self.patient_state_col / str(state)
             scipy.sparse.save_npz(state_dir_path / f"{sample}.npz", X)
@@ -604,14 +652,13 @@ class PILOT(PatientsRepresentationMethod):
         cells_type_key,
         patient_state_col,
         dataset_name="pilot_dataset",
-        embedding_matrix="X_pca",
+        layer="X_pca",
         seed=67,
     ):
-        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, seed=seed)
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
         self.patient_state_col = patient_state_col
         self.dataset_name = dataset_name
-        self.embedding_matrix = embedding_matrix
 
         self.results_dir = None
         self.pc = None
@@ -626,7 +673,7 @@ class PILOT(PatientsRepresentationMethod):
 
         self.pc, self.annotation, self.results_dir = pt.extract_data_anno_scRNA_from_h5ad(
             self.adata,
-            emb_matrix=self.embedding_matrix,
+            emb_matrix=self.layer,
             clusters_col=self.cells_type_key,
             sample_col=self.sample_key,
             status=self.patient_state_col,
@@ -673,10 +720,9 @@ class TotalPseudobulk(PatientsRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_pseudobulk_distances"
 
-    def __init__(self, sample_key, cells_type_key, embedding_matrix="X_pca", seed=67):
-        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, seed=seed)
+    def __init__(self, sample_key, cells_type_key, layer="X_pca", seed=67):
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
-        self.embedding_matrix = embedding_matrix
         self.patient_representations = None
 
     def calculate_distance_matrix(self, force: bool = False, average="mean"):
@@ -686,9 +732,7 @@ class TotalPseudobulk(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        self.patient_representations = np.zeros(
-            shape=(len(self.samples), self.adata.obsm[self.embedding_matrix].shape[1])
-        )
+        self.patient_representations = np.zeros(shape=(len(self.samples), self._get_data().shape[1]))
 
         if average == "mean":
             func = np.mean
@@ -698,8 +742,9 @@ class TotalPseudobulk(PatientsRepresentationMethod):
             raise ValueError(f"Averaging function {average} is not supported")
 
         for i, sample in enumerate(self.samples):
-            sample_cells = self.adata[self.adata.obs[self.sample_key] == sample, :]
-            self.patient_representations[i] = func(sample_cells.obsm[self.embedding_matrix], axis=0)
+            sample_cells = self._get_data()[self.adata.obs[self.sample_key] == sample, :]
+            sample_data = sample_cells.obsm[self.layer] if self.layer not in ["X", None] else sample_cells.X
+            self.patient_representations[i] = func(sample_data, axis=0)
 
         distances = scipy.spatial.distance.pdist(self.patient_representations)
         distances = scipy.spatial.distance.squareform(distances)
@@ -715,10 +760,9 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_cellsbulk_distances"
 
-    def __init__(self, sample_key, cells_type_key, embedding_matrix="X_pca", seed=67):
-        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, seed=seed)
+    def __init__(self, sample_key, cells_type_key, layer="X_pca", seed=67):
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
-        self.embedding_matrix = embedding_matrix
         self.patient_representations = None
 
     def calculate_distance_matrix(self, force: bool = False, average="mean"):
@@ -737,7 +781,7 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
 
         # List of matrices with embedding centroids for samples for each cell type
         self.patient_representations = np.zeros(
-            shape=(len(self.cell_types), len(self.samples), self.adata.obsm[self.embedding_matrix].shape[1])
+            shape=(len(self.cell_types), len(self.samples), self._get_data().shape[1])
         )
 
         for i, cell_type in enumerate(self.cell_types):
@@ -745,7 +789,8 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
                 cells = self.adata[
                     (self.adata.obs[self.sample_key] == sample) & (self.adata.obs[self.cells_type_key] == cell_type)
                 ]
-                self.patient_representations[i, j] = func(cells.obsm[self.embedding_matrix], axis=0)
+                cells_data = cells.obsm[self.embedding_matrix] if self.layer not in ["X", None] else cells.X
+                self.patient_representations[i, j] = func(cells_data, axis=0)
 
         # Matrix of distances between samples for each cell type
         distances = np.zeros(shape=(len(self.cell_types), len(self.samples), len(self.samples)))
@@ -771,8 +816,8 @@ class CellTypesComposition(PatientsRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_celltype_composition"
 
-    def __init__(self, sample_key, cells_type_key, seed=67):
-        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, seed=seed)
+    def __init__(self, sample_key, cells_type_key, layer=None, seed=67):
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
         self.patient_representations = None
 
@@ -810,9 +855,10 @@ class SCellBOW(PatientsRepresentationMethod):
         n_worker=1,
         latent_dim: int = 300,
         n_iter: int = 20,
+        layer=None,
         seed=67,
     ):
-        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, seed=seed)
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
         self.model_dir = model_dir
         self.n_worker = n_worker
@@ -822,8 +868,10 @@ class SCellBOW(PatientsRepresentationMethod):
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
         """Pretrain SCellBOW model"""
+        self.adata = self._move_layer_to_X(adata)
+
         super().prepare_anndata(
-            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
+            adata=self.adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
 
         sb.SCellBOW_pretrain(
@@ -875,12 +923,13 @@ class SCPoli(PatientsRepresentationMethod):
         sample_key,
         cells_type_key,
         latent_dim=3,
+        layer=None,
         seed=67,
         n_epochs: int = 50,
         pretraining_epochs: int = 40,
         eta: float = 5,
     ):
-        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, seed=seed)
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
         self.latent_dim = latent_dim
         self.model = None
@@ -891,8 +940,10 @@ class SCPoli(PatientsRepresentationMethod):
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
         """Set up scPoli model"""
+        self.adata = self._move_layer_to_X(adata)
+
         super().prepare_anndata(
-            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
+            adata=self.adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
 
         self.model = scPoli(
