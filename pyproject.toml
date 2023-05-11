@@ -23,7 +23,6 @@ urls.Source = "https://github.com/lueckenlab/patient_representation"
 urls.Home-page = "https://github.com/lueckenlab/patient_representation"
 dependencies = [
     "anndata>=0.8",
-    "cloudpred  @ git+ssh://git@github.com/VladimirShitov/CloudPred",
     "matplotlib>=3.6",
     "mrvi>=0.1",
     "numpy>=1.23",
