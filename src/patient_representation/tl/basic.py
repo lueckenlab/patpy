@@ -6,6 +6,7 @@ import mrvi
 import numpy as np
 import pandas as pd
 import PILOT as pt
+import scanpy as sc
 import SCellBOW as sb
 import scipy
 import seaborn as sns
@@ -114,6 +115,25 @@ class PatientsRepresentationMethod:
             return self.adata.X
 
         return self.adata.obsm[self.layer]
+
+    def _move_layer_to_X(self, adata: sc.AnnData) -> sc.AnnData:
+        """Some models require data to be stored in `adata.X`. This method moves `layer` to `.X`"""
+        if self.layer == "X" or self.layer is None:
+            # The data is already in correct slot
+            return adata
+
+        # Copy everything except from .var* to new adata, with correct layer in X
+        new_adata = sc.AnnData(
+            X=adata.obsm[self.layer],
+            obs=adata.obs,
+            obsm=adata.obsm,
+            layers=adata.layers,
+            uns=adata.uns,
+            obsp=adata.obsp,
+        )
+        new_adata.obsm["X_old"] = adata.X
+
+        return new_adata
 
     def _extract_metadata(self, columns) -> pd.DataFrame:
         """Return dataframe with requested `columns` in the correct rows order"""
@@ -848,7 +868,7 @@ class SCellBOW(PatientsRepresentationMethod):
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
         """Pretrain SCellBOW model"""
-        self.adata = self._move_layer_to_X(adata)  # TODO: implement
+        self.adata = self._move_layer_to_X(adata)
 
         super().prepare_anndata(
             adata=self.adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
