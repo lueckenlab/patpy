@@ -2,7 +2,6 @@ from .basic import (
     PILOT,
     CellTypePseudobulk,
     CellTypesComposition,
-    CloudPred,
     MrVI,
     SCellBOW,
     SCPoli,
