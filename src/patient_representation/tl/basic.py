@@ -105,6 +105,16 @@ class PatientsRepresentationMethod:
 
         return filtered_cell_types
 
+    def _get_data(self):
+        """Extract data from `self.layer`"""
+        if self.adata is None:
+            raise RuntimeError("adata is not yet set. Please, run prepare_anndata() method first")
+
+        if self.layer is None or self.layer == "X":
+            return self.adata.X
+
+        return self.adata.obsm[self.layer]
+
     def _extract_metadata(self, columns) -> pd.DataFrame:
         """Return dataframe with requested `columns` in the correct rows order"""
         metadata = self.adata.obs[[self.sample_key, *columns]].drop_duplicates()
@@ -350,7 +360,7 @@ class WassersteinTSNE(PatientsRepresentationMethod):
         else:
             raise TypeError(f"Type {type(matrix)} is not supported")
 
-    def __init__(self, sample_key, cells_type_key, replicate_key, seed=67):
+    def __init__(self, sample_key, cells_type_key, replicate_key, layer="X_scvi", seed=67):
         """Create Wasserstein distances embedding between samples
 
         Parameters
@@ -361,8 +371,12 @@ class WassersteinTSNE(PatientsRepresentationMethod):
         replicate_key : str
             Key in .obs that specifies some kind of replicate for the observations of a sample.
             Could be cell types. Corresponds to "sample" in the original WassersteinTSNE paper
+        layer : Optional[str]
+            Key in .obsm where the data is stored. We recommend using scVI or scANVI embedding
+        seed : int = 67
+            Number to initialize pseudorandom generator
         """
-        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, seed=seed)
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
         self.replicate_key = replicate_key
 
@@ -376,8 +390,8 @@ class WassersteinTSNE(PatientsRepresentationMethod):
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
 
-        self.data = pd.DataFrame(self.adata.X)
-        self.data.set_index([adata.obs[self.sample_key], adata.obs[self.replicate_key]], inplace=True)
+        self.data = pd.DataFrame(self._get_data())
+        self.data.set_index([self.adata.obs[self.sample_key], adata.obs[self.replicate_key]], inplace=True)
 
         self.model = WT.Dataset2Gaussians(self.data)
         self.distances_model = WT.GaussianWassersteinDistance(self.model)
@@ -543,7 +557,7 @@ class CloudPred(PatientsRepresentationMethod):
         for sample in self.samples:
             state = self.adata.obs.loc[self.adata.obs[self.sample_key] == sample, self.patient_state_col].values[0]
 
-            X = self.adata.X[self.adata.obs[self.sample_key] == sample, :].transpose()
+            X = self._get_data()[self.adata.obs[self.sample_key] == sample, :].transpose()
 
             state_dir_path = self.data_dir / self.patient_state_col / str(state)
             scipy.sparse.save_npz(state_dir_path / f"{sample}.npz", X)
