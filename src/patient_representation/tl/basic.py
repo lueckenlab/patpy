@@ -222,13 +222,45 @@ class PatientsRepresentationMethod:
             figsize=figsize,
         )
 
-    def embed(self, method="MDS"):
-        """Calculate embedding of samples with the given `method`"""
+    def embed(self, method="TSNE", n_jobs: int = -1, verbose: bool = False):
+        """Convert distances to embedding of the samples
+
+        Parameters
+        ----------
+        method : str = "TSNE
+            Method to use for embedding. Currently, "TSNE" and "MDS" are supported
+        n_jobs : int = 1
+            Number of threads to use for computation. Use -1 to run on all processors
+        verbose : bool = False
+            If True, print logging information during the computation
+
+        Returns
+        -------
+        coordinates : array-like
+            Coordinates of samples in the embedding space. 2D for TSNE and MDS
+        """
         if method == "MDS":
             from sklearn.manifold import MDS
 
-            mds = MDS(n_components=2, dissimilarity="precomputed")
+            mds = MDS(
+                n_components=2, dissimilarity="precomputed", verbose=verbose, n_jobs=n_jobs, random_state=self.seed
+            )
             coordinates = mds.fit_transform(self.adata.uns[self.DISTANCES_UNS_KEY])
+        elif method == "TSNE":
+            from openTSNE import TSNE
+
+            tsne = TSNE(
+                n_components=2,
+                metric="precomputed",
+                neighbors="exact",
+                n_jobs=n_jobs,
+                random_state=self.seed,
+                verbose=verbose,
+            )
+            coordinates = tsne.fit(self.adata.uns[self.DISTANCES_UNS_KEY])
+
+        else:
+            raise ValueError(f'Method {method} is not supported, please use one of ["MDS", "TSNE"]')
 
         self.embeddings[method] = coordinates
         return coordinates
