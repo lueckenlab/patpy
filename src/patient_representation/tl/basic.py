@@ -1,18 +1,11 @@
 import warnings
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import mrvi
 import numpy as np
 import pandas as pd
-import PILOT as pt
 import scanpy as sc
-import SCellBOW as sb
 import scipy
 import seaborn as sns
-import torch
-import WassersteinTSNE as WT
-from scarches.models.scpoli import scPoli
 
 
 def prepare_data_for_phemd(adata, sample_col, n_top_var_genes: int = 100):
@@ -229,19 +222,53 @@ class PatientsRepresentationMethod:
             figsize=figsize,
         )
 
-    def embed(self, method="MDS"):
-        """Calculate embedding of samples with the given `method`"""
+    def embed(self, method="TSNE", n_jobs: int = -1, verbose: bool = False):
+        """Convert distances to embedding of the samples
+
+        Parameters
+        ----------
+        method : str = "TSNE
+            Method to use for embedding. Currently, "TSNE" and "MDS" are supported
+        n_jobs : int = 1
+            Number of threads to use for computation. Use -1 to run on all processors
+        verbose : bool = False
+            If True, print logging information during the computation
+
+        Returns
+        -------
+        coordinates : array-like
+            Coordinates of samples in the embedding space. 2D for TSNE and MDS
+        """
         if method == "MDS":
             from sklearn.manifold import MDS
 
-            mds = MDS(n_components=2, dissimilarity="precomputed")
+            mds = MDS(
+                n_components=2, dissimilarity="precomputed", verbose=verbose, n_jobs=n_jobs, random_state=self.seed
+            )
             coordinates = mds.fit_transform(self.adata.uns[self.DISTANCES_UNS_KEY])
+        elif method == "TSNE":
+            from openTSNE import TSNE
+
+            tsne = TSNE(
+                n_components=2,
+                metric="precomputed",
+                neighbors="exact",
+                n_jobs=n_jobs,
+                random_state=self.seed,
+                verbose=verbose,
+            )
+            coordinates = tsne.fit(self.adata.uns[self.DISTANCES_UNS_KEY])
+
+        else:
+            raise ValueError(f'Method {method} is not supported, please use one of ["MDS", "TSNE"]')
 
         self.embeddings[method] = coordinates
         return coordinates
 
     def plot_embedding(self, method="MDS", metadata_cols=None):
         """Plot embedding of samples colored by `metadata_cols`"""
+        import matplotlib.pyplot as plt
+
         if method not in self.embeddings:
             self.embed(method=method)
 
@@ -278,6 +305,7 @@ class MrVI(PatientsRepresentationMethod):
 
         self.model = None
         self.model_params = model_params
+        self.patient_representations = None
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
         """Train MrVI model
@@ -290,6 +318,8 @@ class MrVI(PatientsRepresentationMethod):
         ----
         model : MrVI model
         """
+        import mrvi
+
         super().prepare_anndata(
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
@@ -332,14 +362,16 @@ class MrVI(PatientsRepresentationMethod):
         if "X_mrvi_u" not in self.adata.obsm or force:
             self.adata.obsm["X_mrvi_u"] = self.model.get_latent_representation(give_z=False)
 
-        self.adata.uns[self.DISTANCES_UNS_KEY] = self.model.get_local_sample_representation(return_distances=True)
+        self.patient_representations = self.model.get_local_sample_representation(return_distances=True)
 
         if cells_mask is None:
-            sample_sample_distances = self.adata.uns[self.DISTANCES_UNS_KEY].mean(axis=0)
+            sample_sample_distances = self.patient_representations.mean(axis=0)
 
         else:
-            distance_matrices_subset = self.adata.uns[self.DISTANCES_UNS_KEY][cells_mask, :, :]
+            distance_matrices_subset = self.patient_representations[cells_mask, :, :]
             sample_sample_distances = distance_matrices_subset.mean(axis=0)
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = sample_sample_distances
 
         return sample_sample_distances
 
@@ -406,6 +438,8 @@ class WassersteinTSNE(PatientsRepresentationMethod):
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
         """Set up Gaussian Wasserstein Distance model"""
+        import WassersteinTSNE as WT
+
         super().prepare_anndata(
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
@@ -456,177 +490,6 @@ class WassersteinTSNE(PatientsRepresentationMethod):
         return super().clustermap(covariance_weight=covariance_weight)
 
 
-class CloudPred(PatientsRepresentationMethod):
-    """End-to-end differentiable learning algorithm which is coupled with a biologically informed mixture of cell types model.
-
-    Source: https://arxiv.org/abs/2110.07069
-    """
-
-    DISTANCES_UNS_KEY = "X_cloudpred_distances"
-
-    def _reduce_dims(self, X):
-        """Transform data in the same way as during training"""
-        pc = np.load(f"{self.data_dir}/{self.patient_state_col}/pc_{self.transform}_{self.seed}_{self.dims}_5.npz")[
-            "pc"
-        ]
-        pc = pc[:, : self.dims]
-
-        ### Project onto principal components ###
-        mu = scipy.sparse.vstack([x[0] for x in X]).mean(axis=0)
-
-        return [(x[0].dot(pc) - np.matmul(mu, pc), *x[1:]) for x in X]
-
-    def _get_model_predictions(self, n_mixtures) -> pd.DataFrame:
-        """Read the whole dataset in Cloudpred format, and get the output of Mixture model for it
-
-        Parameters
-        ----------
-        n_mixtures : int
-            Number of Gaussian mixtures in the model
-
-        Returns
-        -------
-        Data frame with the following columns:
-        - gaussian_0, gaussian_1, ... – probabilities from i_th gaussian for each of the `n_mixtures`
-        - cell_type
-        - outcome : the patient state
-        - patient : index of the patient
-        """
-        col_names = [f"gaussian_{i}" for i in range(n_mixtures)]
-
-        # Read data. For each state it contains a list of tuples with 3 elements
-        # 1. Counts matrix
-        # 2. Patient state
-        # 3. Cell types vector
-        # Don't ask me, I did not suggest this format
-        X = np.load(self.data_dir / self.patient_state_col / "Xall.pkl", allow_pickle=True)
-        # Merge classes 0 and 1 into one array
-        X = [*X[0], *X[1]]
-        X = self._reduce_dims(X)
-
-        probs_df = None
-
-        for idx, patient_data in enumerate(X):
-            cells, outcome, cell_types = patient_data
-
-            for cell_type in np.unique(cell_types):
-                cell_type_mask = cell_types == cell_type
-                with torch.no_grad():
-                    cells_probs = self.model.mixture.forward(cells[cell_type_mask]).numpy()
-
-                cells_probs = np.array(cells_probs)
-
-                patient_df = pd.DataFrame(cells_probs.reshape(-1, n_mixtures), columns=col_names)
-                patient_df["cell_type"] = cell_type
-                patient_df["outcome"] = outcome
-                patient_df["patient"] = idx
-
-                if probs_df is None:
-                    probs_df = patient_df
-                else:
-                    probs_df = pd.concat([probs_df, patient_df])
-
-        return probs_df
-
-    def __init__(
-        self,
-        sample_key,
-        cells_type_key,
-        patient_state_col,
-        data_dir="./",
-        seed=67,
-        test_size=0.25,
-        valid_size=0.25,
-        dims=100,
-        pc=50,
-        transform="log",
-    ):
-        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, seed=seed)
-
-        self.patient_state_col = patient_state_col
-        self.data_dir = Path(data_dir)
-        self.test_size = test_size
-        self.valid_size = valid_size
-        self.dims = dims
-        self.pc = pc
-        self.transform = transform
-
-        self.model = None
-        self.probs_df = None
-        self.patient_representations = None
-
-    def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
-        """Save files in a format readable for CloudPred
-
-        Note: you need a 2 times size of your `adata` additional disk storage, because
-        authors of CloudPred duplicate the data on the disk twice
-
-        Parameters
-        ----------
-        adata : AnnData object with normalized counts in .X
-        """
-        super().prepare_anndata(
-            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
-        )
-
-        # Save data for each state to the separate file as required by cloudpred
-        for state in self.adata.obs[self.patient_state_col].unique():
-            state_dir_path = self.data_dir / self.patient_state_col / str(state)
-            state_dir_path.mkdir(parents=True, exist_ok=True)
-
-        for sample in self.samples:
-            state = self.adata.obs.loc[self.adata.obs[self.sample_key] == sample, self.patient_state_col].values[0]
-
-            X = self._get_data()[self.adata.obs[self.sample_key] == sample, :].transpose()
-
-            state_dir_path = self.data_dir / self.patient_state_col / str(state)
-            scipy.sparse.save_npz(state_dir_path / f"{sample}.npz", X)
-            np.save(
-                state_dir_path / f"ct_{sample}.npy",
-                self.adata.obs[self.adata.obs[self.sample_key] == sample][self.cells_type_key].values,
-            )
-
-    def calculate_distance_matrix(self, centers=5, force: bool = False):
-        """Run the cloudpred model and convert putput to distances"""
-        from cloudpred.main import run_pipeline
-
-        distances = super().calculate_distance_matrix(force=force)
-
-        if distances is not None and self.adata.uns["cloudpred_parameters"]["centers"] == centers:
-            return distances
-
-        run_pipeline(
-            data_dir=f"{self.data_dir / self.patient_state_col}/",
-            centers=[centers],
-            dims=self.dims,
-            pc=self.pc,
-            seed=self.seed,
-            transform=self.transform,
-            valid_size=self.valid_size,
-            test_size=self.test_size,
-        )
-
-        self.model = torch.load(self.data_dir / self.patient_state_col / "model.pt")
-        self.probs_df = self._get_model_predictions(n_mixtures=centers)
-        self.patient_representations = (
-            self.probs_df.drop(["cell_type", "outcome"], axis=1).groupby("patient").agg(np.mean)
-        )
-
-        distances = scipy.spatial.distance.pdist(self.patient_representations.values)
-        distances = scipy.spatial.distance.squareform(distances)
-
-        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
-        self.adata.uns["cloudpred_parameters"] = {
-            "sample_key": self.sample_key,
-            "cells_type_key": self.cells_type_key,
-            "patient_state_col": self.patient_state_col,
-            "centers": centers,
-            "transform": self.transform,
-        }
-
-        return distances
-
-
 class PILOT(PatientsRepresentationMethod):
     """Optimal transport based method to compute the Wasserstein distance between two single single-cell experiments.
 
@@ -667,6 +530,8 @@ class PILOT(PatientsRepresentationMethod):
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
         """Set up PILOT model"""
+        import PILOT as pt
+
         super().prepare_anndata(
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
@@ -682,6 +547,8 @@ class PILOT(PatientsRepresentationMethod):
 
     def calculate_distance_matrix(self, c_reg: float = 10, force: bool = False):
         """Calculate matrix of distances between samples"""
+        import PILOT as pt
+
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
@@ -743,8 +610,7 @@ class TotalPseudobulk(PatientsRepresentationMethod):
 
         for i, sample in enumerate(self.samples):
             sample_cells = self._get_data()[self.adata.obs[self.sample_key] == sample, :]
-            sample_data = sample_cells.obsm[self.layer] if self.layer not in ["X", None] else sample_cells.X
-            self.patient_representations[i] = func(sample_data, axis=0)
+            self.patient_representations[i] = func(sample_cells, axis=0)
 
         distances = scipy.spatial.distance.pdist(self.patient_representations)
         distances = scipy.spatial.distance.squareform(distances)
@@ -786,10 +652,9 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
 
         for i, cell_type in enumerate(self.cell_types):
             for j, sample in enumerate(self.samples):
-                cells = self.adata[
+                cells_data = self._get_data()[
                     (self.adata.obs[self.sample_key] == sample) & (self.adata.obs[self.cells_type_key] == cell_type)
                 ]
-                cells_data = cells.obsm[self.embedding_matrix] if self.layer not in ["X", None] else cells.X
                 self.patient_representations[i, j] = func(cells_data, axis=0)
 
         # Matrix of distances between samples for each cell type
@@ -868,6 +733,8 @@ class SCellBOW(PatientsRepresentationMethod):
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
         """Pretrain SCellBOW model"""
+        import SCellBOW as sb
+
         self.adata = self._move_layer_to_X(adata)
 
         super().prepare_anndata(
@@ -880,16 +747,30 @@ class SCellBOW(PatientsRepresentationMethod):
 
         self.adata = sb.SCellBOW_cluster(self.adata, self.model_dir).run()
 
-    def calculate_distance_matrix(self, force: bool = False):
+    def calculate_distance_matrix(self, force: bool = False, average="mean"):
         """Calculate distances between patients"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
             return distances
 
-        self.patient_representations = self.adata.obsm["X_embed"]
+        if average == "mean":
+            func = np.mean
+        elif average == "median":
+            func = np.median
+        else:
+            raise ValueError(f"Averaging function {average} is not supported")
 
-        distances = scipy.spatial.distance.pdist(self.patient_representations.values)
+        # X_embbed contains 50 components PCA of SCellBOW cell embeddings
+        cell_representations = self.adata.obsm["X_embed"]
+        self.patient_representations = np.zeros(shape=(len(self.samples), cell_representations.shape[1]))
+
+        for i, sample in enumerate(self.samples):
+            sample_cells = cell_representations[self.adata.obs[self.sample_key] == sample, :]
+            # Aggregate representations of cells for each sample
+            self.patient_representations[i] = func(sample_cells, axis=0)
+
+        distances = scipy.spatial.distance.pdist(self.patient_representations)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
@@ -940,6 +821,8 @@ class SCPoli(PatientsRepresentationMethod):
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
         """Set up scPoli model"""
+        from scarches.models.scpoli import scPoli
+
         self.adata = self._move_layer_to_X(adata)
 
         super().prepare_anndata(
