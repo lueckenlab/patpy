@@ -26,6 +26,7 @@ dependencies = [
     "matplotlib>=3.6",
     "mrvi>=0.1",
     "numpy>=1.23",
+    "opentsne>=0.6",
     "pandas>=1.5",
     "pilot @ git+ssh://git@github.com/CostaLab/PILOT.git",
     "SCellBOW>=1.2",
