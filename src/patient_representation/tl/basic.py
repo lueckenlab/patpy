@@ -930,7 +930,7 @@ class SCellBOW(PatientsRepresentationMethod):
 
         self.patient_representations = self.adata.obsm["X_embed"]
 
-        distances = scipy.spatial.distance.pdist(self.patient_representations.values)
+        distances = scipy.spatial.distance.pdist(self.patient_representations)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
