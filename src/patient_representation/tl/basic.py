@@ -362,7 +362,7 @@ class WassersteinTSNE(PatientsRepresentationMethod):
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
 
-        self.data = pd.DataFrame(adata.X)
+        self.data = pd.DataFrame(self.adata.X)
         self.data.set_index([adata.obs[self.sample_key], adata.obs[self.replicate_key]], inplace=True)
 
         self.model = WT.Dataset2Gaussians(self.data)
