@@ -743,8 +743,7 @@ class TotalPseudobulk(PatientsRepresentationMethod):
 
         for i, sample in enumerate(self.samples):
             sample_cells = self._get_data()[self.adata.obs[self.sample_key] == sample, :]
-            sample_data = sample_cells.obsm[self.layer] if self.layer not in ["X", None] else sample_cells.X
-            self.patient_representations[i] = func(sample_data, axis=0)
+            self.patient_representations[i] = func(sample_cells, axis=0)
 
         distances = scipy.spatial.distance.pdist(self.patient_representations)
         distances = scipy.spatial.distance.squareform(distances)
@@ -786,10 +785,9 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
 
         for i, cell_type in enumerate(self.cell_types):
             for j, sample in enumerate(self.samples):
-                cells = self.adata[
+                cells_data = self._get_data()[
                     (self.adata.obs[self.sample_key] == sample) & (self.adata.obs[self.cells_type_key] == cell_type)
                 ]
-                cells_data = cells.obsm[self.embedding_matrix] if self.layer not in ["X", None] else cells.X
                 self.patient_representations[i, j] = func(cells_data, axis=0)
 
         # Matrix of distances between samples for each cell type
