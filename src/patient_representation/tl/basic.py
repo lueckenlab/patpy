@@ -298,8 +298,10 @@ class MrVI(PatientsRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_mrvi_distances"
 
-    def __init__(self, sample_key: str, cells_type_key: str, categorical_nuisance_keys: list, seed=67, **model_params):
-        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, seed=seed)
+    def __init__(
+        self, sample_key: str, cells_type_key: str, categorical_nuisance_keys: list, layer=None, seed=67, **model_params
+    ):
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
         self.categorical_nuisance_keys = categorical_nuisance_keys
 
