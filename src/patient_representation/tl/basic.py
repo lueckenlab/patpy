@@ -921,14 +921,28 @@ class SCellBOW(PatientsRepresentationMethod):
 
         self.adata = sb.SCellBOW_cluster(self.adata, self.model_dir).run()
 
-    def calculate_distance_matrix(self, force: bool = False):
+    def calculate_distance_matrix(self, force: bool = False, average="mean"):
         """Calculate distances between patients"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
             return distances
 
-        self.patient_representations = self.adata.obsm["X_embed"]
+        if average == "mean":
+            func = np.mean
+        elif average == "median":
+            func = np.median
+        else:
+            raise ValueError(f"Averaging function {average} is not supported")
+
+        # X_embbed contains 50 components PCA of SCellBOW cell embeddings
+        cell_representations = self.adata.obsm["X_embed"]
+        self.patient_representations = np.zeros(shape=(len(self.samples), cell_representations.shape[1]))
+
+        for i, sample in enumerate(self.samples):
+            sample_cells = cell_representations[self.adata.obs[self.sample_key] == sample, :]
+            # Aggregate representations of cells for each sample
+            self.patient_representations[i] = func(sample_cells, axis=0)
 
         distances = scipy.spatial.distance.pdist(self.patient_representations)
         distances = scipy.spatial.distance.squareform(distances)
