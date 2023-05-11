@@ -7,7 +7,7 @@ allow-direct-references = true  # Allow installing packages from git repositorie
 
 [project]
 name = "patient_representation"
-version = "0.0.3"
+version = "0.0.4"
 description = "Representing patients or samples from single-cell data"
 readme = "README.md"
 requires-python = "~=3.10"
@@ -23,10 +23,10 @@ urls.Source = "https://github.com/lueckenlab/patient_representation"
 urls.Home-page = "https://github.com/lueckenlab/patient_representation"
 dependencies = [
     "anndata>=0.8",
-    "cloudpred  @ git+ssh://git@github.com/VladimirShitov/CloudPred",
     "matplotlib>=3.6",
     "mrvi>=0.1",
     "numpy>=1.23",
+    "opentsne>=0.6",
     "pandas>=1.5",
     "pilot @ git+ssh://git@github.com/CostaLab/PILOT.git",
     "SCellBOW>=1.2",
