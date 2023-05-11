@@ -1,18 +1,11 @@
 import warnings
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import mrvi
 import numpy as np
 import pandas as pd
-import PILOT as pt
 import scanpy as sc
-import SCellBOW as sb
 import scipy
 import seaborn as sns
-import torch
-import WassersteinTSNE as WT
-from scarches.models.scpoli import scPoli
 
 
 def prepare_data_for_phemd(adata, sample_col, n_top_var_genes: int = 100):
@@ -242,6 +235,8 @@ class PatientsRepresentationMethod:
 
     def plot_embedding(self, method="MDS", metadata_cols=None):
         """Plot embedding of samples colored by `metadata_cols`"""
+        import matplotlib.pyplot as plt
+
         if method not in self.embeddings:
             self.embed(method=method)
 
@@ -291,6 +286,8 @@ class MrVI(PatientsRepresentationMethod):
         ----
         model : MrVI model
         """
+        import mrvi
+
         super().prepare_anndata(
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
@@ -409,6 +406,8 @@ class WassersteinTSNE(PatientsRepresentationMethod):
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
         """Set up Gaussian Wasserstein Distance model"""
+        import WassersteinTSNE as WT
+
         super().prepare_anndata(
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
@@ -495,6 +494,8 @@ class CloudPred(PatientsRepresentationMethod):
         - outcome : the patient state
         - patient : index of the patient
         """
+        import torch
+
         col_names = [f"gaussian_{i}" for i in range(n_mixtures)]
 
         # Read data. For each state it contains a list of tuples with 3 elements
@@ -591,6 +592,7 @@ class CloudPred(PatientsRepresentationMethod):
 
     def calculate_distance_matrix(self, centers=5, force: bool = False):
         """Run the cloudpred model and convert putput to distances"""
+        import torch
         from cloudpred.main import run_pipeline
 
         distances = super().calculate_distance_matrix(force=force)
@@ -670,6 +672,8 @@ class PILOT(PatientsRepresentationMethod):
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
         """Set up PILOT model"""
+        import PILOT as pt
+
         super().prepare_anndata(
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
@@ -685,6 +689,8 @@ class PILOT(PatientsRepresentationMethod):
 
     def calculate_distance_matrix(self, c_reg: float = 10, force: bool = False):
         """Calculate matrix of distances between samples"""
+        import PILOT as pt
+
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
@@ -869,6 +875,8 @@ class SCellBOW(PatientsRepresentationMethod):
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
         """Pretrain SCellBOW model"""
+        import SCellBOW as sb
+
         self.adata = self._move_layer_to_X(adata)
 
         super().prepare_anndata(
@@ -941,6 +949,8 @@ class SCPoli(PatientsRepresentationMethod):
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
         """Set up scPoli model"""
+        from scarches.models.scpoli import scPoli
+
         self.adata = self._move_layer_to_X(adata)
 
         super().prepare_anndata(
