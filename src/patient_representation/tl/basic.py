@@ -256,6 +256,7 @@ class PatientsRepresentationMethod:
                 n_jobs=n_jobs,
                 random_state=self.seed,
                 verbose=verbose,
+                initialization="spectral",  # pca doesn't work with precomputed distances
             )
             coordinates = tsne.fit(self.adata.uns[self.DISTANCES_UNS_KEY])
 
