@@ -678,6 +678,37 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
         return avg_distances
 
 
+class RandomVector(PatientsRepresentationMethod):
+    """A dummy baseline, which represents patients as random embeddings"""
+
+    DISTANCES_UNS_KEY = "X_random_vector_distances"
+
+    def __init__(self, sample_key, cells_type_key, latent_dim: int = 30, seed=67):
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, seed=seed)
+
+        self.latent_dim = latent_dim
+        self.patient_representations = None
+
+    def calculate_distance_matrix(self, force: bool = False):
+        """Calculate distances between patients represented as random vectors"""
+        distances = super().calculate_distance_matrix(force=force)
+
+        if distances is not None:
+            return distances
+
+        self.patient_representations = np.random.normal(size=(len(self.samples), self.latent_dim))
+
+        distances = scipy.spatial.distance.pdist(self.patient_representations)
+        distances = scipy.spatial.distance.squareform(distances)
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        self.adata.uns["random_vec_parameters"] = {
+            "sample_key": self.sample_key,
+        }
+
+        return distances
+
+
 class CellTypesComposition(PatientsRepresentationMethod):
     """A simple baseline, which represents patients as composition of their cell types"""
 
