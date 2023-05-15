@@ -357,7 +357,7 @@ class MrVI(PatientsRepresentationMethod):
         """
         distances = super().calculate_distance_matrix(force=force)
 
-        if distances is not None:
+        if distances is not None and not force:
             return distances
 
         if "X_mrvi_z" not in self.adata.obsm or force:
