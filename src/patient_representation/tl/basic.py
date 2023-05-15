@@ -316,6 +316,11 @@ class PatientsRepresentationMethod:
         distances = self.calculate_distance_matrix()
         distances = distances[is_class_known][:, is_class_known]  # Drop samples with unknown target
 
+        # Diagonal contains 0s forcing using the same sample for prediction
+        # This gives the perfect prediction even for random target (super weird)
+        # Filling diagonal with large value removes this leakage
+        np.fill_diagonal(distances, distances.max())
+
         if task == "classification":
             knn = KNeighborsClassifier(n_neighbors=n_neighbors, metric="precomputed", weights="distance")
         elif task == "regression":
