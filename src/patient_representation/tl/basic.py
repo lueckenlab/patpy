@@ -532,7 +532,7 @@ class WassersteinTSNE(PatientsRepresentationMethod):
             else:
                 return self.adata.uns[self.DISTANCES_UNS_KEY]
 
-        distances = self.distances_model.matrix(covariance_weight)
+        distances = self.distances_model.matrix(covariance_weight).values
         distances = self._set_diagonal_to_zeros(distances)
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
         self.adata.uns["wasserstein_covariance_weight"] = covariance_weight
