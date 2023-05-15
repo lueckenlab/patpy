@@ -304,8 +304,10 @@ class PatientsRepresentationMethod:
 
         Returns
         -------
+        y_true : array-like
+            True values of `target` from metadata for samples with known values
         y_predicted : array-like
-            Predicted values of `target` for samples with known class
+            Predicted values of `target` for samples with known values
         """
         from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 
@@ -323,7 +325,7 @@ class PatientsRepresentationMethod:
 
         knn.fit(distances, y_true[is_class_known])
 
-        return knn.predict(distances)
+        return y_true, knn.predict(distances)
 
 
 class MrVI(PatientsRepresentationMethod):
