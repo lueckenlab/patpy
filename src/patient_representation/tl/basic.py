@@ -325,7 +325,7 @@ class PatientsRepresentationMethod:
 
         knn.fit(distances, y_true[is_class_known])
 
-        return y_true, knn.predict(distances)
+        return y_true[is_class_known], knn.predict(distances)
 
 
 class MrVI(PatientsRepresentationMethod):
