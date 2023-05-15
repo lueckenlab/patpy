@@ -365,13 +365,22 @@ class MrVI(PatientsRepresentationMethod):
         if "X_mrvi_u" not in self.adata.obsm or force:
             self.adata.obsm["X_mrvi_u"] = self.model.get_latent_representation(give_z=False)
 
-        self.patient_representations = self.model.get_local_sample_representation(return_distances=True)
+        # This is a tensor of shape (n_cells, n_samples, n_latent_variables)
+        cell_sample_representations = self.model.get_local_sample_representation(return_distances=False)
+        self.patient_representations = np.zeros(shape=(len(self.samples, cell_sample_representations.shape[2])))
+
+        # For a patient representation we will take centroid of cells of this sample
+        for i, sample in enumerate(self.samples):
+            sample_mask = self.adata.obs[self.sample_key] == sample
+            self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
+
+        cell_cell_distances = self.model.get_local_sample_representation(return_distances=True)
 
         if cells_mask is None:
-            sample_sample_distances = self.patient_representations.mean(axis=0)
+            sample_sample_distances = cell_cell_distances.mean(axis=0)
 
         else:
-            distance_matrices_subset = self.patient_representations[cells_mask, :, :]
+            distance_matrices_subset = cell_cell_distances[cells_mask, :, :]
             sample_sample_distances = distance_matrices_subset.mean(axis=0)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = sample_sample_distances
