@@ -438,34 +438,6 @@ class WassersteinTSNE(PatientsRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_wasserstein_distances"
 
-    @staticmethod
-    def _set_diagonal_to_zeros(matrix):
-        """Set diagonal elements of the `matrix` to zeros
-
-        Sometimes, these elements don't equal 0 for some reason. TODO: check why
-
-        Parameters
-        ----------
-        matrix : Uniion[pandas.DataFrame, numpy.array]
-            Square matrix of distances
-
-        Returns
-        -------
-        Matrix where the diagonal elements are zeros
-        """
-        if isinstance(matrix, pd.DataFrame):
-            for sample in matrix.index:
-                matrix.loc[sample, sample] = 0
-            return matrix
-
-        elif isinstance(matrix, np.ndarray):
-            for i in range(matrix.shape[0]):
-                matrix[i, i] = 0
-            return matrix
-
-        else:
-            raise TypeError(f"Type {type(matrix)} is not supported")
-
     def __init__(self, sample_key, cells_type_key, replicate_key, layer="X_scvi", seed=67):
         """Create Wasserstein distances embedding between samples
 
@@ -533,7 +505,6 @@ class WassersteinTSNE(PatientsRepresentationMethod):
                 return self.adata.uns[self.DISTANCES_UNS_KEY]
 
         distances = self.distances_model.matrix(covariance_weight).values
-        distances = self._set_diagonal_to_zeros(distances)
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
         self.adata.uns["wasserstein_covariance_weight"] = covariance_weight
 
