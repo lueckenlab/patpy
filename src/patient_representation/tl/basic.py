@@ -499,7 +499,7 @@ class WassersteinTSNE(PatientsRepresentationMethod):
         )
 
         self.data = pd.DataFrame(self._get_data())
-        self.data.set_index([self.adata.obs[self.sample_key], adata.obs[self.replicate_key]], inplace=True)
+        self.data.set_index([self.adata.obs[self.sample_key], self.adata.obs[self.replicate_key]], inplace=True)
 
         self.model = WT.Dataset2Gaussians(self.data)
         self.distances_model = WT.GaussianWassersteinDistance(self.model)
