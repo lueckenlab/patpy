@@ -387,6 +387,41 @@ class MrVI(PatientsRepresentationMethod):
 
         return sample_sample_distances
 
+    def predict_metadata(self, target, n_neighbors: int = 3, task="classification"):
+        """Predict classes from metadata column `target` for samples using K-Nearest Neighbors classifier
+
+        Parameters
+        ----------
+        target : str
+            Column name from `adata.obs`, which will be used for classification
+        n_neighbors : int = 3
+            Number of neighbors to use for classification
+        task : str = "classification"
+
+
+        Returns
+        -------
+        y_predicted : array-like
+            Predicted values of `target` for samples with known class
+        """
+        from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+
+        y_true = self._extract_metadata([target])[target]
+        is_class_known = y_true.notna()
+        distances = self.calculate_distance_matrix()
+        distances = distances[is_class_known][:, is_class_known]  # Drop samples with unknown target
+
+        if task == "classification":
+            knn = KNeighborsClassifier(n_neighbors=n_neighbors, metric="precomputed", weights="distance")
+        elif task == "regression":
+            knn = KNeighborsRegressor(n_neighbors=n_neighbors, metric="precomputed", weights="distance")
+        else:
+            raise ValueError(f'task {task} is not supported, please set one of ["classification", "regression"]')
+
+        knn.fit(distances, y_true[is_class_known])
+
+        return knn.predict(distances)
+
 
 class WassersteinTSNE(PatientsRepresentationMethod):
     """Method based on the matrix of pairwise Wasserstein distances between units.
