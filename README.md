@@ -33,7 +33,7 @@ pip install patient_representation
 1. Install the latest development version:
 
 ```bash
-pip install git+https://github.com/VladimirShitov/patient_representation.git@main
+pip install git+https://github.com/lueckenlab/patient_representation.git@main
 ```
 
 ## Release notes

@@ -256,6 +256,7 @@ class PatientsRepresentationMethod:
                 n_jobs=n_jobs,
                 random_state=self.seed,
                 verbose=verbose,
+                initialization="spectral",  # pca doesn't work with precomputed distances
             )
             coordinates = tsne.fit(self.adata.uns[self.DISTANCES_UNS_KEY])
 
@@ -298,8 +299,10 @@ class MrVI(PatientsRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_mrvi_distances"
 
-    def __init__(self, sample_key: str, cells_type_key: str, categorical_nuisance_keys: list, seed=67, **model_params):
-        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, seed=seed)
+    def __init__(
+        self, sample_key: str, cells_type_key: str, categorical_nuisance_keys: list, layer=None, seed=67, **model_params
+    ):
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
         self.categorical_nuisance_keys = categorical_nuisance_keys
 
@@ -354,7 +357,7 @@ class MrVI(PatientsRepresentationMethod):
         """
         distances = super().calculate_distance_matrix(force=force)
 
-        if distances is not None:
+        if distances is not None and not force:
             return distances
 
         if "X_mrvi_z" not in self.adata.obsm or force:
@@ -362,18 +365,62 @@ class MrVI(PatientsRepresentationMethod):
         if "X_mrvi_u" not in self.adata.obsm or force:
             self.adata.obsm["X_mrvi_u"] = self.model.get_latent_representation(give_z=False)
 
-        self.patient_representations = self.model.get_local_sample_representation(return_distances=True)
+        # This is a tensor of shape (n_cells, n_samples, n_latent_variables)
+        cell_sample_representations = self.model.get_local_sample_representation(return_distances=False)
+        self.patient_representations = np.zeros(shape=(len(self.samples, cell_sample_representations.shape[2])))
+
+        # For a patient representation we will take centroid of cells of this sample
+        for i, sample in enumerate(self.samples):
+            sample_mask = self.adata.obs[self.sample_key] == sample
+            self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
+
+        cell_cell_distances = self.model.get_local_sample_representation(return_distances=True)
 
         if cells_mask is None:
-            sample_sample_distances = self.patient_representations.mean(axis=0)
+            sample_sample_distances = cell_cell_distances.mean(axis=0)
 
         else:
-            distance_matrices_subset = self.patient_representations[cells_mask, :, :]
+            distance_matrices_subset = cell_cell_distances[cells_mask, :, :]
             sample_sample_distances = distance_matrices_subset.mean(axis=0)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = sample_sample_distances
 
         return sample_sample_distances
+
+    def predict_metadata(self, target, n_neighbors: int = 3, task="classification"):
+        """Predict classes from metadata column `target` for samples using K-Nearest Neighbors classifier
+
+        Parameters
+        ----------
+        target : str
+            Column name from `adata.obs`, which will be used for classification
+        n_neighbors : int = 3
+            Number of neighbors to use for classification
+        task : str = "classification"
+
+
+        Returns
+        -------
+        y_predicted : array-like
+            Predicted values of `target` for samples with known class
+        """
+        from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+
+        y_true = self._extract_metadata([target])[target]
+        is_class_known = y_true.notna()
+        distances = self.calculate_distance_matrix()
+        distances = distances[is_class_known][:, is_class_known]  # Drop samples with unknown target
+
+        if task == "classification":
+            knn = KNeighborsClassifier(n_neighbors=n_neighbors, metric="precomputed", weights="distance")
+        elif task == "regression":
+            knn = KNeighborsRegressor(n_neighbors=n_neighbors, metric="precomputed", weights="distance")
+        else:
+            raise ValueError(f'task {task} is not supported, please set one of ["classification", "regression"]')
+
+        knn.fit(distances, y_true[is_class_known])
+
+        return knn.predict(distances)
 
 
 class WassersteinTSNE(PatientsRepresentationMethod):
@@ -674,6 +721,37 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
         }
 
         return avg_distances
+
+
+class RandomVector(PatientsRepresentationMethod):
+    """A dummy baseline, which represents patients as random embeddings"""
+
+    DISTANCES_UNS_KEY = "X_random_vector_distances"
+
+    def __init__(self, sample_key, cells_type_key, latent_dim: int = 30, seed=67):
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, seed=seed)
+
+        self.latent_dim = latent_dim
+        self.patient_representations = None
+
+    def calculate_distance_matrix(self, force: bool = False):
+        """Calculate distances between patients represented as random vectors"""
+        distances = super().calculate_distance_matrix(force=force)
+
+        if distances is not None:
+            return distances
+
+        self.patient_representations = np.random.normal(size=(len(self.samples), self.latent_dim))
+
+        distances = scipy.spatial.distance.pdist(self.patient_representations)
+        distances = scipy.spatial.distance.squareform(distances)
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        self.adata.uns["random_vec_parameters"] = {
+            "sample_key": self.sample_key,
+        }
+
+        return distances
 
 
 class CellTypesComposition(PatientsRepresentationMethod):
