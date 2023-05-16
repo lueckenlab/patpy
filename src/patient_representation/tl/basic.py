@@ -370,7 +370,10 @@ class MrVI(PatientsRepresentationMethod):
         )
 
         mrvi.MrVI.setup_anndata(
-            self.adata, sample_key=self.sample_key, categorical_nuisance_keys=self.categorical_nuisance_keys
+            self.adata,
+            sample_key=self.sample_key,
+            categorical_nuisance_keys=self.categorical_nuisance_keys,
+            layer=self.layer,
         )
 
         self.model = mrvi.MrVI(self.adata, **self.model_params)
@@ -409,7 +412,7 @@ class MrVI(PatientsRepresentationMethod):
 
         # This is a tensor of shape (n_cells, n_samples, n_latent_variables)
         cell_sample_representations = self.model.get_local_sample_representation(return_distances=False)
-        self.patient_representations = np.zeros(shape=(len(self.samples, cell_sample_representations.shape[2])))
+        self.patient_representations = np.zeros(shape=(len(self.samples), cell_sample_representations.shape[2]))
 
         # For a patient representation we will take centroid of cells of this sample
         for i, sample in enumerate(self.samples):
@@ -572,6 +575,7 @@ class PILOT(PatientsRepresentationMethod):
 
     def calculate_distance_matrix(self, c_reg: float = 10, force: bool = False):
         """Calculate matrix of distances between samples"""
+        import matplotlib.pyplot as plt
         import PILOT as pt
 
         distances = super().calculate_distance_matrix(force=force)
@@ -603,6 +607,10 @@ class PILOT(PatientsRepresentationMethod):
             "patient_state_col": self.patient_state_col,
             "c_reg": c_reg,
         }
+
+        # PILOT draws several plots and changes global rcParams during running
+        # This line returns plotting params to defaults
+        plt.style.use("default")
 
         return distances
 
