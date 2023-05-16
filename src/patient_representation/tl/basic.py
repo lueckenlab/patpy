@@ -286,7 +286,13 @@ class PatientsRepresentationMethod:
             _, axes = plt.subplots(nrows=1, ncols=len(metadata_cols), sharey=True, figsize=(len(metadata_cols) * 5, 5))
 
             for i, col in enumerate(metadata_cols):
-                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", hue=col, ax=axes[i])
+                n_unique_values = len(np.unique(metadata_df[col]))
+                if n_unique_values > 5:
+                    palette = "icefire"
+                else:
+                    palette = "tab10"
+
+                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", hue=col, ax=axes[i], palette=palette)
 
         return axes
 
