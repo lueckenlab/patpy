@@ -292,6 +292,15 @@ class PatientsRepresentationMethod:
                 else:
                     palette = "tab10"
 
+                # Plot points with missing values in metadata
+                sns.scatterplot(
+                    embedding_df[np.isnan(metadata_df[col])],
+                    x=f"{method}_0",
+                    y=f"{method}_1",
+                    ax=axes[i],
+                    color="lightgray",
+                )
+                # Plot points with known metadata
                 sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", hue=col, ax=axes[i], palette=palette)
 
         return axes
