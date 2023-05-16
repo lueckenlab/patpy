@@ -409,7 +409,7 @@ class MrVI(PatientsRepresentationMethod):
 
         # This is a tensor of shape (n_cells, n_samples, n_latent_variables)
         cell_sample_representations = self.model.get_local_sample_representation(return_distances=False)
-        self.patient_representations = np.zeros(shape=(len(self.samples, cell_sample_representations.shape[2])))
+        self.patient_representations = np.zeros(shape=(len(self.samples), cell_sample_representations.shape[2]))
 
         # For a patient representation we will take centroid of cells of this sample
         for i, sample in enumerate(self.samples):
