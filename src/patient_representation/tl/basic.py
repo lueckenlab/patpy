@@ -100,24 +100,35 @@ class PatientsRepresentationMethod:
         return filtered_cell_types
 
     def _get_data(self):
-        """Extract data from `self.layer`"""
+        """Extract data from correct layer specified by `self.layer`"""
         if self.adata is None:
             raise RuntimeError("adata is not yet set. Please, run prepare_anndata() method first")
 
         if self.layer is None or self.layer == "X":
+            # Assuming, data is stored in .X
+            warnings.warn("Using data from adata.X", stacklevel=1)
             return self.adata.X
 
-        return self.adata.obsm[self.layer]
+        elif self.adata.obsm and self.layer in self.adata.obsm:
+            warnings.warn(f"Using data from key {self.layer} of adata.obsm", stacklevel=1)
+            return self.adata.obsm[self.layer]
+
+        elif self.adata.layers and self.layer in self.adata.layers:
+            warnings.warn(f"Using data from key {self.layer} of adata.layers", stacklevel=1)
+            return self.adata.layers[self.layer]
+
+        else:
+            raise ValueError(f"Cannot find layer {self.layer} in adata. Please make sure it is specified correctly")
 
     def _move_layer_to_X(self, adata: sc.AnnData) -> sc.AnnData:
-        """Some models require data to be stored in `adata.X`. This method moves `layer` to `.X`"""
+        """Some models require data to be stored in `adata.X`. This method moves `self.layer` to `.X`"""
         if self.layer == "X" or self.layer is None:
             # The data is already in correct slot
             return adata
 
         # Copy everything except from .var* to new adata, with correct layer in X
         new_adata = sc.AnnData(
-            X=adata.obsm[self.layer],
+            X=self._get_data(),
             obs=adata.obs,
             obsm=adata.obsm,
             layers=adata.layers,
@@ -286,7 +297,22 @@ class PatientsRepresentationMethod:
             _, axes = plt.subplots(nrows=1, ncols=len(metadata_cols), sharey=True, figsize=(len(metadata_cols) * 5, 5))
 
             for i, col in enumerate(metadata_cols):
-                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", hue=col, ax=axes[i])
+                n_unique_values = len(np.unique(metadata_df[col]))
+                if n_unique_values > 5:
+                    palette = "icefire"
+                else:
+                    palette = "tab10"
+
+                # Plot points with missing values in metadata
+                sns.scatterplot(
+                    embedding_df[np.isnan(metadata_df[col])],
+                    x=f"{method}_0",
+                    y=f"{method}_1",
+                    ax=axes[i],
+                    color="lightgray",
+                )
+                # Plot points with known metadata
+                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", hue=col, ax=axes[i], palette=palette)
 
         return axes
 
@@ -461,7 +487,6 @@ class WassersteinTSNE(PatientsRepresentationMethod):
 
         self.replicate_key = replicate_key
 
-        self.data = None
         self.model = None
         self.distances_model = None
 
@@ -473,10 +498,10 @@ class WassersteinTSNE(PatientsRepresentationMethod):
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
 
-        self.data = pd.DataFrame(self._get_data())
-        self.data.set_index([self.adata.obs[self.sample_key], self.adata.obs[self.replicate_key]], inplace=True)
+        data = pd.DataFrame(self._get_data())
+        data.set_index([self.adata.obs[self.sample_key], self.adata.obs[self.replicate_key]], inplace=True)
 
-        self.model = WT.Dataset2Gaussians(self.data)
+        self.model = WT.Dataset2Gaussians(data)
         self.distances_model = WT.GaussianWassersteinDistance(self.model)
 
     def calculate_distance_matrix(self, covariance_weight=0.5, force: bool = False):
@@ -632,7 +657,9 @@ class TotalPseudobulk(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        self.patient_representations = np.zeros(shape=(len(self.samples), self._get_data().shape[1]))
+        data = self._get_data()
+
+        self.patient_representations = np.zeros(shape=(len(self.samples), data.shape[1]))
 
         if average == "mean":
             func = np.mean
@@ -642,7 +669,7 @@ class TotalPseudobulk(PatientsRepresentationMethod):
             raise ValueError(f"Averaging function {average} is not supported")
 
         for i, sample in enumerate(self.samples):
-            sample_cells = self._get_data()[self.adata.obs[self.sample_key] == sample, :]
+            sample_cells = data[self.adata.obs[self.sample_key] == sample, :]
             self.patient_representations[i] = func(sample_cells, axis=0)
 
         distances = scipy.spatial.distance.pdist(self.patient_representations)
@@ -657,7 +684,7 @@ class TotalPseudobulk(PatientsRepresentationMethod):
 class CellTypePseudobulk(PatientsRepresentationMethod):
     """Baseline, where distances between patients are average distances between their cell type pseudobulks"""
 
-    DISTANCES_UNS_KEY = "X_cellsbulk_distances"
+    DISTANCES_UNS_KEY = "X_ct_pseudobulk_distances"
 
     def __init__(self, sample_key, cells_type_key, layer="X_pca", seed=67):
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
@@ -678,14 +705,14 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
         else:
             raise ValueError(f"Averaging function {average} is not supported")
 
+        data = self._get_data()
+
         # List of matrices with embedding centroids for samples for each cell type
-        self.patient_representations = np.zeros(
-            shape=(len(self.cell_types), len(self.samples), self._get_data().shape[1])
-        )
+        self.patient_representations = np.zeros(shape=(len(self.cell_types), len(self.samples), data.shape[1]))
 
         for i, cell_type in enumerate(self.cell_types):
             for j, sample in enumerate(self.samples):
-                cells_data = self._get_data()[
+                cells_data = data[
                     (self.adata.obs[self.sample_key] == sample) & (self.adata.obs[self.cells_type_key] == cell_type)
                 ]
                 self.patient_representations[i, j] = func(cells_data, axis=0)
