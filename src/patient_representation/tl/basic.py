@@ -657,7 +657,7 @@ class TotalPseudobulk(PatientsRepresentationMethod):
 class CellTypePseudobulk(PatientsRepresentationMethod):
     """Baseline, where distances between patients are average distances between their cell type pseudobulks"""
 
-    DISTANCES_UNS_KEY = "X_cellsbulk_distances"
+    DISTANCES_UNS_KEY = "X_ct_pseudobulk_distances"
 
     def __init__(self, sample_key, cells_type_key, layer="X_pca", seed=67):
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
