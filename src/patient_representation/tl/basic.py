@@ -370,7 +370,10 @@ class MrVI(PatientsRepresentationMethod):
         )
 
         mrvi.MrVI.setup_anndata(
-            self.adata, sample_key=self.sample_key, categorical_nuisance_keys=self.categorical_nuisance_keys
+            self.adata,
+            sample_key=self.sample_key,
+            categorical_nuisance_keys=self.categorical_nuisance_keys,
+            layer=self.layer,
         )
 
         self.model = mrvi.MrVI(self.adata, **self.model_params)
