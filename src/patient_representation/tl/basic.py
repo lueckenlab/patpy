@@ -305,7 +305,7 @@ class PatientsRepresentationMethod:
 
                 # Plot points with missing values in metadata
                 sns.scatterplot(
-                    embedding_df[np.isnan(metadata_df[col])],
+                    embedding_df[metadata_df[col].isna()],
                     x=f"{method}_0",
                     y=f"{method}_1",
                     ax=axes[i],
