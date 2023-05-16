@@ -575,6 +575,7 @@ class PILOT(PatientsRepresentationMethod):
 
     def calculate_distance_matrix(self, c_reg: float = 10, force: bool = False):
         """Calculate matrix of distances between samples"""
+        import matplotlib.pyplot as plt
         import PILOT as pt
 
         distances = super().calculate_distance_matrix(force=force)
@@ -606,6 +607,10 @@ class PILOT(PatientsRepresentationMethod):
             "patient_state_col": self.patient_state_col,
             "c_reg": c_reg,
         }
+
+        # PILOT draws several plots and changes global rcParams during running
+        # This line returns plotting params to defaults
+        plt.style.use("default")
 
         return distances
 
