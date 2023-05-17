@@ -120,22 +120,22 @@ class PatientsRepresentationMethod:
         else:
             raise ValueError(f"Cannot find layer {self.layer} in adata. Please make sure it is specified correctly")
 
-    def _move_layer_to_X(self, adata: sc.AnnData) -> sc.AnnData:
+    def _move_layer_to_X(self) -> sc.AnnData:
         """Some models require data to be stored in `adata.X`. This method moves `self.layer` to `.X`"""
         if self.layer == "X" or self.layer is None:
             # The data is already in correct slot
-            return adata
+            return self.adata
 
         # Copy everything except from .var* to new adata, with correct layer in X
         new_adata = sc.AnnData(
             X=self._get_data(),
-            obs=adata.obs,
-            obsm=adata.obsm,
-            layers=adata.layers,
-            uns=adata.uns,
-            obsp=adata.obsp,
+            obs=self.adata.obs,
+            obsm=self.adata.obsm,
+            layers=self.adata.layers,
+            uns=self.adata.uns,
+            obsp=self.adata.obsp,
         )
-        new_adata.obsm["X_old"] = adata.X
+        new_adata.obsm["X_old"] = self.adata.X
 
         return new_adata
 
@@ -826,11 +826,11 @@ class SCellBOW(PatientsRepresentationMethod):
         """Pretrain SCellBOW model"""
         import SCellBOW as sb
 
-        self.adata = self._move_layer_to_X(adata)
-
         super().prepare_anndata(
             adata=self.adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
+
+        self.adata = self._move_layer_to_X()
 
         sb.SCellBOW_pretrain(
             self.adata, save_dir=self.model_dir, vec_size=self.latent_dim, n_worker=self.n_worker, iter=self.n_iter
@@ -914,11 +914,11 @@ class SCPoli(PatientsRepresentationMethod):
         """Set up scPoli model"""
         from scarches.models.scpoli import scPoli
 
-        self.adata = self._move_layer_to_X(adata)
-
         super().prepare_anndata(
             adata=self.adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
+
+        self.adata = self._move_layer_to_X()
 
         self.model = scPoli(
             adata=self.adata,
