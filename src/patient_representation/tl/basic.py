@@ -279,7 +279,7 @@ class PatientsRepresentationMethod:
 
     def plot_embedding(
         self,
-        method="MDS",
+        method="TSNE",
         metadata_cols=None,
         continuous_palette="viridis",
         categorical_palette="tab10",
