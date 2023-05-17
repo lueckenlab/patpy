@@ -310,16 +310,19 @@ class PatientsRepresentationMethod:
                 else:
                     palette = categorical_palette
 
+                # If there is only 1 metadata column, axes is not subscriptable
+                ax = axes[i] if len(metadata_cols) > 1 else axes
+
                 # Plot points with missing values in metadata
                 sns.scatterplot(
                     embedding_df[metadata_df[col].isna()],
                     x=f"{method}_0",
                     y=f"{method}_1",
-                    ax=axes[i],
+                    ax=ax,
                     color=na_color,
                 )
                 # Plot points with known metadata
-                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", hue=col, ax=axes[i], palette=palette)
+                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", hue=col, ax=ax, palette=palette)
 
         return axes
 
