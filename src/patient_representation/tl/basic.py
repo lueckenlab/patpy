@@ -120,29 +120,42 @@ class PatientsRepresentationMethod:
         else:
             raise ValueError(f"Cannot find layer {self.layer} in adata. Please make sure it is specified correctly")
 
-    def _move_layer_to_X(self, adata: sc.AnnData) -> sc.AnnData:
+    def _move_layer_to_X(self) -> sc.AnnData:
         """Some models require data to be stored in `adata.X`. This method moves `self.layer` to `.X`"""
         if self.layer == "X" or self.layer is None:
             # The data is already in correct slot
-            return adata
+            return self.adata
 
         # Copy everything except from .var* to new adata, with correct layer in X
         new_adata = sc.AnnData(
             X=self._get_data(),
-            obs=adata.obs,
-            obsm=adata.obsm,
-            layers=adata.layers,
-            uns=adata.uns,
-            obsp=adata.obsp,
+            obs=self.adata.obs,
+            obsm=self.adata.obsm,
+            layers=self.adata.layers,
+            uns=self.adata.uns,
+            obsp=self.adata.obsp,
         )
-        new_adata.obsm["X_old"] = adata.X
+        new_adata.obsm["X_old"] = self.adata.X
 
         return new_adata
 
     def _extract_metadata(self, columns) -> pd.DataFrame:
         """Return dataframe with requested `columns` in the correct rows order"""
         metadata = self.adata.obs[[self.sample_key, *columns]].drop_duplicates()
+
+        # If sample_key is in `columns`, it will cause error, when reindexing data frame
+        need_to_rename_sample_key = self.sample_key in columns
+
+        # To avoid error, we rename column with sample key, reindex dataframe, and then rename sample column back
+        if need_to_rename_sample_key:
+            # Rename the first column with sample key to sample_key_dupl
+            metadata.columns = [self.sample_key + "_dupl"] + list(metadata.columns[1:])
+
         metadata = metadata.set_index(self.sample_key)
+
+        if need_to_rename_sample_key:
+            metadata.rename(columns={self.sample_key + "_dupl": self.sample_key}, inplace=True)
+
         return metadata.loc[self.samples]
 
     def __init__(self, sample_key, cells_type_key, layer=None, seed=67):
@@ -277,7 +290,14 @@ class PatientsRepresentationMethod:
         self.embeddings[method] = coordinates
         return coordinates
 
-    def plot_embedding(self, method="MDS", metadata_cols=None):
+    def plot_embedding(
+        self,
+        method="TSNE",
+        metadata_cols=None,
+        continuous_palette="viridis",
+        categorical_palette="tab10",
+        na_color="lightgray",
+    ):
         """Plot embedding of samples colored by `metadata_cols`"""
         import matplotlib.pyplot as plt
 
@@ -299,20 +319,23 @@ class PatientsRepresentationMethod:
             for i, col in enumerate(metadata_cols):
                 n_unique_values = len(np.unique(metadata_df[col]))
                 if n_unique_values > 5:
-                    palette = "icefire"
+                    palette = continuous_palette
                 else:
-                    palette = "tab10"
+                    palette = categorical_palette
+
+                # If there is only 1 metadata column, axes is not subscriptable
+                ax = axes[i] if len(metadata_cols) > 1 else axes
 
                 # Plot points with missing values in metadata
                 sns.scatterplot(
                     embedding_df[metadata_df[col].isna()],
                     x=f"{method}_0",
                     y=f"{method}_1",
-                    ax=axes[i],
-                    color="lightgray",
+                    ax=ax,
+                    color=na_color,
                 )
                 # Plot points with known metadata
-                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", hue=col, ax=axes[i], palette=palette)
+                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", hue=col, ax=ax, palette=palette)
 
         return axes
 
@@ -826,11 +849,11 @@ class SCellBOW(PatientsRepresentationMethod):
         """Pretrain SCellBOW model"""
         import SCellBOW as sb
 
-        self.adata = self._move_layer_to_X(adata)
-
         super().prepare_anndata(
-            adata=self.adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
+            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
+
+        self.adata = self._move_layer_to_X()
 
         sb.SCellBOW_pretrain(
             self.adata, save_dir=self.model_dir, vec_size=self.latent_dim, n_worker=self.n_worker, iter=self.n_iter
@@ -914,11 +937,11 @@ class SCPoli(PatientsRepresentationMethod):
         """Set up scPoli model"""
         from scarches.models.scpoli import scPoli
 
-        self.adata = self._move_layer_to_X(adata)
-
         super().prepare_anndata(
-            adata=self.adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
+            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
+
+        self.adata = self._move_layer_to_X()
 
         self.model = scPoli(
             adata=self.adata,
