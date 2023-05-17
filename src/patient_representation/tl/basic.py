@@ -277,7 +277,14 @@ class PatientsRepresentationMethod:
         self.embeddings[method] = coordinates
         return coordinates
 
-    def plot_embedding(self, method="MDS", metadata_cols=None):
+    def plot_embedding(
+        self,
+        method="MDS",
+        metadata_cols=None,
+        continuous_palette="viridis",
+        categorical_palette="tab10",
+        na_color="lightgray",
+    ):
         """Plot embedding of samples colored by `metadata_cols`"""
         import matplotlib.pyplot as plt
 
@@ -299,9 +306,9 @@ class PatientsRepresentationMethod:
             for i, col in enumerate(metadata_cols):
                 n_unique_values = len(np.unique(metadata_df[col]))
                 if n_unique_values > 5:
-                    palette = "icefire"
+                    palette = continuous_palette
                 else:
-                    palette = "tab10"
+                    palette = categorical_palette
 
                 # Plot points with missing values in metadata
                 sns.scatterplot(
@@ -309,7 +316,7 @@ class PatientsRepresentationMethod:
                     x=f"{method}_0",
                     y=f"{method}_1",
                     ax=axes[i],
-                    color="lightgray",
+                    color=na_color,
                 )
                 # Plot points with known metadata
                 sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", hue=col, ax=axes[i], palette=palette)
