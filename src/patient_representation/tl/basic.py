@@ -922,7 +922,7 @@ class SCPoli(PatientsRepresentationMethod):
         from scarches.models.scpoli import scPoli
 
         super().prepare_anndata(
-            adata=self.adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
+            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
 
         self.adata = self._move_layer_to_X()
