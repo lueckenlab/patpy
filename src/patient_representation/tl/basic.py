@@ -442,7 +442,6 @@ class PatientsRepresentationMethod:
             Number of neighbors to use for classification
         task : str = "classification"
 
-
         Returns
         -------
         y_true : array-like
@@ -472,6 +471,32 @@ class PatientsRepresentationMethod:
         knn.fit(distances, y_true[is_class_known])
 
         return y_true[is_class_known], knn.predict(distances)
+
+    def plot_metadata_distribution(self, method_name: str, metadata_columns: list[str], tasks: list[str]):
+        """Predict metadata columns, and plot embeddings colorised by metadata values
+
+        Parameters
+        ----------
+        metadata_columns : list
+            List of metadata columns to show
+        method_name : str
+            Name of the method to dispay the results
+        tasks : list
+            Tasks for each metadata column (classification, ranking or regression). Can be one string for all columns.
+        """
+        if isinstance(tasks, str):
+            tasks = [tasks] * len(metadata_columns)
+
+        results = self.evaluate_representation(method_name=method_name, columns=metadata_columns, tasks=tasks)
+
+        results = results.sort_values("score", ascending=False)
+
+        # Plot results from the best to the worst
+        for _, row in results.iterrows():
+            col = row["column"]
+            ax = self.plot_embedding(metadata_cols=[col])
+            ax.set_title(f'{col}: {round(row["score"], 4)}')
+            ax.legend(loc=(1.05, 0))
 
 
 class MrVI(PatientsRepresentationMethod):
