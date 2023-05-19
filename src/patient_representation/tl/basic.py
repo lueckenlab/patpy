@@ -472,7 +472,9 @@ class PatientsRepresentationMethod:
 
         return y_true[is_class_known], knn.predict(distances)
 
-    def plot_metadata_distribution(self, method_name: str, metadata_columns: list[str], tasks: list[str]):
+    def plot_metadata_distribution(
+        self, method_name: str, metadata_columns: list[str], tasks: list[str], embedding: str = "UMAP"
+    ):
         """Predict metadata columns, and plot embeddings colorised by metadata values
 
         Parameters
@@ -483,6 +485,8 @@ class PatientsRepresentationMethod:
             Name of the method to dispay the results
         tasks : list
             Tasks for each metadata column (classification, ranking or regression). Can be one string for all columns.
+        embedding : str = "UMAP"
+            Embedding to use for plotting
         """
         if isinstance(tasks, str):
             tasks = [tasks] * len(metadata_columns)
@@ -494,7 +498,7 @@ class PatientsRepresentationMethod:
         # Plot results from the best to the worst
         for _, row in results.iterrows():
             col = row["column"]
-            ax = self.plot_embedding(metadata_cols=[col])
+            ax = self.plot_embedding(metadata_cols=[col], method=embedding)
             ax.set_title(f'{col}: {round(row["score"], 4)}')
             ax.legend(loc=(1.05, 0))
 
