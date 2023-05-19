@@ -383,6 +383,54 @@ class PatientsRepresentationMethod:
 
         return axes
 
+    def evaluate_representation(pat_rep_method, method_name: str, columns: list, tasks: list, n_neighbors=3):
+        """Run prediction of `columns` for patient representation methods
+
+        Parameters
+        ----------
+        pat_rep_method : PatientRepresentationMethod
+            A trained class instance of a patient representation method
+        method_name : str
+            Name of the method to dispay the results
+        columns : list
+            Columns from metadata to predict
+        tasks : list
+            Prediction tasks (classification, ranking or regression) for each column
+        n_neighbors : int = 3
+            Number of neighbors to use for KNN algorithm
+
+        Returns
+        -------
+        results : pd.DataFrame
+            Table with columns "method", "column", "task", "n_samples", "metric", "score"
+        """
+        from scipy.stats import spearmanr
+        from sklearn.metrics import f1_score
+
+        results = []
+        result_cols = ["method", "column", "task", "n_samples", "metric", "score"]
+
+        for col, task in zip(columns, tasks):
+            # Change ranking to classification for method to work
+            prediction_task = task if task != "ranking" else "classification"
+            true_target, predicted_target = pat_rep_method.predict_metadata(
+                target=col, task=prediction_task, n_neighbors=n_neighbors
+            )
+            n = len(true_target)
+
+            if task == "classification":
+                score = f1_score(y_true=true_target, y_pred=predicted_target, average="macro")
+                metric = "f1_macro"
+            elif task == "regression" or task == "ranking":
+                score = spearmanr(true_target, predicted_target).statistic
+                metric = "spearman_r"
+            else:
+                raise ValueError(f"{task} is not valid task")
+
+            results.append([method_name, col, task, n, metric, score])
+
+        return pd.DataFrame(results, columns=result_cols)
+
     def predict_metadata(self, target, n_neighbors: int = 3, task="classification"):
         """Predict classes from metadata column `target` for samples using K-Nearest Neighbors classifier
 
