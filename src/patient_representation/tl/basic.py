@@ -383,7 +383,7 @@ class PatientsRepresentationMethod:
 
         return axes
 
-    def evaluate_representation(pat_rep_method, method_name: str, columns: list, tasks: list, n_neighbors=3):
+    def evaluate_representation(self, method_name: str, columns: list, tasks: list, n_neighbors=3):
         """Run prediction of `columns` for patient representation methods
 
         Parameters
@@ -413,7 +413,7 @@ class PatientsRepresentationMethod:
         for col, task in zip(columns, tasks):
             # Change ranking to classification for method to work
             prediction_task = task if task != "ranking" else "classification"
-            true_target, predicted_target = pat_rep_method.predict_metadata(
+            true_target, predicted_target = self.predict_metadata(
                 target=col, task=prediction_task, n_neighbors=n_neighbors
             )
             n = len(true_target)
