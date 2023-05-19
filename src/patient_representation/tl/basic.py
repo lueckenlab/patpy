@@ -62,6 +62,45 @@ def create_colormap(df, col, palette="Spectral"):
     return df[col].map(color_map)
 
 
+def describe_metadata(metadata: pd.DataFrame) -> None:
+    """Prints the basic information about the metadata and tries to gues column types
+
+    Parameters
+    ----------
+    metadata : pd.DataFrame
+        File with metadata for the samples. Or any pandas data frame you want to describe
+    """
+    from pandas.api.types import is_numeric_dtype
+
+    n = metadata.shape[0]
+
+    numeric_cols = []
+    categorical_cols = []
+
+    for col in metadata.columns:
+        n_missing = metadata[col].isna().sum()
+        n_unique = len(metadata[col].unique())
+
+        if is_numeric_dtype(metadata[col]) and n_unique > 10:
+            numeric_cols.append(col)
+        elif n_unique > 1 and n_unique < n // 2:
+            categorical_cols.append(col)
+
+        print("Column", col)
+        print("Type:", metadata[col].dtype)
+        print("Number of missing values:", n_missing, f"({round(100 * n_missing / n, 2)}%)")
+        print("Number of unique values:", n_unique)
+
+        if n_unique < 50:
+            print("Unique values:", metadata[col].unique())
+
+        print("-" * 25)
+        print()
+
+    print("Possibly, numerical columns:", numeric_cols)
+    print("Possibly, categorical columns:", categorical_cols)
+
+
 class PatientsRepresentationMethod:
     """Base class for patient representation methods"""
 
