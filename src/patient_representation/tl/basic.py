@@ -62,6 +62,45 @@ def create_colormap(df, col, palette="Spectral"):
     return df[col].map(color_map)
 
 
+def describe_metadata(metadata: pd.DataFrame) -> None:
+    """Prints the basic information about the metadata and tries to gues column types
+
+    Parameters
+    ----------
+    metadata : pd.DataFrame
+        File with metadata for the samples. Or any pandas data frame you want to describe
+    """
+    from pandas.api.types import is_numeric_dtype
+
+    n = metadata.shape[0]
+
+    numeric_cols = []
+    categorical_cols = []
+
+    for col in metadata.columns:
+        n_missing = metadata[col].isna().sum()
+        n_unique = len(metadata[col].unique())
+
+        if is_numeric_dtype(metadata[col]) and n_unique > 10:
+            numeric_cols.append(col)
+        elif n_unique > 1 and n_unique < n // 2:
+            categorical_cols.append(col)
+
+        print("Column", col)
+        print("Type:", metadata[col].dtype)
+        print("Number of missing values:", n_missing, f"({round(100 * n_missing / n, 2)}%)")
+        print("Number of unique values:", n_unique)
+
+        if n_unique < 50:
+            print("Unique values:", metadata[col].unique())
+
+        print("-" * 25)
+        print()
+
+    print("Possibly, numerical columns:", numeric_cols)
+    print("Possibly, categorical columns:", categorical_cols)
+
+
 class PatientsRepresentationMethod:
     """Base class for patient representation methods"""
 
@@ -344,6 +383,54 @@ class PatientsRepresentationMethod:
 
         return axes
 
+    def evaluate_representation(self, method_name: str, columns: list, tasks: list, n_neighbors=3):
+        """Run prediction of `columns` for patient representation methods
+
+        Parameters
+        ----------
+        pat_rep_method : PatientRepresentationMethod
+            A trained class instance of a patient representation method
+        method_name : str
+            Name of the method to dispay the results
+        columns : list
+            Columns from metadata to predict
+        tasks : list
+            Prediction tasks (classification, ranking or regression) for each column
+        n_neighbors : int = 3
+            Number of neighbors to use for KNN algorithm
+
+        Returns
+        -------
+        results : pd.DataFrame
+            Table with columns "method", "column", "task", "n_samples", "metric", "score"
+        """
+        from scipy.stats import spearmanr
+        from sklearn.metrics import f1_score
+
+        results = []
+        result_cols = ["method", "column", "task", "n_samples", "metric", "score"]
+
+        for col, task in zip(columns, tasks):
+            # Change ranking to classification for method to work
+            prediction_task = task if task != "ranking" else "classification"
+            true_target, predicted_target = self.predict_metadata(
+                target=col, task=prediction_task, n_neighbors=n_neighbors
+            )
+            n = len(true_target)
+
+            if task == "classification":
+                score = f1_score(y_true=true_target, y_pred=predicted_target, average="macro")
+                metric = "f1_macro"
+            elif task == "regression" or task == "ranking":
+                score = spearmanr(true_target, predicted_target).statistic
+                metric = "spearman_r"
+            else:
+                raise ValueError(f"{task} is not valid task")
+
+            results.append([method_name, col, task, n, metric, score])
+
+        return pd.DataFrame(results, columns=result_cols)
+
     def predict_metadata(self, target, n_neighbors: int = 3, task="classification"):
         """Predict classes from metadata column `target` for samples using K-Nearest Neighbors classifier
 
@@ -354,7 +441,6 @@ class PatientsRepresentationMethod:
         n_neighbors : int = 3
             Number of neighbors to use for classification
         task : str = "classification"
-
 
         Returns
         -------
@@ -385,6 +471,36 @@ class PatientsRepresentationMethod:
         knn.fit(distances, y_true[is_class_known])
 
         return y_true[is_class_known], knn.predict(distances)
+
+    def plot_metadata_distribution(
+        self, method_name: str, metadata_columns: list[str], tasks: list[str], embedding: str = "UMAP"
+    ):
+        """Predict metadata columns, and plot embeddings colorised by metadata values
+
+        Parameters
+        ----------
+        metadata_columns : list
+            List of metadata columns to show
+        method_name : str
+            Name of the method to dispay the results
+        tasks : list
+            Tasks for each metadata column (classification, ranking or regression). Can be one string for all columns.
+        embedding : str = "UMAP"
+            Embedding to use for plotting
+        """
+        if isinstance(tasks, str):
+            tasks = [tasks] * len(metadata_columns)
+
+        results = self.evaluate_representation(method_name=method_name, columns=metadata_columns, tasks=tasks)
+
+        results = results.sort_values("score", ascending=False)
+
+        # Plot results from the best to the worst
+        for _, row in results.iterrows():
+            col = row["column"]
+            ax = self.plot_embedding(metadata_cols=[col], method=embedding)
+            ax.set_title(f'{col}: {round(row["score"], 4)}')
+            ax.legend(loc=(1.05, 0))
 
 
 class MrVI(PatientsRepresentationMethod):
