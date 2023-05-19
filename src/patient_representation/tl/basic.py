@@ -283,16 +283,21 @@ class PatientsRepresentationMethod:
                 initialization="spectral",  # pca doesn't work with precomputed distances
             )
             coordinates = tsne.fit(self.adata.uns[self.DISTANCES_UNS_KEY])
+        elif method == "UMAP":
+            from umap import UMAP
+
+            umap = UMAP(n_components=2, metric="precomputed", random_state=self.seed, verbose=verbose, n_jobs=n_jobs)
+            coordinates = umap.fit_transform(self.adata.uns[self.DISTANCES_UNS_KEY])
 
         else:
-            raise ValueError(f'Method {method} is not supported, please use one of ["MDS", "TSNE"]')
+            raise ValueError(f'Method {method} is not supported, please use one of ["MDS", "TSNE", "UMAP"]')
 
         self.embeddings[method] = coordinates
         return coordinates
 
     def plot_embedding(
         self,
-        method="TSNE",
+        method="UMAP",
         metadata_cols=None,
         continuous_palette="viridis",
         categorical_palette="tab10",
