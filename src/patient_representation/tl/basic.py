@@ -159,6 +159,43 @@ def calculate_compositional_metrics(adata, sample_key, composition_keys, normali
     return compositional_metrics
 
 
+def calculate_cell_qc_metrics(adata, sample_key, cell_qc_vars, agg_function=np.median):
+    """
+    Calculate agregated cell quality control metrics for the given AnnData object
+
+    Parameters
+    ----------
+    adata : AnnData
+        Annotated data object.
+    sample_key : str
+        Key for the sample information in `adata.obs`
+    cell_qc_vars: list[str]
+        List of column keys representing the cell QC variables. For example, number of genes per cell
+    agg_function: Callable = numpy.median
+        Aggregation function to use for aggregating cell QC metrics. Default is numpy.median
+
+    Returns
+    -------
+    cells_qc_aggregated : pandas.DataFrame
+        DataFrame with samples in rows and aggregated QC metrics in columns
+
+    Examples
+    --------
+    >>> calculate_cell_qc_metrics(adata, sample_key="scRNASeq_sample_ID", cell_qc_vars=["QC_ngenes", "QC_total_UMI"])
+                        median_QC_ngenes  median_QC_total_UMI
+    scRNASeq_sample_ID
+    G05061-Ja005E-PBCa            1112.0               3150.0
+    G05064-Ja005E-PBCa             982.5               2955.0
+    """
+    new_col_names = {col_name: agg_function.__name__ + "_" + col_name for col_name in cell_qc_vars}
+
+    cells_qc_aggregated = (
+        adata.obs.groupby(by=sample_key).aggregate(agg_function)[cell_qc_vars].rename(columns=new_col_names)
+    )
+
+    return cells_qc_aggregated
+
+
 class PatientsRepresentationMethod:
     """Base class for patient representation methods"""
 
