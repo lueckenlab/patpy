@@ -91,7 +91,7 @@ def calculate_cell_qc_metrics(adata, sample_key, cell_qc_vars, agg_function=np.m
     new_col_names = {col_name: agg_function.__name__ + "_" + col_name for col_name in cell_qc_vars}
 
     cells_qc_aggregated = (
-        adata.obs.groupby(by=sample_key).aggregate(agg_function)[cell_qc_vars].rename(columns=new_col_names)
+        adata.obs[cell_qc_vars].groupby(by=sample_key).aggregate(agg_function).rename(columns=new_col_names)
     )
 
     return cells_qc_aggregated
