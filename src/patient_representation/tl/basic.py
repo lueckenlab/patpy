@@ -7,6 +7,8 @@ import scanpy as sc
 import scipy
 import seaborn as sns
 
+from patient_representation.pp import filter_small_cell_types, filter_small_samples
+
 
 def prepare_data_for_phemd(adata, sample_col, n_top_var_genes: int = 100):
     """Convert the expression data to the input format of PhEMD
@@ -105,38 +107,6 @@ class PatientsRepresentationMethod:
     """Base class for patient representation methods"""
 
     DISTANCES_UNS_KEY = "X_method-name_distances"
-
-    @staticmethod
-    def filter_small_samples(adata, sample_key, sample_size_threshold: int = 300) -> set:
-        """Leave only samples with not less than `sample_size_threshold` cells"""
-        sample_size_counts = adata.obs[sample_key].value_counts()
-        small_samples = sample_size_counts[sample_size_counts < sample_size_threshold].index
-        filtered_samples = set(adata.obs[sample_key]) - set(small_samples)
-        print(len(small_samples), "samples removed:", ", ".join(small_samples))
-
-        return filtered_samples
-
-    @staticmethod
-    def filter_small_cell_types(adata, sample_key, cells_type_key, cluster_size_threshold: int = 5) -> set:
-        """Leave only cell types with not less than `cluster_size_threshold` cells"""
-        cells_counts = adata.obs[[sample_key, cells_type_key]].value_counts().reset_index(name="count")
-
-        # This step does not filter cell types with 0 counts
-        small_cell_types = cells_counts.loc[cells_counts["count"] < cluster_size_threshold, cells_type_key].unique()
-        small_cell_types = set(small_cell_types)
-
-        if cluster_size_threshold > 0:
-            # Add cell types with 0 counts in some samples
-            for sample in adata.obs[sample_key].unique():
-                for cell_type in adata.obs[cells_type_key].unique():
-                    sample_cells = adata[(adata.obs[sample_key] == sample) & (adata.obs[cells_type_key] == cell_type)]
-                    if not sample_cells:
-                        small_cell_types.add(cell_type)
-
-        filtered_cell_types = set(adata.obs[cells_type_key]) - set(small_cell_types)
-        print(len(small_cell_types), "cell types removed:", ", ".join(small_cell_types))
-
-        return filtered_cell_types
 
     def _get_data(self):
         """Extract data from correct layer specified by `self.layer`"""
@@ -238,13 +208,13 @@ class PatientsRepresentationMethod:
         self.adata = adata
 
         # Filter samples with too few cells
-        filtered_samples = self.filter_small_samples(
+        filtered_samples = filter_small_samples(
             adata=self.adata, sample_key=self.sample_key, sample_size_threshold=sample_size_threshold
         )
         self.samples = list(filtered_samples)
         self.adata = self.adata[self.adata.obs[self.sample_key].isin(filtered_samples)].copy()
 
-        filtered_cell_types = self.filter_small_cell_types(
+        filtered_cell_types = filter_small_cell_types(
             adata=self.adata,
             sample_key=self.sample_key,
             cells_type_key=self.cells_type_key,
