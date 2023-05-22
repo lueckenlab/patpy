@@ -63,7 +63,7 @@ def create_colormap(df, col, palette="Spectral"):
 
 
 def describe_metadata(metadata: pd.DataFrame) -> None:
-    """Prints the basic information about the metadata and tries to gues column types
+    """Prints the basic information about the metadata and tries to guess column types
 
     Parameters
     ----------
