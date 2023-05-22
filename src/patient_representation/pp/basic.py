@@ -95,3 +95,35 @@ def calculate_cell_qc_metrics(adata, sample_key, cell_qc_vars, agg_function=np.m
     )
 
     return cells_qc_aggregated
+
+
+def filter_small_samples(adata, sample_key, sample_size_threshold: int = 300) -> set:
+    """Leave only samples with not less than `sample_size_threshold` cells"""
+    sample_size_counts = adata.obs[sample_key].value_counts()
+    small_samples = sample_size_counts[sample_size_counts < sample_size_threshold].index
+    filtered_samples = set(adata.obs[sample_key]) - set(small_samples)
+    print(len(small_samples), "samples removed:", ", ".join(small_samples))
+
+    return filtered_samples
+
+
+def filter_small_cell_types(adata, sample_key, cells_type_key, cluster_size_threshold: int = 5) -> set:
+    """Leave only cell types with not less than `cluster_size_threshold` cells"""
+    cells_counts = adata.obs[[sample_key, cells_type_key]].value_counts().reset_index(name="count")
+
+    # This step does not filter cell types with 0 counts
+    small_cell_types = cells_counts.loc[cells_counts["count"] < cluster_size_threshold, cells_type_key].unique()
+    small_cell_types = set(small_cell_types)
+
+    if cluster_size_threshold > 0:
+        # Add cell types with 0 counts in some samples
+        for sample in adata.obs[sample_key].unique():
+            for cell_type in adata.obs[cells_type_key].unique():
+                sample_cells = adata[(adata.obs[sample_key] == sample) & (adata.obs[cells_type_key] == cell_type)]
+                if not sample_cells:
+                    small_cell_types.add(cell_type)
+
+    filtered_cell_types = set(adata.obs[cells_type_key]) - set(small_cell_types)
+    print(len(small_cell_types), "cell types removed:", ", ".join(small_cell_types))
+
+    return filtered_cell_types
