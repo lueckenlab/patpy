@@ -208,21 +208,19 @@ class PatientsRepresentationMethod:
         self.adata = adata
 
         # Filter samples with too few cells
-        filtered_samples = filter_small_samples(
+        self.adata = filter_small_samples(
             adata=self.adata, sample_key=self.sample_key, sample_size_threshold=sample_size_threshold
         )
-        self.samples = list(filtered_samples)
-        self.adata = self.adata[self.adata.obs[self.sample_key].isin(filtered_samples)].copy()
+        self.samples = adata.obs[self.sample_key].unique()
 
-        filtered_cell_types = filter_small_cell_types(
+        # Filter cell types with too few cells
+        self.adata = filter_small_cell_types(
             adata=self.adata,
             sample_key=self.sample_key,
             cells_type_key=self.cells_type_key,
             cluster_size_threshold=cluster_size_threshold,
         )
-        self.cell_types = list(filtered_cell_types)
-        self.adata = self.adata[self.adata.obs[self.sample_key].isin(filtered_samples)].copy()
-        self.adata = self.adata[self.adata.obs[self.cells_type_key].isin(filtered_cell_types)].copy()
+        self.cell_types = self.adata[self.cells_type_key].unique()
 
     def calculate_distance_matrix(self, force: bool = False):
         """Transform-like method: returns samples distances matrix"""
