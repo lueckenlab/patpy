@@ -98,6 +98,27 @@ def calculate_cell_qc_metrics(adata, sample_key, cell_qc_vars, agg_function=np.m
     return cells_qc_aggregated
 
 
+def calclulate_n_cells_per_sample(adata, sample_key) -> pd.DataFrame:
+    """
+    Calculate the number of cells per sample in the given AnnData object.
+
+    Parameters
+    ----------
+    adata : AnnData
+        Annotated data object.
+    sample_key : str
+        Key for the sample information in `adata.obs`
+
+    Returns
+    -------
+    cell_counts : pandas.DataFrame
+        DataFrame containing the number of cells per sample in the columns "n_cells"
+    """
+    cell_counts = pd.DataFrame(adata.obs[sample_key].value_counts())
+    cell_counts.columns = ["n_cells"]
+    return cell_counts
+
+
 def filter_small_samples(adata, sample_key, sample_size_threshold: int = 300):
     """Leave only samples with not less than `sample_size_threshold` cells"""
     sample_size_counts = adata.obs[sample_key].value_counts()
