@@ -399,13 +399,15 @@ class PatientsRepresentationMethod:
 
         return pd.DataFrame(results, columns=result_cols)
 
-    def predict_metadata(self, target, n_neighbors: int = 3, task="classification"):
+    def predict_metadata(self, target, metadata=None, n_neighbors: int = 3, task="classification"):
         """Predict classes from metadata column `target` for samples using K-Nearest Neighbors classifier
 
         Parameters
         ----------
         target : str
             Column name from `adata.obs`, which will be used for classification
+        metadata : Optional[pd.DataFrame] = None
+            Table with metadata about samples. Index should contain samples. If None, `adata.obs` is used
         n_neighbors : int = 3
             Number of neighbors to use for classification
         task : str = "classification"
@@ -419,7 +421,10 @@ class PatientsRepresentationMethod:
         """
         from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 
-        y_true = self._extract_metadata([target])[target]
+        if metadata is None:
+            metadata = self._extract_metadata([target])
+
+        y_true = metadata[target]
         is_class_known = y_true.notna()
         distances = self.calculate_distance_matrix()
         distances = distances[is_class_known][:, is_class_known]  # Drop samples with unknown target
