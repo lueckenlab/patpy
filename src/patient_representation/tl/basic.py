@@ -221,7 +221,7 @@ class PatientsRepresentationMethod:
             cells_type_key=self.cells_type_key,
             cluster_size_threshold=cluster_size_threshold,
         )
-        self.cell_types = self.adata[self.cells_type_key].unique()
+        self.cell_types = self.adata.obs[self.cells_type_key].unique()
 
     def calculate_distance_matrix(self, force: bool = False):
         """Transform-like method: returns samples distances matrix"""
