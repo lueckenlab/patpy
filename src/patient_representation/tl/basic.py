@@ -190,6 +190,7 @@ class PatientsRepresentationMethod:
         self.samples = None
         self.cell_types = None
         self.embeddings = {}
+        self.samples_adata = None
 
     # fit-like method: save data and process it
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
@@ -301,6 +302,38 @@ class PatientsRepresentationMethod:
 
         self.embeddings[method] = coordinates
         return coordinates
+
+    def to_adata(self, metadata: pd.DataFrame = None, *args, **kwargs):
+        """Convert samples data to AnnData object
+
+        Parameters
+        ----------
+        metadata : Optional[pd.DataFrame] = None
+            Metadata about samples to be added to .obs of AnnData object. Should contain samples in index
+        *args, **kwargs
+            Additional arguments to pass to calculate_distance_matrix method
+
+        Returns
+        -------
+        samples_adata : AnnData
+            AnnData object with samples data
+        """
+        if (
+            self.patient_representations is not None
+            and self.patient_representations.ndim == 2
+            and self.patient_representations.shape[0] == len(self.samples)
+        ):
+            representation = self.patient_representations
+        else:
+            representation = np.array(self.embed())
+
+        self.samples_adata = sc.AnnData(
+            X=representation,
+            obs=metadata.loc[self.samples] if metadata is not None else None,
+            obsm={self.DISTANCES_UNS_KEY: self.calculate_distance_matrix(*args, **kwargs)},
+        )
+
+        return self.samples_adata
 
     def plot_embedding(
         self,
