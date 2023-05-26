@@ -333,6 +333,10 @@ class PatientsRepresentationMethod:
             obsm={self.DISTANCES_UNS_KEY: self.calculate_distance_matrix(*args, **kwargs)},
         )
 
+        # Move samples embeddings to .obsm
+        for method, embedding in self.embeddings.items():
+            self.samples_adata.obsm["X_" + method.lower()] = embedding
+
         return self.samples_adata
 
     def plot_embedding(
