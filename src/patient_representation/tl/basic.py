@@ -190,6 +190,7 @@ class PatientsRepresentationMethod:
         self.samples = None
         self.cell_types = None
         self.embeddings = {}
+        self.samples_adata = None
 
     # fit-like method: save data and process it
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
@@ -220,7 +221,7 @@ class PatientsRepresentationMethod:
             cells_type_key=self.cells_type_key,
             cluster_size_threshold=cluster_size_threshold,
         )
-        self.cell_types = self.adata[self.cells_type_key].unique()
+        self.cell_types = self.adata.obs[self.cells_type_key].unique()
 
     def calculate_distance_matrix(self, force: bool = False):
         """Transform-like method: returns samples distances matrix"""
@@ -253,7 +254,7 @@ class PatientsRepresentationMethod:
             figsize=figsize,
         )
 
-    def embed(self, method="TSNE", n_jobs: int = -1, verbose: bool = False):
+    def embed(self, method="UMAP", n_jobs: int = -1, verbose: bool = False):
         """Convert distances to embedding of the samples
 
         Parameters
@@ -301,6 +302,42 @@ class PatientsRepresentationMethod:
 
         self.embeddings[method] = coordinates
         return coordinates
+
+    def to_adata(self, metadata: pd.DataFrame = None, *args, **kwargs):
+        """Convert samples data to AnnData object
+
+        Parameters
+        ----------
+        metadata : Optional[pd.DataFrame] = None
+            Metadata about samples to be added to .obs of AnnData object. Should contain samples in index
+        *args, **kwargs
+            Additional arguments to pass to calculate_distance_matrix method
+
+        Returns
+        -------
+        samples_adata : AnnData
+            AnnData object with samples data
+        """
+        if (
+            self.patient_representations is not None
+            and self.patient_representations.ndim == 2
+            and self.patient_representations.shape[0] == len(self.samples)
+        ):
+            representation = self.patient_representations
+        else:
+            representation = np.array(self.embed())
+
+        self.samples_adata = sc.AnnData(
+            X=representation,
+            obs=metadata.loc[self.samples] if metadata is not None else None,
+            obsm={self.DISTANCES_UNS_KEY: self.calculate_distance_matrix(*args, **kwargs)},
+        )
+
+        # Move samples embeddings to .obsm
+        for method, embedding in self.embeddings.items():
+            self.samples_adata.obsm["X_" + method.lower()] = embedding
+
+        return self.samples_adata
 
     def plot_embedding(
         self,
@@ -399,13 +436,15 @@ class PatientsRepresentationMethod:
 
         return pd.DataFrame(results, columns=result_cols)
 
-    def predict_metadata(self, target, n_neighbors: int = 3, task="classification"):
+    def predict_metadata(self, target, metadata=None, n_neighbors: int = 3, task="classification"):
         """Predict classes from metadata column `target` for samples using K-Nearest Neighbors classifier
 
         Parameters
         ----------
         target : str
             Column name from `adata.obs`, which will be used for classification
+        metadata : Optional[pd.DataFrame] = None
+            Table with metadata about samples. Index should contain samples. If None, `adata.obs` is used
         n_neighbors : int = 3
             Number of neighbors to use for classification
         task : str = "classification"
@@ -419,7 +458,10 @@ class PatientsRepresentationMethod:
         """
         from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 
-        y_true = self._extract_metadata([target])[target]
+        if metadata is None:
+            metadata = self._extract_metadata([target])
+
+        y_true = metadata[target]
         is_class_known = y_true.notna()
         distances = self.calculate_distance_matrix()
         distances = distances[is_class_known][:, is_class_known]  # Drop samples with unknown target
