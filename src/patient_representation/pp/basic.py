@@ -98,7 +98,7 @@ def calculate_cell_qc_metrics(adata, sample_key, cell_qc_vars, agg_function=np.m
     return cells_qc_aggregated
 
 
-def calclulate_n_cells_per_sample(adata, sample_key) -> pd.DataFrame:
+def calculate_n_cells_per_sample(adata, sample_key) -> pd.DataFrame:
     """
     Calculate the number of cells per sample in the given AnnData object.
 
