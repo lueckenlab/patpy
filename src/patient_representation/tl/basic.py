@@ -254,7 +254,7 @@ class PatientsRepresentationMethod:
             figsize=figsize,
         )
 
-    def embed(self, method="TSNE", n_jobs: int = -1, verbose: bool = False):
+    def embed(self, method="UMAP", n_jobs: int = -1, verbose: bool = False):
         """Convert distances to embedding of the samples
 
         Parameters
