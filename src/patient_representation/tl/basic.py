@@ -522,7 +522,14 @@ class MrVI(PatientsRepresentationMethod):
     DISTANCES_UNS_KEY = "X_mrvi_distances"
 
     def __init__(
-        self, sample_key: str, cells_type_key: str, categorical_nuisance_keys: list, layer=None, seed=67, **model_params
+        self,
+        sample_key: str,
+        cells_type_key: str,
+        categorical_nuisance_keys: list,
+        layer=None,
+        seed=67,
+        max_epochs=None,
+        **model_params,
     ):
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
@@ -531,6 +538,7 @@ class MrVI(PatientsRepresentationMethod):
         self.model = None
         self.model_params = model_params
         self.patient_representations = None
+        self.max_epochs = max_epochs
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
         """Train MrVI model
@@ -557,7 +565,7 @@ class MrVI(PatientsRepresentationMethod):
         )
 
         self.model = mrvi.MrVI(self.adata, **self.model_params)
-        self.model.train()
+        self.model.train(max_epochs=self.max_epochs)
 
     def calculate_distance_matrix(self, cells_mask=None, batch_size: int = 1000, force: bool = False):
         """Return sample by sample distances matrix

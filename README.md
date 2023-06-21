@@ -50,7 +50,7 @@ If you found a bug, please use the [issue tracker][issue-tracker].
 > t.b.a
 
 [scverse-discourse]: https://discourse.scverse.org/
-[issue-tracker]: https://github.com/VladimirShitov/patient_representation/issues
+[issue-tracker]: https://github.com/lueckenlab/patient_representation/issues
 [changelog]: https://patient_representation.readthedocs.io/latest/changelog.html
 [link-docs]: https://patient_representation.readthedocs.io
 [link-api]: https://patient_representation.readthedocs.io/latest/api.html
