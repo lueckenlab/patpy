@@ -212,7 +212,7 @@ class PatientsRepresentationMethod:
         self.adata = filter_small_samples(
             adata=self.adata, sample_key=self.sample_key, sample_size_threshold=sample_size_threshold
         )
-        self.samples = adata.obs[self.sample_key].unique()
+        self.samples = self.adata.obs[self.sample_key].unique()
 
         # Filter cell types with too few cells
         self.adata = filter_small_cell_types(
