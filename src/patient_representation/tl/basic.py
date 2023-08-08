@@ -610,7 +610,9 @@ class MrVI(PatientsRepresentationMethod):
 
         print("Calculating cells representations")
         # This is a tensor of shape (n_cells, n_samples, n_latent_variables)
-        cell_sample_representations = self.model.get_local_sample_representation(return_distances=False)
+        cell_sample_representations = self.model.get_local_sample_representation(
+            batch_size=batch_size, return_distances=False
+        )
         self.patient_representations = np.zeros(shape=(len(self.samples), cell_sample_representations.shape[2]))
 
         print("Calculating samples representations")
@@ -622,13 +624,9 @@ class MrVI(PatientsRepresentationMethod):
         sample_sample_distances = np.zeros(shape=(len(self.samples), len(self.samples)))
 
         print("Calculating distance matrix between samples")
-        for i in range(0, self.adata[cells_mask].shape[0], batch_size):
-            batch_cells = self.adata[i : i + batch_size]
-            batch_samples_distances = self.model.get_local_sample_representation(batch_cells, return_distances=True)
-            sample_sample_distances += batch_samples_distances.sum(axis=0)
-
-        # Convert sum of distances to mean
-        sample_sample_distances /= len(self.adata[cells_mask])
+        sample_sample_distances = self.model.get_local_sample_representation(
+            self.adata[cells_mask], batch_size=batch_size, return_distances=True
+        ).mean(axis=0)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = sample_sample_distances
 
