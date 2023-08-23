@@ -10,5 +10,6 @@ from .basic import (
     WassersteinTSNE,
     convert_cell_types_to_phemd_format,
     describe_metadata,
+    evaluate_representation,
     prepare_data_for_phemd,
 )
