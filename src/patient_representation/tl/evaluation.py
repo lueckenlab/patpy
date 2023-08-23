@@ -155,11 +155,11 @@ def test_distances_significance(
         distances, conditions, control_level, normalization_type, n_bootstraps, trimmed_fraction, compare_by_difference
     )
 
-    pvalue = (null_distributed_statistics >= real_statistic).sum() / n_bootstraps
+    p_value = (null_distributed_statistics >= real_statistic).sum() / n_bootstraps
 
     normalized_distances -= np.median(null_distributed_statistics)
 
-    return normalized_distances, real_statistic, pvalue
+    return normalized_distances, real_statistic, p_value
 
 
 def predict_knn(distances, y_true, n_neighbors: int = 3, task: _PREDICTION_TASKS = "classification"):
@@ -334,7 +334,7 @@ def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "kn
 
     elif method == "distances":
         _, score, p_value = test_distances_significance(distances, conditions=target, **parameters)
-        result = {"score": score, "pvalue": p_value, "metric": "distances", **parameters}
+        result = {"score": score, "p_value": p_value, "metric": "distances", **parameters}
 
     elif method == "proportions":
         if "groups" not in parameters:
