@@ -8,8 +8,7 @@ import scipy
 import seaborn as sns
 
 from patient_representation.pp import filter_small_cell_types, filter_small_samples
-from patient_representation.tl import evaluate_representation
-from patient_representation.tl.evaluation import _EVALUATION_METHODS
+from patient_representation.tl._types import _EVALUATION_METHODS
 
 
 def prepare_data_for_phemd(adata, sample_col, n_top_var_genes: int = 100):
@@ -428,6 +427,8 @@ class PatientsRepresentationMethod:
             - method: name of the method used for evaluation
             There are other optional keys depending on the method used for evaluation.
         """
+        from patient_representation.tl import evaluate_representation
+
         if metadata is None:
             metadata = self._extract_metadata()
 
