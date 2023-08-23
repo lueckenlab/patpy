@@ -194,7 +194,7 @@ class PatientsRepresentationMethod:
         self.samples_adata = None
 
     # fit-like method: save data and process it
-    def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
+    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Prepare adata for the analysis, filter cell types and samples with too few observations
 
         Parameters
@@ -559,7 +559,7 @@ class MrVI(PatientsRepresentationMethod):
         self.patient_representations = None
         self.max_epochs = max_epochs
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
+    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Train MrVI model
 
         Parameters
@@ -683,7 +683,7 @@ class WassersteinTSNE(PatientsRepresentationMethod):
         self.model = None
         self.distances_model = None
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
+    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Set up Gaussian Wasserstein Distance model"""
         import WassersteinTSNE as WT
 
@@ -774,7 +774,7 @@ class PILOT(PatientsRepresentationMethod):
         self.annotation = None
         self.patient_representations = None
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
+    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Set up PILOT model"""
         import PILOT as pt
 
@@ -1015,7 +1015,7 @@ class SCellBOW(PatientsRepresentationMethod):
         self.n_iter = n_iter
         self.patient_representations = None
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
+    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Pretrain SCellBOW model"""
         import SCellBOW as sb
 
@@ -1103,7 +1103,7 @@ class SCPoli(PatientsRepresentationMethod):
         self.pretraining_epochs = pretraining_epochs
         self.eta = eta
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
+    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Set up scPoli model"""
         from scarches.models.scpoli import scPoli
 
