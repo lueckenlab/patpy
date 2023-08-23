@@ -1,13 +1,47 @@
+from typing import Literal
+
 import numpy as np
 import pandas as pd
 from scipy.stats import trim_mean
 
+_NORMALIZATION_TYPES = Literal["total", "shift", "var"]
+_PREDICTION_TASKS = Literal["classification", "regression", "ranking"]
+_EVALUATION_METHODS = Literal["knn", "distances", "proportions", "silhouette"]
+
 
 def _upper_diagonal(matrix):
+    """Return upper diagonal of the matrix excluding the diagonal itself"""
     return matrix[np.triu_indices(matrix.shape[0], k=1)]
 
 
-def _get_normalized_distances(distances, conditions, control_level, normalization_type, compare_by_difference=True):
+def _get_normalized_distances(
+    distances, conditions, control_level, normalization_type: _NORMALIZATION_TYPES, compare_by_difference: bool = True
+):
+    """Calculate distances between samples normalized in respect to the other group
+
+    Based on Petukhov et al (2022): https://www.biorxiv.org/content/10.1101/2022.03.15.484475v1.full.pdf
+
+    Parameters
+    ----------
+    distances : square matrix
+        Matrix of distances between samples
+    conditions : array-like
+        Vector with the same length as `distances` containing a categorical variable
+    control_level
+        Value of `conditions` that should be used as a control group
+    normalization_type : Literal["total", "shift", "var"]
+        Type of normalization to use. In the text below, "case" means enything that is not a control group.
+        - total: normalize distances between control and case groups to the median of within-control group distances
+        - shift: normalize distances between control and case groups to the average of within-control and within-case group median distances
+        - var: normalize distances within case group to the median of within-control group distances
+    compare_by_difference : bool = True
+        If True, normalization is defined as difference (as in the original paper). Otherwise, it is defined as a ratio
+
+    Returns
+    -------
+    normalized_distances : array-like
+        Vector of normalized distances between samples
+    """
     is_control = conditions == control_level
     is_case = ~is_control
 
@@ -40,11 +74,35 @@ def _get_null_distances_distribution(
     distances,
     conditions,
     control_level,
-    normalization_type,
-    n_bootstraps=1000,
-    trimmed_fraction=0.2,
-    compare_by_difference=True,
+    normalization_type: _NORMALIZATION_TYPES,
+    n_bootstraps: int = 1000,
+    trimmed_fraction: float = 0.2,
+    compare_by_difference: bool = True,
 ):
+    """Calculate null distribution of average normalized distances between samples
+
+    Parameters
+    ----------
+    distances : square matrix
+        Matrix of distances between samples
+    conditions : array-like
+        Vector with the same length as `distances` containing a categorical variable
+    control_level
+        Value of `conditions` that should be used as a control group
+    normalization_type : Literal["total", "shift", "var"]
+        Type of normalization to use. For explanation, see the documetation of `_get_normalized_distances`
+    n_bootstraps : int = 1000
+        Number of bootstrap iterations to use
+    trimmed_fraction : float = 0.2
+        Fraction of the most extreme values to remove from the distribution
+    compare_by_difference : bool = True
+        If True, normalization is defined as difference (as in the original paper). Otherwise, it is defined as a ratio
+
+    Returns
+    -------
+    statistics : array-like
+        Vector of statistics for each bootstrap iteration
+    """
     statistics = np.zeros(n_bootstraps)
     for i in range(n_bootstraps):
         norm_distances = _get_normalized_distances(
@@ -63,12 +121,35 @@ def test_distances_significance(
     distances,
     conditions,
     control_level,
-    normalization_type,
-    n_bootstraps=1000,
-    trimmed_fraction=0.2,
-    compare_by_difference=True,
+    normalization_type: _NORMALIZATION_TYPES,
+    n_bootstraps: int = 1000,
+    trimmed_fraction: float = 0.2,
+    compare_by_difference: bool = True,
 ):
-    """Test if distances are significantly different from the null distribution"""
+    """Test if distances are significantly different from the null distribution
+
+    Based on Petukhov et al (2022): https://www.biorxiv.org/content/10.1101/2022.03.15.484475v1.full.pdf
+
+    Parameters
+    ----------
+    distances : square matrix
+        Matrix of distances between samples
+    conditions : array-like
+        Vector with the same length as `distances` containing a categorical variable
+    control_level
+        Value of `conditions` that should be used as a control group
+    normalization_type : Literal["total", "shift", "var"]
+        Type of normalization to use. In the text below, "case" means enything that is not a control group.
+        - total: normalize distances between control and case groups to the median of within-control group distances
+        - shift: normalize distances between control and case groups to the average of within-control and within-case group median distances
+        - var: normalize distances within case group to the median of within-control group distances
+    n_bootstraps : int = 1000
+        Number of bootstrap iterations to use
+    trimmed_fraction : float = 0.2
+        Fraction of the most extreme values to remove from the distribution
+    compare_by_difference : bool = True
+        If True, normalization is defined as difference (as in the original paper). Otherwise, it is defined as a ratio
+    """
     normalized_distances = _get_normalized_distances(
         distances, conditions, control_level, normalization_type, compare_by_difference
     )
@@ -85,7 +166,7 @@ def test_distances_significance(
     return normalized_distances, real_statistic, pvalue
 
 
-def predict_knn(distances, y_true, n_neighbors: int = 3, task="classification"):
+def predict_knn(distances, y_true, n_neighbors: int = 3, task: _PREDICTION_TASKS = "classification"):
     """Predict values of `y_true` using K-nearest neighbors
 
     Parameters
@@ -95,13 +176,17 @@ def predict_knn(distances, y_true, n_neighbors: int = 3, task="classification"):
     y_true : array-like
         Vector with the same length as `distances` containing values for prediction
     n_neighbors : int = 3
-        Number of neighbors to use for classification
-    task : str = "classification"
+        Number of neighbors to use for prediction
+    task : Literal["classification", "regression", "ranking"]
+        Type of prediction task:
+        - classification: predict class labels
+        - regression: predict continuous values
+        - ranking: predict ranks of the values. Currently, formulated as a regression task
 
     Returns
     -------
     y_predicted : array-like
-        Predicted values of `target` for samples with known values
+        Predicted values of `target` for samples with known values of `y_true`
     """
     from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 
@@ -123,7 +208,26 @@ def predict_knn(distances, y_true, n_neighbors: int = 3, task="classification"):
 
 
 def evaluate_prediction(y_true, y_pred, task):
-    """Evaluate how well `y_pred` predicts `y_true`"""
+    """Evaluate how well `y_pred` predicts `y_true`
+
+    Parameters
+    ----------
+    y_true : array-like
+        Vector with the values of a feature
+    y_pred : array-like
+        Vector with the predicted values of a feature
+    task : Literal["classification", "regression", "ranking"]
+        Type of prediction task. See documentation of `predict_knn` for more information
+
+    Returns
+    -------
+    result : dict
+        Result of evaluation with the following keys:
+        - score: score of the prediction
+        - metric: name of the metric used for evaluation. The following metrics are currently used:
+            - f1_macro_calibrated: F1 score for classification task. Calibrated to have value 0 for random prediction and 1 for perfect prediction
+            - spearman_r: Spearman correlation for regression and ranking tasks
+    """
     from scipy.stats import spearmanr
     from sklearn.metrics import f1_score
 
@@ -186,8 +290,46 @@ def _filter_missing(distances, target):
     return distances, target[not_empty_values]
 
 
-def evaluate_representation(distances, target, method="knn", **parameters):
-    """Evaluate representation of `target` for the given distance matrix"""
+def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "knn", **parameters):
+    """Evaluate representation of `target` for the given distance matrix
+
+    Parameters
+    ----------
+    distances : square matrix
+        Matrix of distances between samples
+    target : array-like
+        Vector with the values of a feature for each sample
+    method : Literal["knn", "distances", "proportions", "silhouette"]
+        Method to use for evaluation:
+        - knn: predict values of `target` using K-nearest neighbors and evaluate the prediction
+        - distances: test if distances between samples are significantly different from the null distribution
+        - proportions: test if distribution of `target` differs between groups (e.g. clusters)
+        - silhouette: calculate silhouette score for the given distances
+    parameters : dict
+        Parameters for the evaluation method. The following parameters are used:
+        - knn:
+            - n_neighbors: number of neighbors to use for prediction
+            - task: type of prediction task. One of "classification", "regression", "ranking". See documentation of `predict_knn` for more information
+        - distances:
+            - control_level: value of `target` that should be used as a control group
+            - normalization_type: type of normalization to use. One of "total", "shift", "var". See documentation of `test_distances_significance` for more information
+            - n_bootstraps: number of bootstrap iterations to use
+            - trimmed_fraction: fraction of the most extreme values to remove from the distribution
+            - compare_by_difference: if True, normalization is defined as difference (as in the original paper). Otherwise, it is defined as a ratio
+        - proportions:
+            - groups: groups (e.g. cluster numbers) of the observations
+
+    Returns
+    -------
+    result : dict
+        Result of evaluation with the following keys:
+        - score: a number evaluating the representation. The higher the better
+        - metric: name of the metric used for evaluation
+        - n_unique: number of unique values in `target`
+        - n_observations: number of observations used for evaluation. Can be different for different targets, even within one dataset (because of NAs)
+        - method: name of the method used for evaluation
+        There are other optional keys depending on the method used for evaluation.
+    """
     distances, target = _filter_missing(distances, target)
 
     if method == "knn":
@@ -213,5 +355,6 @@ def evaluate_representation(distances, target, method="knn", **parameters):
 
     result["n_unique"] = len(np.unique(target))
     result["n_observations"] = len(target)  # Without missing values this number can change between features
+    result["method"] = method
 
     return result
