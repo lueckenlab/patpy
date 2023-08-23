@@ -430,7 +430,7 @@ class PatientsRepresentationMethod:
         from patient_representation.tl import evaluate_representation
 
         if metadata is None:
-            metadata = self._extract_metadata()
+            metadata = self._extract_metadata([target])
 
         return evaluate_representation(self.calculate_distance_matrix(), metadata[target], method, **parameters)
 
