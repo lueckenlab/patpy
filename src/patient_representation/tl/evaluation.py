@@ -203,7 +203,7 @@ def predict_knn(distances, y_true, n_neighbors: int = 3, task: _PREDICTION_TASKS
     return knn.predict(distances)
 
 
-def evaluate_prediction(y_true, y_pred, task):
+def evaluate_prediction(y_true, y_pred, task, **parameters):
     """Evaluate how well `y_pred` predicts `y_true`
 
     Parameters
