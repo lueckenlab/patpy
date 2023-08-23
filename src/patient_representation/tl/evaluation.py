@@ -1,12 +1,8 @@
-from typing import Literal
-
 import numpy as np
 import pandas as pd
 from scipy.stats import trim_mean
 
-_NORMALIZATION_TYPES = Literal["total", "shift", "var"]
-_PREDICTION_TASKS = Literal["classification", "regression", "ranking"]
-_EVALUATION_METHODS = Literal["knn", "distances", "proportions", "silhouette"]
+from patient_representation.tl._types import _EVALUATION_METHODS, _NORMALIZATION_TYPES, _PREDICTION_TASKS
 
 
 def _upper_diagonal(matrix):
