@@ -513,7 +513,7 @@ class PatientsRepresentationMethod:
         for col, task in zip(metadata_columns, tasks):
             result = self.evaluate_representation(target=col, method=method, metadata=metadata, task=task)
             results.append(
-                col, result["score"], result["metric"], result["n_unique"], result["n_observations"], result["method"]
+                (col, result["score"], result["metric"], result["n_unique"], result["n_observations"], result["method"])
             )
 
         results = pd.DataFrame(results, index=metadata_columns, columns=result_cols)
