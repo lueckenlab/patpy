@@ -8,6 +8,7 @@ import scipy
 import seaborn as sns
 
 from patient_representation.pp import filter_small_cell_types, filter_small_samples
+from patient_representation.tl._types import _EVALUATION_METHODS
 
 
 def prepare_data_for_phemd(adata, sample_col, n_top_var_genes: int = 100):
@@ -193,7 +194,7 @@ class PatientsRepresentationMethod:
         self.samples_adata = None
 
     # fit-like method: save data and process it
-    def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
+    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Prepare adata for the analysis, filter cell types and samples with too few observations
 
         Parameters
@@ -388,53 +389,50 @@ class PatientsRepresentationMethod:
 
         return axes
 
-    def evaluate_representation(self, method_name: str, columns: list, tasks: list, n_neighbors=3):
-        """Run prediction of `columns` for patient representation methods
+    def evaluate_representation(self, target, method: _EVALUATION_METHODS = "knn", metadata=None, **parameters):
+        """Evaluate representation of `target` for the given distance matrix
 
         Parameters
         ----------
-        pat_rep_method : PatientRepresentationMethod
-            A trained class instance of a patient representation method
-        method_name : str
-            Name of the method to dispay the results
-        columns : list
-            Columns from metadata to predict
-        tasks : list
-            Prediction tasks (classification, ranking or regression) for each column
-        n_neighbors : int = 3
-            Number of neighbors to use for KNN algorithm
+        target : "str"
+            A patient covariate to evaluate representation for
+        method : Literal["knn", "distances", "proportions", "silhouette"]
+            Method to use for evaluation:
+            - knn: predict values of `target` using K-nearest neighbors and evaluate the prediction
+            - distances: test if distances between samples are significantly different from the null distribution
+            - proportions: test if distribution of `target` differs between groups (e.g. clusters)
+            - silhouette: calculate silhouette score for the given distances
+        parameters : dict
+            Parameters for the evaluation method. The following parameters are used:
+            - knn:
+                - n_neighbors: number of neighbors to use for prediction
+                - task: type of prediction task. One of "classification", "regression", "ranking". See documentation of `predict_knn` for more information
+            - distances:
+                - control_level: value of `target` that should be used as a control group
+                - normalization_type: type of normalization to use. One of "total", "shift", "var". See documentation of `test_distances_significance` for more information
+                - n_bootstraps: number of bootstrap iterations to use
+                - trimmed_fraction: fraction of the most extreme values to remove from the distribution
+                - compare_by_difference: if True, normalization is defined as difference (as in the original paper). Otherwise, it is defined as a ratio
+            - proportions:
+                - groups: groups (e.g. cluster numbers) of the observations
 
         Returns
         -------
-        results : pd.DataFrame
-            Table with columns "method", "column", "task", "n_samples", "metric", "score"
+        result : dict
+            Result of evaluation with the following keys:
+            - score: a number evaluating the representation. The higher the better
+            - metric: name of the metric used for evaluation
+            - n_unique: number of unique values in `target`
+            - n_observations: number of observations used for evaluation. Can be different for different targets, even within one dataset (because of NAs)
+            - method: name of the method used for evaluation
+            There are other optional keys depending on the method used for evaluation.
         """
-        from scipy.stats import spearmanr
-        from sklearn.metrics import f1_score
+        from patient_representation.tl import evaluate_representation
 
-        results = []
-        result_cols = ["method", "column", "task", "n_samples", "metric", "score"]
+        if metadata is None:
+            metadata = self._extract_metadata([target])
 
-        for col, task in zip(columns, tasks):
-            # Change ranking to classification for method to work
-            prediction_task = task if task != "ranking" else "classification"
-            true_target, predicted_target = self.predict_metadata(
-                target=col, task=prediction_task, n_neighbors=n_neighbors
-            )
-            n = len(true_target)
-
-            if task == "classification":
-                score = f1_score(y_true=true_target, y_pred=predicted_target, average="macro")
-                metric = "f1_macro"
-            elif task == "regression" or task == "ranking":
-                score = spearmanr(true_target, predicted_target).statistic
-                metric = "spearman_r"
-            else:
-                raise ValueError(f"{task} is not valid task")
-
-            results.append([method_name, col, task, n, metric, score])
-
-        return pd.DataFrame(results, columns=result_cols)
+        return evaluate_representation(self.calculate_distance_matrix(), metadata[target], method, **parameters)
 
     def predict_metadata(self, target, metadata=None, n_neighbors: int = 3, task="classification"):
         """Predict classes from metadata column `target` for samples using K-Nearest Neighbors classifier
@@ -483,7 +481,13 @@ class PatientsRepresentationMethod:
         return y_true[is_class_known], knn.predict(distances)
 
     def plot_metadata_distribution(
-        self, method_name: str, metadata_columns: list[str], tasks: list[str], embedding: str = "UMAP"
+        self,
+        metadata_columns: list[str],
+        tasks: list[str],
+        method: _EVALUATION_METHODS = "knn",
+        embedding: str = "UMAP",
+        metadata=None,
+        metric_threshold=0.4,
     ):
         """Predict metadata columns, and plot embeddings colorised by metadata values
 
@@ -491,26 +495,41 @@ class PatientsRepresentationMethod:
         ----------
         metadata_columns : list
             List of metadata columns to show
-        method_name : str
-            Name of the method to dispay the results
         tasks : list
             Tasks for each metadata column (classification, ranking or regression). Can be one string for all columns.
+        method : Literal["knn", "distances", "proportions", "silhouette"]
+            Method to use for evaluation. See documentation of `evaluate_representation` for more information
         embedding : str = "UMAP"
             Embedding to use for plotting
+        metric_threshold : float = 0.3
+            Results with lower values than this metric will not be displayed
         """
         if isinstance(tasks, str):
             tasks = [tasks] * len(metadata_columns)
 
-        results = self.evaluate_representation(method_name=method_name, columns=metadata_columns, tasks=tasks)
+        result_cols = ("feature", "score", "metric", "n_unique", "n_observations", "method")
+        results = []
 
+        for col, task in zip(metadata_columns, tasks):
+            result = self.evaluate_representation(target=col, method=method, metadata=metadata, task=task)
+            results.append(
+                (col, result["score"], result["metric"], result["n_unique"], result["n_observations"], result["method"])
+            )
+
+        results = pd.DataFrame(results, index=metadata_columns, columns=result_cols)
         results = results.sort_values("score", ascending=False)
 
         # Plot results from the best to the worst
         for _, row in results.iterrows():
-            col = row["column"]
+            if row["score"] < metric_threshold:
+                break
+
+            col = row["feature"]
             ax = self.plot_embedding(metadata_cols=[col], method=embedding)
             ax.set_title(f'{col}: {round(row["score"], 4)}')
             ax.legend(loc=(1.05, 0))
+
+        return results
 
 
 class MrVI(PatientsRepresentationMethod):
@@ -540,7 +559,7 @@ class MrVI(PatientsRepresentationMethod):
         self.patient_representations = None
         self.max_epochs = max_epochs
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
+    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Train MrVI model
 
         Parameters
@@ -610,7 +629,9 @@ class MrVI(PatientsRepresentationMethod):
 
         print("Calculating cells representations")
         # This is a tensor of shape (n_cells, n_samples, n_latent_variables)
-        cell_sample_representations = self.model.get_local_sample_representation(return_distances=False)
+        cell_sample_representations = self.model.get_local_sample_representation(
+            batch_size=batch_size, return_distances=False
+        )
         self.patient_representations = np.zeros(shape=(len(self.samples), cell_sample_representations.shape[2]))
 
         print("Calculating samples representations")
@@ -622,13 +643,9 @@ class MrVI(PatientsRepresentationMethod):
         sample_sample_distances = np.zeros(shape=(len(self.samples), len(self.samples)))
 
         print("Calculating distance matrix between samples")
-        for i in range(0, self.adata[cells_mask].shape[0], batch_size):
-            batch_cells = self.adata[i : i + batch_size]
-            batch_samples_distances = self.model.get_local_sample_representation(batch_cells, return_distances=True)
-            sample_sample_distances += batch_samples_distances.sum(axis=0)
-
-        # Convert sum of distances to mean
-        sample_sample_distances /= len(self.adata[cells_mask])
+        sample_sample_distances = self.model.get_local_sample_representation(
+            self.adata[cells_mask], batch_size=batch_size, return_distances=True
+        ).mean(axis=0)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = sample_sample_distances
 
@@ -666,7 +683,7 @@ class WassersteinTSNE(PatientsRepresentationMethod):
         self.model = None
         self.distances_model = None
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
+    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Set up Gaussian Wasserstein Distance model"""
         import WassersteinTSNE as WT
 
@@ -757,7 +774,7 @@ class PILOT(PatientsRepresentationMethod):
         self.annotation = None
         self.patient_representations = None
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
+    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Set up PILOT model"""
         import PILOT as pt
 
@@ -998,7 +1015,7 @@ class SCellBOW(PatientsRepresentationMethod):
         self.n_iter = n_iter
         self.patient_representations = None
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
+    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Pretrain SCellBOW model"""
         import SCellBOW as sb
 
@@ -1086,7 +1103,7 @@ class SCPoli(PatientsRepresentationMethod):
         self.pretraining_epochs = pretraining_epochs
         self.eta = eta
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 300, cluster_size_threshold: int = 5):
+    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Set up scPoli model"""
         from scarches.models.scpoli import scPoli
 

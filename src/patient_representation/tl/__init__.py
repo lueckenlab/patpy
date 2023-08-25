@@ -12,3 +12,4 @@ from .basic import (
     describe_metadata,
     prepare_data_for_phemd,
 )
+from .evaluation import evaluate_representation
