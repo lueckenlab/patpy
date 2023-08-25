@@ -43,13 +43,13 @@ def _get_normalized_distances(
 
     between_distances = distances[is_control][:, is_case].flatten()
     d_control = _upper_diagonal(distances[is_control][:, is_control])
+    d_case = _upper_diagonal(distances[is_case][:, is_case])
 
     if normalization_type == "total":
         comparison_group = between_distances
         compare_to = np.median(d_control)
 
     elif normalization_type == "shift":
-        d_case = _upper_diagonal(distances[is_case][:, is_case])
         comparison_group = between_distances
         compare_to = 0.5 * (np.median(d_case) + np.median(d_control))
 
