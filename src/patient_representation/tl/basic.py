@@ -774,26 +774,28 @@ class PILOT(PatientsRepresentationMethod):
         self.annotation = None
         self.patient_representations = None
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
-        """Set up PILOT model"""
-        import PILOT as pt
+    def calculate_distance_matrix(self, force: bool = False, **pilot_parameters):
+        """Calculate matrix of distances between samples
 
-        super().prepare_anndata(
-            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
-        )
+        Parameters
+        ----------
+        force : bool = False
+            If True, recalculate distances
+        pilot_parameters : dict
+            Parameters to pass to pilot.tl.wasserstein_distance. Possible keys and default values are:
+            - metric = 'cosine'
+            - regulizer = 0.2
+            - normalization = True
+            - regularized = 'unreg'
+            - reg = 0.1
+            - res = 0.01
+            - steper = 0.01
+            For parameters description, refer to the PILOT documentation
 
-        self.pc, self.annotation, self.results_dir = pt.extract_data_anno_scRNA_from_h5ad(
-            self.adata,
-            emb_matrix=self.layer,
-            clusters_col=self.cells_type_key,
-            sample_col=self.sample_key,
-            status=self.patient_state_col,
-            name_dataset=self.dataset_name,
-        )
-
-    def calculate_distance_matrix(self, c_reg: float = 10, force: bool = False):
-        """Calculate matrix of distances between samples"""
-        import matplotlib.pyplot as plt
+        Returns
+        -------
+        Matrix of distances between samples
+        """
         import PILOT as pt
 
         distances = super().calculate_distance_matrix(force=force)
@@ -801,21 +803,20 @@ class PILOT(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        cluster_representations = pt.Cluster_Representations(
-            self.annotation, regulizer=c_reg, regularization=(c_reg != 0)
+        # This runs all the calculations and adds several keys to .uns
+        pt.tl.wasserstein_distance(
+            self.adata,
+            clusters_col=self.cells_type_key,
+            sample_col=self.sample_key,
+            status=self.patient_state_col,
+            emb_matrix=self.layer,
+            data_type="scRNA",
+            **pilot_parameters,
         )
 
-        self.patient_representations = np.array(list(cluster_representations.values()))
+        self.patient_representations = pd.DataFrame(self.adata.uns["proportions"]).loc[self.samples].to_numpy()
 
-        cell_types_distances = pt.cost_matrix(self.annotation, self.pc, self.results_dir, cell_col=0)
-
-        distances = pt.wasserstein_d(
-            cluster_representations,
-            cell_types_distances / cell_types_distances.max(),
-            regularized="unreg",
-            path=self.results_dir,
-        )
-
+        distances = self.adata.uns["EMD_df"].loc[self.samples, self.samples].to_numpy()
         distances = self._make_matrix_symmetric(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
@@ -823,12 +824,8 @@ class PILOT(PatientsRepresentationMethod):
             "sample_key": self.sample_key,
             "cells_type_key": self.cells_type_key,
             "patient_state_col": self.patient_state_col,
-            "c_reg": c_reg,
+            **pilot_parameters,
         }
-
-        # PILOT draws several plots and changes global rcParams during running
-        # This line returns plotting params to defaults
-        plt.style.use("default")
 
         return distances
 
