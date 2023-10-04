@@ -814,7 +814,10 @@ class PILOT(PatientsRepresentationMethod):
             **pilot_parameters,
         )
 
-        self.patient_representations = pd.DataFrame(self.adata.uns["proportions"]).loc[self.samples].to_numpy()
+        # Matrix of cell type proportions for each sample
+        self.patient_representations = (
+            pd.DataFrame(self.adata.uns["proportions"], index=self.cell_types).T.loc[self.samples].to_numpy()
+        )
 
         distances = self.adata.uns["EMD_df"].loc[self.samples, self.samples].to_numpy()
         distances = self._make_matrix_symmetric(distances)
