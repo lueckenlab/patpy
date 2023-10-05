@@ -6,7 +6,7 @@ import scanpy as sc
 import scipy
 import seaborn as sns
 
-from patient_representation.pp import filter_small_cell_types, filter_small_samples
+from patient_representation.pp import filter_small_cell_types, filter_small_samples, subsample
 from patient_representation.tl._types import _EVALUATION_METHODS
 
 
@@ -1151,5 +1151,82 @@ class SCPoli(PatientsRepresentationMethod):
             "pretraining_epochs": self.pretraining_epochs,
             "eta": self.eta,
         }
+
+        return distances
+
+
+class PhEMD(PatientsRepresentationMethod):
+    """Phenotypic Earth Mover's Distance. Source: https://pubmed.ncbi.nlm.nih.gov/31932777/
+
+    Python implementation source: https://github.com/atong01/MultiscaleEMD/blob/main/comparison/phemd.py
+    """
+
+    DISTANCES_UNS_KEY = "X_phemd"
+
+    def __init__(self, sample_key, cells_type_key, layer=None, n_clusters: int = 8, seed=67):
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
+
+        self.n_clusters = n_clusters
+        self.encoded_labels = None
+
+    def prepare_anndata(
+        self,
+        adata,
+        sample_size_threshold: int = 1,
+        cluster_size_threshold: int = 0,
+        subset_fraction: float = None,
+        subset_n_obs: int = None,
+        subset_min_obs_per_sample: int = 500,
+    ):
+        """Prepare anndata for PhEMD calculation. As computation is very slow, using subset of cells is recommended
+
+        Parameters
+        ----------
+        adata : AnnData
+            Annotated data matrix
+        sample_size_threshold : int = 1
+            Minimum number of cells in a sample
+        cluster_size_threshold : int = 0
+            Minimum number of cells in a cluster
+        subset_fraction : float = None
+            Fraction of cells from each sample to use for PhEMD calculation
+        subset_n_obs : int = None
+            Number of cells from each sample to use for PhEMD calculation. Ignored if `subset_fraction` is set
+        subset_min_obs_per_sample : int = 500
+            Minimum number of cells per sample to use for PhEMD calculation
+        """
+        super().prepare_anndata(adata, sample_size_threshold, cluster_size_threshold)
+
+        if subset_fraction is not None or subset_n_obs is not None:
+            self.adata = subsample(
+                self.adata,
+                obs_category_col=self.cells_type_key,
+                fraction=subset_fraction,
+                n_obs=subset_n_obs,
+                min_obs_per_category=subset_min_obs_per_sample,
+            )
+
+        # Convert labels to a format required by phemd implementation
+        # The labels will be one-hot encoded and divided by the number of samples
+        sc_labels_df = pd.get_dummies(self.adata.obs[self.cells_type_key])
+        self.samples = sc_labels_df.columns
+        self.encoded_labels = sc_labels_df.to_numpy()
+        self.encoded_labels = self.encoded_labels / self.encoded_labels.sum(axis=0)
+
+    def calculate_distance_matrix(self, force: bool = False):
+        """Calculate distances between samples"""
+        distances = super().calculate_distance_matrix(force=force)
+
+        if distances is not None:
+            return distances
+
+        distances = phemd(self._get_data(), self.encoded_labels, n_clusters=self.n_clusters, random_state=self.seed)
+
+        self.adata.uns["phemd_parameters"] = {
+            "sample_key": self.sample_key,
+            "cells_type_key": self.cells_type_key,
+            "n_clusters": self.n_clusters,
+        }
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
 
         return distances
