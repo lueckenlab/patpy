@@ -153,3 +153,50 @@ def filter_small_cell_types(adata, sample_key, cells_type_key, cluster_size_thre
     adata = adata[adata.obs[cells_type_key].isin(filtered_cell_types)].copy()
 
     return adata
+
+
+def subsample(adata, obs_category_col: str, min_samples_per_category: int, fraction=None, n_obs=None):
+    """Subsample cells from each category in `obs_category_col` to have at least `min_samples_per_category` cells.
+
+    Parameters
+    ----------
+    adata : AnnData
+        Annotated data object containing cells.
+    obs_category_col : str
+        Name of the column in `adata.obs` containing categories to subsample.
+    min_samples_per_category : int
+        Minimum number of cells per category.
+    fraction : float or None
+        Fraction of cells to take from each category. If `None`, `n_obs` must be set.
+    n_obs : int or None
+        Number of cells to take from each category. If `None`, `fraction` must be set.
+
+    Returns
+    -------
+    AnnData
+        Subsampled AnnData object.
+    """
+    subsample_idxs = []
+
+    assert fraction is None or 0 < fraction <= 1, "`fraction` must be a number between 0 and 1"
+    if fraction is None:
+        assert n_obs is not None and int(n_obs), "`n_obs` must be an integer number or `fraction` must be set"
+
+    for level in adata.obs[obs_category_col].unique():
+        level_cells = adata.obs[obs_category_col] == level
+        obs_per_level = sum(level_cells)
+        level_idxs = np.where(level_cells)[0]
+
+        if obs_per_level <= min_samples_per_category:
+            # Take all cells from this level
+            subsample_idxs.extend(level_idxs)
+        else:
+            if fraction is not None:
+                n_cells = int(fraction * obs_per_level)
+            else:
+                n_cells = int(n_obs)
+
+            selected_cells_idxs = np.random.choice(level_idxs, size=n_cells, replace=False)
+            subsample_idxs.extend(selected_cells_idxs)
+
+    return adata[subsample_idxs]
