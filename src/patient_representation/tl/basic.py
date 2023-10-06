@@ -1208,7 +1208,7 @@ class PhEMD(PatientsRepresentationMethod):
 
         # Convert labels to a format required by phemd implementation
         # The labels will be one-hot encoded and divided by the number of samples
-        sc_labels_df = pd.get_dummies(self.adata.obs[self.cells_type_key])
+        sc_labels_df = pd.get_dummies(self.adata.obs[self.sample_key])
         self.samples = sc_labels_df.columns
         self.encoded_labels = sc_labels_df.to_numpy()
         self.encoded_labels = self.encoded_labels / self.encoded_labels.sum(axis=0)
