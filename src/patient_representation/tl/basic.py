@@ -58,7 +58,7 @@ def describe_metadata(metadata: pd.DataFrame) -> None:
     print("Possibly, categorical columns:", categorical_cols)
 
 
-def phemd(data, labels, n_clusters=8, random_state=42):
+def phemd(data, labels, n_clusters=8, random_state=42, n_jobs=-1):
     """Compute the PhEMD between distributions. As specified in Chen et al. 2019.
 
     Source: https://github.com/atong01/MultiscaleEMD/blob/main/comparison/phemd.py
@@ -77,7 +77,7 @@ def phemd(data, labels, n_clusters=8, random_state=42):
     from sklearn.cluster import KMeans
     from sklearn.metrics import pairwise_distances
 
-    phate_op = phate.PHATE(random_state=random_state)
+    phate_op = phate.PHATE(random_state=random_state, n_jobs=n_jobs)
     phate_op.fit(data)
     cluster_op = KMeans(n_clusters, random_state=random_state)
     cluster_ids = cluster_op.fit_predict(phate_op.diff_potential)
@@ -1213,14 +1213,16 @@ class PhEMD(PatientsRepresentationMethod):
         self.encoded_labels = sc_labels_df.to_numpy()
         self.encoded_labels = self.encoded_labels / self.encoded_labels.sum(axis=0)
 
-    def calculate_distance_matrix(self, force: bool = False):
+    def calculate_distance_matrix(self, force: bool = False, n_jobs=-1):
         """Calculate distances between samples"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
             return distances
 
-        distances = phemd(self._get_data(), self.encoded_labels, n_clusters=self.n_clusters, random_state=self.seed)
+        distances = phemd(
+            self._get_data(), self.encoded_labels, n_clusters=self.n_clusters, random_state=self.seed, n_jobs=n_jobs
+        )
 
         self.adata.uns["phemd_parameters"] = {
             "sample_key": self.sample_key,
