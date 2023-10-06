@@ -3,6 +3,7 @@ from .basic import (
     CellTypePseudobulk,
     CellTypesComposition,
     MrVI,
+    PhEMD,
     RandomVector,
     SCellBOW,
     SCPoli,
