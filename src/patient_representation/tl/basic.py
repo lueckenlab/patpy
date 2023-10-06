@@ -1,5 +1,4 @@
 import warnings
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -7,53 +6,8 @@ import scanpy as sc
 import scipy
 import seaborn as sns
 
-from patient_representation.pp import filter_small_cell_types, filter_small_samples
+from patient_representation.pp import filter_small_cell_types, filter_small_samples, subsample
 from patient_representation.tl._types import _EVALUATION_METHODS
-
-
-def prepare_data_for_phemd(adata, sample_col, n_top_var_genes: int = 100):
-    """Convert the expression data to the input format of PhEMD
-
-    Returns
-    -------
-    all_expression_data : list
-        Expression data of G genes for the cells of each of S samples
-    all_genes : list[str]
-        Names of the genes for the expression data
-    selected_genes : list[str]
-        Subset of genes to use
-    samples_names : list[str]
-        List of S names for the samples
-    """
-    top_variance = adata.var["variances"].sort_values(ascending=False)[:n_top_var_genes]
-    selected_genes = top_variance.index
-
-    expression_data = adata.X.toarray()
-    samples_names = adata.obs[sample_col]
-
-    return expression_data, adata.var_names, selected_genes, samples_names
-
-
-def convert_cell_types_to_phemd_format(
-    adata, cell_type_col, sample_col, output_dir="./", cell_types=None, n_top_var_genes=100
-):
-    """Converts `adata` to the tables required by PhEMD and saves them to `output_dir`"""
-    if cell_types is None:
-        cell_types = adata.obs[cell_type_col].unique()
-
-    for cell_type in cell_types:
-        cell_type_adata = adata[adata.obs[cell_type_col] == cell_type]
-        all_expression_data, all_genes, selected_genes, samples_names = prepare_data_for_phemd(
-            cell_type_adata, sample_col, n_top_var_genes
-        )
-
-        cell_type_dir = Path(output_dir) / cell_type
-        cell_type_dir.mkdir(exist_ok=True)
-
-        pd.DataFrame(all_expression_data).to_csv(cell_type_dir / "expression.csv", index=False, header=False)
-        pd.DataFrame(all_genes).to_csv(cell_type_dir / "all_genes.csv", index=False, header=False)
-        pd.DataFrame(selected_genes).to_csv(cell_type_dir / "selected_genes.csv", index=False, header=False)
-        pd.DataFrame(samples_names).to_csv(cell_type_dir / "samples.csv", index=False, header=False)
 
 
 def create_colormap(df, col, palette="Spectral"):
@@ -102,6 +56,54 @@ def describe_metadata(metadata: pd.DataFrame) -> None:
 
     print("Possibly, numerical columns:", numeric_cols)
     print("Possibly, categorical columns:", categorical_cols)
+
+
+def phemd(data, labels, n_clusters=8, random_state=42):
+    """Compute the PhEMD between distributions. As specified in Chen et al. 2019.
+
+    Source: https://github.com/atong01/MultiscaleEMD/blob/main/comparison/phemd.py
+
+    Args:
+        data: 2-D array N x F points by features.
+        labels: 2-D array N x M points by distributions.
+
+    Returns
+    -------
+        distance_matrix: 2-D M x M array with each cell representing the
+        distance between each distribution of points.
+    """
+    import ot
+    import phate
+    from sklearn.cluster import KMeans
+    from sklearn.metrics import pairwise_distances
+
+    phate_op = phate.PHATE(random_state=random_state)
+    phate_op.fit(data)
+    cluster_op = KMeans(n_clusters, random_state=random_state)
+    cluster_ids = cluster_op.fit_predict(phate_op.diff_potential)
+    cluster_centers = np.array(
+        [
+            np.average(
+                data[(cluster_ids == c)],
+                axis=0,
+                weights=labels[cluster_ids == c].sum(axis=1),
+            )
+            for c in range(n_clusters)
+        ]
+    )
+    # Compute the cluster histograms C x M
+    cluster_counts = np.array([labels[(cluster_ids == c)].sum(axis=0) for c in range(n_clusters)])
+    cluster_dists = np.ascontiguousarray(pairwise_distances(cluster_centers, metric="euclidean"))
+
+    N, M = labels.shape
+    assert data.shape[0] == N
+    dists = np.empty((M, M))
+    for i in range(M):
+        for j in range(i, M):
+            weights_a = np.ascontiguousarray(cluster_counts[:, i])
+            weights_b = np.ascontiguousarray(cluster_counts[:, j])
+            dists[i, j] = dists[j, i] = ot.emd2(weights_a, weights_b, cluster_dists)
+    return dists
 
 
 class PatientsRepresentationMethod:
@@ -1149,5 +1151,82 @@ class SCPoli(PatientsRepresentationMethod):
             "pretraining_epochs": self.pretraining_epochs,
             "eta": self.eta,
         }
+
+        return distances
+
+
+class PhEMD(PatientsRepresentationMethod):
+    """Phenotypic Earth Mover's Distance. Source: https://pubmed.ncbi.nlm.nih.gov/31932777/
+
+    Python implementation source: https://github.com/atong01/MultiscaleEMD/blob/main/comparison/phemd.py
+    """
+
+    DISTANCES_UNS_KEY = "X_phemd"
+
+    def __init__(self, sample_key, cells_type_key, layer=None, n_clusters: int = 8, seed=67):
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
+
+        self.n_clusters = n_clusters
+        self.encoded_labels = None
+
+    def prepare_anndata(
+        self,
+        adata,
+        sample_size_threshold: int = 1,
+        cluster_size_threshold: int = 0,
+        subset_fraction: float = None,
+        subset_n_obs: int = None,
+        subset_min_obs_per_sample: int = 500,
+    ):
+        """Prepare anndata for PhEMD calculation. As computation is very slow, using subset of cells is recommended
+
+        Parameters
+        ----------
+        adata : AnnData
+            Annotated data matrix
+        sample_size_threshold : int = 1
+            Minimum number of cells in a sample
+        cluster_size_threshold : int = 0
+            Minimum number of cells in a cluster
+        subset_fraction : float = None
+            Fraction of cells from each sample to use for PhEMD calculation
+        subset_n_obs : int = None
+            Number of cells from each sample to use for PhEMD calculation. Ignored if `subset_fraction` is set
+        subset_min_obs_per_sample : int = 500
+            Minimum number of cells per sample to use for PhEMD calculation
+        """
+        super().prepare_anndata(adata, sample_size_threshold, cluster_size_threshold)
+
+        if subset_fraction is not None or subset_n_obs is not None:
+            self.adata = subsample(
+                self.adata,
+                obs_category_col=self.cells_type_key,
+                fraction=subset_fraction,
+                n_obs=subset_n_obs,
+                min_obs_per_category=subset_min_obs_per_sample,
+            )
+
+        # Convert labels to a format required by phemd implementation
+        # The labels will be one-hot encoded and divided by the number of samples
+        sc_labels_df = pd.get_dummies(self.adata.obs[self.sample_key])
+        self.samples = sc_labels_df.columns
+        self.encoded_labels = sc_labels_df.to_numpy()
+        self.encoded_labels = self.encoded_labels / self.encoded_labels.sum(axis=0)
+
+    def calculate_distance_matrix(self, force: bool = False):
+        """Calculate distances between samples"""
+        distances = super().calculate_distance_matrix(force=force)
+
+        if distances is not None:
+            return distances
+
+        distances = phemd(self._get_data(), self.encoded_labels, n_clusters=self.n_clusters, random_state=self.seed)
+
+        self.adata.uns["phemd_parameters"] = {
+            "sample_key": self.sample_key,
+            "cells_type_key": self.cells_type_key,
+            "n_clusters": self.n_clusters,
+        }
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
 
         return distances

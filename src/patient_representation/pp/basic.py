@@ -1,5 +1,52 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+
+
+def prepare_data_for_phemd(adata, sample_col, n_top_var_genes: int = 100):
+    """Convert the expression data to the input format of PhEMD (R implementation)
+
+    Returns
+    -------
+    all_expression_data : list
+        Expression data of G genes for the cells of each of S samples
+    all_genes : list[str]
+        Names of the genes for the expression data
+    selected_genes : list[str]
+        Subset of genes to use
+    samples_names : list[str]
+        List of S names for the samples
+    """
+    top_variance = adata.var["variances"].sort_values(ascending=False)[:n_top_var_genes]
+    selected_genes = top_variance.index
+
+    expression_data = adata.X.toarray()
+    samples_names = adata.obs[sample_col]
+
+    return expression_data, adata.var_names, selected_genes, samples_names
+
+
+def convert_cell_types_to_phemd_format(
+    adata, cell_type_col, sample_col, output_dir="./", cell_types=None, n_top_var_genes=100
+):
+    """Converts `adata` to the tables required by PhEMD (R implementation) and saves them to `output_dir`"""
+    if cell_types is None:
+        cell_types = adata.obs[cell_type_col].unique()
+
+    for cell_type in cell_types:
+        cell_type_adata = adata[adata.obs[cell_type_col] == cell_type]
+        all_expression_data, all_genes, selected_genes, samples_names = prepare_data_for_phemd(
+            cell_type_adata, sample_col, n_top_var_genes
+        )
+
+        cell_type_dir = Path(output_dir) / cell_type
+        cell_type_dir.mkdir(exist_ok=True)
+
+        pd.DataFrame(all_expression_data).to_csv(cell_type_dir / "expression.csv", index=False, header=False)
+        pd.DataFrame(all_genes).to_csv(cell_type_dir / "all_genes.csv", index=False, header=False)
+        pd.DataFrame(selected_genes).to_csv(cell_type_dir / "selected_genes.csv", index=False, header=False)
+        pd.DataFrame(samples_names).to_csv(cell_type_dir / "samples.csv", index=False, header=False)
 
 
 def calculate_compositional_metrics(adata, sample_key, composition_keys, normalize_to: int = 100) -> pd.DataFrame:
@@ -153,3 +200,50 @@ def filter_small_cell_types(adata, sample_key, cells_type_key, cluster_size_thre
     adata = adata[adata.obs[cells_type_key].isin(filtered_cell_types)].copy()
 
     return adata
+
+
+def subsample(adata, obs_category_col: str, min_samples_per_category: int, fraction=None, n_obs=None):
+    """Subsample cells from each category in `obs_category_col` to have at least `min_samples_per_category` cells.
+
+    Parameters
+    ----------
+    adata : AnnData
+        Annotated data object containing cells.
+    obs_category_col : str
+        Name of the column in `adata.obs` containing categories to subsample.
+    min_samples_per_category : int
+        Minimum number of cells per category.
+    fraction : float or None
+        Fraction of cells to take from each category. If `None`, `n_obs` must be set.
+    n_obs : int or None
+        Number of cells to take from each category. If `None`, `fraction` must be set.
+
+    Returns
+    -------
+    AnnData
+        Subsampled AnnData object.
+    """
+    subsample_idxs = []
+
+    assert fraction is None or 0 < fraction <= 1, "`fraction` must be a number between 0 and 1"
+    if fraction is None:
+        assert n_obs is not None and int(n_obs), "`n_obs` must be an integer number or `fraction` must be set"
+
+    for level in adata.obs[obs_category_col].unique():
+        level_cells = adata.obs[obs_category_col] == level
+        obs_per_level = sum(level_cells)
+        level_idxs = np.where(level_cells)[0]
+
+        if obs_per_level <= min_samples_per_category:
+            # Take all cells from this level
+            subsample_idxs.extend(level_idxs)
+        else:
+            if fraction is not None:
+                n_cells = int(fraction * obs_per_level)
+            else:
+                n_cells = int(n_obs)
+
+            selected_cells_idxs = np.random.choice(level_idxs, size=n_cells, replace=False)
+            subsample_idxs.extend(selected_cells_idxs)
+
+    return adata[subsample_idxs]
