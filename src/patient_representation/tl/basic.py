@@ -6,7 +6,7 @@ import scanpy as sc
 import scipy
 import seaborn as sns
 
-from patient_representation.pp import filter_small_cell_types, filter_small_samples, subsample
+from patient_representation.pp import filter_small_cell_types, filter_small_samples, is_count_data, subsample
 from patient_representation.tl._types import _EVALUATION_METHODS
 
 
@@ -578,6 +578,8 @@ class MrVI(PatientsRepresentationMethod):
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
 
+        assert is_count_data(self._get_data()), "`layer` must contain count data with integer numbers"
+
         mrvi.MrVI.setup_anndata(
             self.adata,
             sample_key=self.sample_key,
@@ -1114,6 +1116,8 @@ class SCPoli(PatientsRepresentationMethod):
         )
 
         self.adata = self._move_layer_to_X()
+
+        assert is_count_data(self.adata.X), "`layer` must contain count data with integer numbers"
 
         self.model = scPoli(
             adata=self.adata,
