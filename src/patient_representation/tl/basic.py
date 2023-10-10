@@ -1111,7 +1111,9 @@ class SCPoli(PatientsRepresentationMethod):
         self.pretraining_epochs = pretraining_epochs
         self.eta = eta
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
+    def prepare_anndata(
+        self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0, optimize_adata=True
+    ):
         """Set up scPoli model"""
         from scarches.models.scpoli import scPoli
 
@@ -1120,6 +1122,13 @@ class SCPoli(PatientsRepresentationMethod):
         )
 
         self.adata = self._move_layer_to_X()
+
+        if optimize_adata:
+            self.adata = sc.AnnData(
+                X=self.adata.X,
+                obs=self.adata.obs[[self.sample_key, self.cells_type_key]],
+                var_names=self.adata.var_names,
+            )
 
         assert is_count_data(self.adata.X), "`layer` must contain count data with integer numbers"
 
