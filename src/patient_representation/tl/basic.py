@@ -590,7 +590,9 @@ class MrVI(PatientsRepresentationMethod):
         self.model = mrvi.MrVI(self.adata, **self.model_params)
         self.model.train(max_epochs=self.max_epochs)
 
-    def calculate_distance_matrix(self, cells_mask=None, batch_size: int = 1000, force: bool = False):
+    def calculate_distance_matrix(
+        self, cells_mask=None, calculate_representations=False, batch_size: int = 1000, force: bool = False
+    ):
         """Return sample by sample distances matrix
 
         Parameters
@@ -598,6 +600,8 @@ class MrVI(PatientsRepresentationMethod):
         cells_mask : Iterable[bool] with the size identical to the number of cells
             Boolean vector which indicates what cells to take for the calculation of the distances matrix.
             Could for example indicate cells of a particular cell type
+        calculate_representations : bool = False
+            If True, calculate representations of samples and cells, otherwise only return distances matrix
         batch_size : int = 1000
             Number of cells in batch when calculating matrix of distances between samples
         force : bool = False
@@ -621,34 +625,34 @@ class MrVI(PatientsRepresentationMethod):
         # Make sure that batch size is between 1 and number of cells
         batch_size = np.clip(batch_size, 1, len(self.adata))
 
-        if cells_mask is None:  # Use all cells
-            cells_mask = np.ones(len(self.adata))
+        if calculate_representations:
+            if "X_mrvi_z" not in self.adata.obsm or force:
+                print("Calculating cells representation from layer Z")
+                self.adata.obsm["X_mrvi_z"] = self.model.get_latent_representation(give_z=True)
+            if "X_mrvi_u" not in self.adata.obsm or force:
+                print("Calculating cells representation from layer U")
+                self.adata.obsm["X_mrvi_u"] = self.model.get_latent_representation(give_z=False)
 
-        if "X_mrvi_z" not in self.adata.obsm or force:
-            print("Calculating cells representation from layer Z")
-            self.adata.obsm["X_mrvi_z"] = self.model.get_latent_representation(give_z=True)
-        if "X_mrvi_u" not in self.adata.obsm or force:
-            print("Calculating cells representation from layer U")
-            self.adata.obsm["X_mrvi_u"] = self.model.get_latent_representation(give_z=False)
+            print("Calculating cells representations")
+            # This is a tensor of shape (n_cells, n_samples, n_latent_variables)
+            cell_sample_representations = self.model.get_local_sample_representation(
+                batch_size=batch_size, return_distances=False
+            )
+            self.patient_representations = np.zeros(shape=(len(self.samples), cell_sample_representations.shape[2]))
 
-        print("Calculating cells representations")
-        # This is a tensor of shape (n_cells, n_samples, n_latent_variables)
-        cell_sample_representations = self.model.get_local_sample_representation(
-            batch_size=batch_size, return_distances=False
-        )
-        self.patient_representations = np.zeros(shape=(len(self.samples), cell_sample_representations.shape[2]))
-
-        print("Calculating samples representations")
-        # For a patient representation we will take centroid of cells of this sample
-        for i, sample in enumerate(self.samples):
-            sample_mask = self.adata.obs[self.sample_key] == sample
-            self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
+            print("Calculating samples representations")
+            # For a patient representation we will take centroid of cells of this sample
+            for i, sample in enumerate(self.samples):
+                sample_mask = self.adata.obs[self.sample_key] == sample
+                self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
 
         sample_sample_distances = np.zeros(shape=(len(self.samples), len(self.samples)))
 
         print("Calculating distance matrix between samples")
+        input_adata = self.adata if cells_mask is None else self.adata[cells_mask]
+
         sample_sample_distances = self.model.get_local_sample_representation(
-            self.adata[cells_mask], batch_size=batch_size, return_distances=True
+            input_adata, batch_size=batch_size, return_distances=True
         ).mean(axis=0)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = sample_sample_distances
