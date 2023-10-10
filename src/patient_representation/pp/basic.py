@@ -247,3 +247,13 @@ def subsample(adata, obs_category_col: str, min_samples_per_category: int, fract
             subsample_idxs.extend(selected_cells_idxs)
 
     return adata[subsample_idxs]
+
+
+def is_count_data(matrix, window_size=10000) -> bool:
+    """Ensure that `matrix` only contains integers"""
+    from scipy.sparse import issparse
+
+    if issparse(matrix):
+        return np.all(matrix[:window_size, :window_size].data % 1 == 0)
+
+    return np.all(matrix[:window_size, :window_size] % 1 == 0)

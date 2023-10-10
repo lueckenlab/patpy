@@ -5,6 +5,7 @@ from .basic import (
     convert_cell_types_to_phemd_format,
     filter_small_cell_types,
     filter_small_samples,
+    is_count_data,
     prepare_data_for_phemd,
     subsample,
 )
