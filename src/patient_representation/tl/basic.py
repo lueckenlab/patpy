@@ -645,20 +645,17 @@ class MrVI(PatientsRepresentationMethod):
         self.model = mrvi.MrVI(self.adata, **self.model_params)
         self.model.train(max_epochs=self.max_epochs)
 
-    def calculate_distance_matrix(
-        self, cells_mask=None, calculate_representations=False, batch_size: int = 1000, force: bool = False
-    ):
+    def calculate_distance_matrix(self, calculate_representations=False, batch_size: int = 1000, force: bool = False):
         """Return sample by sample distances matrix
 
         Parameters
         ----------
-        cells_mask : Iterable[bool] with the size identical to the number of cells
-            Boolean vector which indicates what cells to take for the calculation of the distances matrix.
-            Could for example indicate cells of a particular cell type
         calculate_representations : bool = False
             If True, calculate representations of samples and cells, otherwise only return distances matrix
         batch_size : int = 1000
             Number of cells in batch when calculating matrix of distances between samples
+        mc_samples : int = 10
+            Number of Monte Carlo samples to use for computing the local sample representation.
         force : bool = False
             If True, recalculate distances
 
