@@ -542,6 +542,61 @@ class MrVI(PatientsRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_mrvi_distances"
 
+    def _optimized_distances_calculation(self, batch_size=256, mc_samples: int = 10):
+        """Calculate pairwise distances between samples not storing large tensors in memory
+
+        This code is based on the following functions from MrVI:
+        1. https://github.com/YosefLab/mrvi/blob/d1934e4889bbf383e411d2d39558488e1568fb0c/mrvi/_model.py#L208
+        2. https://github.com/YosefLab/mrvi/blob/d1934e4889bbf383e411d2d39558488e1568fb0c/mrvi/_model.py#L187
+
+        However, it calculates the mean distance between samples instead of storing tensors of
+        representations and distances in memory. According to local tests, the result is the same
+        with a small numerical error (up to 4%).
+
+        Parameters
+        ----------
+        batch_size
+            Batch size to use for computing the local sample representation.
+        mc_samples
+            Number of Monte Carlo samples to use for computing the local sample representation.
+
+        Returns
+        -------
+        pairwise_dists : np.ndarray
+            Pairwise distances between samples
+        """
+        import torch
+        from mrvi._constants import MRVI_REGISTRY_KEYS
+        from sklearn.metrics import pairwise_distances
+        from tqdm import tqdm
+
+        with torch.no_grad():
+            data_loader = self.model._make_data_loader(adata=self.adata, indices=None, batch_size=batch_size)
+
+            n_donors = len(self.samples)
+            pairwise_dists = np.zeros((n_donors, n_donors))
+
+            for tensors in tqdm(data_loader):
+                xs = []
+                for sample in range(self.model.summary_stats.n_sample):
+                    cf_sample = sample * torch.ones_like(tensors[MRVI_REGISTRY_KEYS.SAMPLE_KEY])
+                    inference_inputs = self.model.module._get_inference_input(tensors)
+                    inference_outputs = self.model.module.inference(
+                        mc_samples=mc_samples, cf_sample=cf_sample, **inference_inputs
+                    )
+                    new = inference_outputs["z"]
+
+                    xs.append(new[:, :, None])
+
+                xs = torch.cat(xs, 2).mean(0)
+
+                for cell in xs:
+                    pairwise_dists += pairwise_distances(cell.cpu().numpy(), metric="euclidean")
+
+            pairwise_dists /= self.adata.shape[0]
+
+        return pairwise_dists
+
     def __init__(
         self,
         sample_key: str,
@@ -590,20 +645,17 @@ class MrVI(PatientsRepresentationMethod):
         self.model = mrvi.MrVI(self.adata, **self.model_params)
         self.model.train(max_epochs=self.max_epochs)
 
-    def calculate_distance_matrix(
-        self, cells_mask=None, calculate_representations=False, batch_size: int = 1000, force: bool = False
-    ):
+    def calculate_distance_matrix(self, calculate_representations=False, batch_size: int = 1000, force: bool = False):
         """Return sample by sample distances matrix
 
         Parameters
         ----------
-        cells_mask : Iterable[bool] with the size identical to the number of cells
-            Boolean vector which indicates what cells to take for the calculation of the distances matrix.
-            Could for example indicate cells of a particular cell type
         calculate_representations : bool = False
             If True, calculate representations of samples and cells, otherwise only return distances matrix
         batch_size : int = 1000
             Number of cells in batch when calculating matrix of distances between samples
+        mc_samples : int = 10
+            Number of Monte Carlo samples to use for computing the local sample representation.
         force : bool = False
             If True, recalculate distances
 
@@ -646,18 +698,10 @@ class MrVI(PatientsRepresentationMethod):
                 sample_mask = self.adata.obs[self.sample_key] == sample
                 self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
 
-        sample_sample_distances = np.zeros(shape=(len(self.samples), len(self.samples)))
-
         print("Calculating distance matrix between samples")
-        input_adata = self.adata if cells_mask is None else self.adata[cells_mask]
+        self.adata.uns[self.DISTANCES_UNS_KEY] = self._optimized_distances_calculation(self, batch_size=batch_size)
 
-        sample_sample_distances = self.model.get_local_sample_representation(
-            input_adata, batch_size=batch_size, return_distances=True
-        ).mean(axis=0)
-
-        self.adata.uns[self.DISTANCES_UNS_KEY] = sample_sample_distances
-
-        return sample_sample_distances
+        return self.adata.uns[self.DISTANCES_UNS_KEY]
 
 
 class WassersteinTSNE(PatientsRepresentationMethod):
