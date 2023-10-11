@@ -550,7 +550,8 @@ class MrVI(PatientsRepresentationMethod):
         2. https://github.com/YosefLab/mrvi/blob/d1934e4889bbf383e411d2d39558488e1568fb0c/mrvi/_model.py#L187
 
         However, it calculates the mean distance between samples instead of storing tensors of
-        representations and distances in memory
+        representations and distances in memory. According to local tests, the result is the same
+        with a small numerical error (up to 4%).
 
         Parameters
         ----------
