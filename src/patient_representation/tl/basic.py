@@ -542,6 +542,60 @@ class MrVI(PatientsRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_mrvi_distances"
 
+    def _optimized_distances_calculation(self, batch_size=256, mc_samples: int = 10):
+        """Calculate pairwise distances between samples not storing large tensors in memory
+
+        This code is based on the following functions from MrVI:
+        1. https://github.com/YosefLab/mrvi/blob/d1934e4889bbf383e411d2d39558488e1568fb0c/mrvi/_model.py#L208
+        2. https://github.com/YosefLab/mrvi/blob/d1934e4889bbf383e411d2d39558488e1568fb0c/mrvi/_model.py#L187
+
+        However, it calculates the mean distance between samples instead of storing tensors of
+        representations and distances in memory
+
+        Parameters
+        ----------
+        batch_size
+            Batch size to use for computing the local sample representation.
+        mc_samples
+            Number of Monte Carlo samples to use for computing the local sample representation.
+
+        Returns
+        -------
+        pairwise_dists : np.ndarray
+            Pairwise distances between samples
+        """
+        import torch
+        from mrvi._constants import MRVI_REGISTRY_KEYS
+        from sklearn.metrics import pairwise_distances
+        from tqdm import tqdm
+
+        with torch.no_grad():
+            data_loader = self.model._make_data_loader(adata=self.adata, indices=None, batch_size=batch_size)
+
+            n_donors = len(self.samples)
+            pairwise_dists = np.zeros((n_donors, n_donors))
+
+            for tensors in tqdm(data_loader):
+                xs = []
+                for sample in range(self.model.summary_stats.n_sample):
+                    cf_sample = sample * torch.ones_like(tensors[MRVI_REGISTRY_KEYS.SAMPLE_KEY])
+                    inference_inputs = self.model.module._get_inference_input(tensors)
+                    inference_outputs = self.model.module.inference(
+                        mc_samples=mc_samples, cf_sample=cf_sample, **inference_inputs
+                    )
+                    new = inference_outputs["z"]
+
+                    xs.append(new[:, :, None])
+
+                xs = torch.cat(xs, 2).mean(0)
+
+                for cell in xs:
+                    pairwise_dists += pairwise_distances(cell.cpu().numpy(), metric="euclidean")
+
+            pairwise_dists /= self.adata.shape[0]
+
+        return pairwise_dists
+
     def __init__(
         self,
         sample_key: str,
