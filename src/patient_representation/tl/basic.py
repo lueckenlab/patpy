@@ -701,18 +701,10 @@ class MrVI(PatientsRepresentationMethod):
                 sample_mask = self.adata.obs[self.sample_key] == sample
                 self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
 
-        sample_sample_distances = np.zeros(shape=(len(self.samples), len(self.samples)))
-
         print("Calculating distance matrix between samples")
-        input_adata = self.adata if cells_mask is None else self.adata[cells_mask]
+        self.adata.uns[self.DISTANCES_UNS_KEY] = self._optimized_distances_calculation(self, batch_size=batch_size)
 
-        sample_sample_distances = self.model.get_local_sample_representation(
-            input_adata, batch_size=batch_size, return_distances=True
-        ).mean(axis=0)
-
-        self.adata.uns[self.DISTANCES_UNS_KEY] = sample_sample_distances
-
-        return sample_sample_distances
+        return self.adata.uns[self.DISTANCES_UNS_KEY]
 
 
 class WassersteinTSNE(PatientsRepresentationMethod):
