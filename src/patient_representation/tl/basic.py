@@ -699,7 +699,7 @@ class MrVI(PatientsRepresentationMethod):
                 self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
 
         print("Calculating distance matrix between samples")
-        self.adata.uns[self.DISTANCES_UNS_KEY] = self._optimized_distances_calculation(self, batch_size=batch_size)
+        self.adata.uns[self.DISTANCES_UNS_KEY] = self._optimized_distances_calculation(batch_size=batch_size)
 
         return self.adata.uns[self.DISTANCES_UNS_KEY]
 
