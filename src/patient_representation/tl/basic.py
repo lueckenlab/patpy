@@ -106,6 +106,65 @@ def phemd(data, labels, n_clusters=8, random_state=42, n_jobs=-1):
     return dists
 
 
+def calculate_average_without_nans(array, axis=0, return_sample_sizes=True):
+    """Calculate average across `axis` in `array`. Consider only numbers, drop NAs
+
+    Note that sample size can be different for each value in the resulting array
+
+    Parameters
+    ----------
+    array : np.ndarray
+        Array to calculate average for
+    axis : int = 0
+        Axis to calculate average across
+    return_sample_sizes : bool = True
+        If True, return number of NAs for each value in the resulting array
+
+    Returns
+    -------
+    averages : np.ndarray
+        Average across `axis` in `array`
+
+    Examples
+    --------
+    >>> arr = np.array([
+            np.ones(shape=(2, 2)),
+            np.ones(shape=(2, 2)) * 3,
+            [[5, np.nan],
+             [5, np.nan]],
+        ])  # arr now contains 3 2x2 matrices
+    >>> arr[0, 1, 1] = np.nan
+    >>> arr[0, 1, 0] = np.nan
+    >>> arr[1, 1, :] = np.nan
+    >>> arr  # One layer contains 0 nans, another 1, the next on 2, and the last one 4 (all)
+    array([[[ 1.,  1.],
+        [nan, nan]],
+
+       [[ 3.,  3.],
+        [nan, nan]],
+
+       [[ 5., nan],
+        [ 5., nan]]])
+
+    >>> averages, sample_sizes = calculate_average_without_nans(arr, axis=0)
+    >>> averages
+    array([[ 3.,  2.],
+           [ 5., nan]])
+    >>> sample_sizes
+    array([[3, 2],
+           [1, 0]])
+    """
+    not_empty_values = ~np.isnan(array)
+    sample_sizes = not_empty_values.sum(axis=0)
+
+    averages = np.mean(array, axis=axis, where=not_empty_values)
+
+    if return_sample_sizes:
+        return averages, sample_sizes
+
+    return averages
+
+
 class PatientsRepresentationMethod:
     """Base class for patient representation methods"""
 
