@@ -239,8 +239,9 @@ def evaluate_prediction(y_true, y_pred, task, **parameters):
             # Calibrate the metric. Expected value is 1 / n_classes (e.g. 1/2 for a binary classification)
             # With this calibration score==0 means that the prediction is as good as random
             # score==1 would mean the perfect prediction
-            # Note that score can be less than 0 in this case => prediction is worse than random
+            # Note that score can be less than 0 in this case => prediction is worse than random. In this case, it is clipped to 0
             score = (score - 1 / n_classes) / (1 - 1 / n_classes)
+            score = np.clip(score, 0, 1)
 
     elif task == "regression" or task == "ranking":
         score = spearmanr(y_true, y_pred).statistic
