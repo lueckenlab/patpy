@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pandas as pd
 from scipy.stats import trim_mean
@@ -241,7 +243,6 @@ def evaluate_prediction(y_true, y_pred, task, **parameters):
             # score==1 would mean the perfect prediction
             # Note that score can be less than 0 in this case => prediction is worse than random. In this case, it is clipped to 0
             score = (score - 1 / n_classes) / (1 - 1 / n_classes)
-            score = np.clip(score, 0, 1)
 
     elif task == "regression" or task == "ranking":
         score = spearmanr(y_true, y_pred).statistic
@@ -249,6 +250,17 @@ def evaluate_prediction(y_true, y_pred, task, **parameters):
 
     else:
         raise ValueError(f"{task} is not valid task")
+
+    # For calibrated F1, negative score means worse than random prediction. It doesn't matter to us if it is
+    # as good as random or worse, so we clip it to 0.
+    # For Spearman correlation, negative score means that nearest neighbors often have values of covariate
+    # from the other end of the distribution. It is not very meaningful for us at all, and it is not
+    # obvious, what is the minimum possible value in this case. -1 is barely possible, because
+    # if the neighbors of a sample have "opposite" values, score for these neighbors would be positive.
+    # So we clip it to 0 as well.
+    if score < -0.5:
+        warnings.warn(f"Score has a big negative value: {score}, which is usually not expected.", stacklevel=1)
+    score = np.clip(score, 0, 1)
 
     return {"score": score, "metric": metric}
 
