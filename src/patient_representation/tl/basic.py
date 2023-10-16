@@ -1028,13 +1028,14 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
             samples_distances = scipy.spatial.distance.pdist(cell_type_embeddings)
             distances[i] = scipy.spatial.distance.squareform(samples_distances)
 
-        avg_distances = distances.mean(axis=0)
+        avg_distances, sample_sizes = calculate_average_without_nans(distances, axis=0)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = avg_distances
         self.adata.uns["celltypebulk_parameters"] = {
             "sample_key": self.sample_key,
             "cells_type_key": self.cells_type_key,
             "average": average,
+            "sample_sizes": sample_sizes,
         }
 
         return avg_distances
