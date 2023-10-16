@@ -601,7 +601,7 @@ class MrVI(PatientsRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_mrvi_distances"
 
-    def _optimized_distances_calculation(self, batch_size=256, mc_samples: int = 10):
+    def _optimized_distances_calculation(self, batch_size=256, mc_samples: int = 10, n_cells_per_sample_threshold=5):
         """Calculate pairwise distances between samples not storing large tensors in memory
 
         This code is based on the following functions from MrVI:
@@ -618,6 +618,9 @@ class MrVI(PatientsRepresentationMethod):
             Batch size to use for computing the local sample representation.
         mc_samples
             Number of Monte Carlo samples to use for computing the local sample representation.
+        n_cells_per_sample_threshold : int = 5
+            Minimum number of cells per cell type in sample to be considered. If there are fewer cells,
+            pairwise distances with other samples are not calculated
 
         Returns
         -------
@@ -629,11 +632,18 @@ class MrVI(PatientsRepresentationMethod):
         from sklearn.metrics import pairwise_distances
         from tqdm import tqdm
 
+        cell_types_to_idx = dict(zip(self.cell_types, np.arange(len(self.cell_types))))
+        n_donors = len(self.samples)
+        n_cell_types = len(self.cell_types)
+        pairwise_dists = np.zeros((n_cell_types, n_donors, n_donors))
+
+        cell_types = self.adata.obs[self.cells_type_key].to_numpy()
+        cell_type_counts = self.adata.obs[self.cells_type_key].value_counts().loc[self.cell_types]
+
+        cell_idx = 0
+
         with torch.no_grad():
             data_loader = self.model._make_data_loader(adata=self.adata, indices=None, batch_size=batch_size)
-
-            n_donors = len(self.samples)
-            pairwise_dists = np.zeros((n_donors, n_donors))
 
             for tensors in tqdm(data_loader):
                 xs = []
@@ -650,11 +660,34 @@ class MrVI(PatientsRepresentationMethod):
                 xs = torch.cat(xs, 2).mean(0)
 
                 for cell in xs:
-                    pairwise_dists += pairwise_distances(cell.cpu().numpy(), metric="euclidean")
+                    cell_type_idx = cell_types_to_idx[cell_types[cell_idx]]
+                    pairwise_dists[cell_type_idx] += pairwise_distances(cell.cpu().numpy(), metric="euclidean")
+                    cell_idx += 1
 
-            pairwise_dists /= self.adata.shape[0]
+        # Normalize distances per cell type size
+        for cell_type_idx in range(n_cell_types):
+            pairwise_dists[cell_type_idx] /= cell_type_counts[cell_type_idx]
 
-        return pairwise_dists
+        for cell_type_idx, cell_type in enumerate(self.cell_types):
+            for sample_idx, sample in enumerate(self.samples):
+                sample_cells = self.adata[
+                    (self.adata.obs[self.sample_key] == sample) & (self.adata.obs[self.cells_type_key] == cell_type)
+                ]
+                n_cells = sample_cells.shape[0]
+
+                if n_cells < n_cells_per_sample_threshold:
+                    # We can't trust distances for that individual of that cell type
+                    pairwise_dists[cell_type_idx, sample_idx, :] = np.nan
+                    pairwise_dists[cell_type_idx, :, sample_idx] = np.nan
+
+        na_distances_percentages = np.isnan(pairwise_dists).sum(axis=1).sum(axis=1) / n_donors**2
+
+        used_cell_types = na_distances_percentages != 1
+        self.cell_types = self.cell_types[used_cell_types]
+        pairwise_dists = pairwise_dists[used_cell_types]
+
+        dists, sample_sizes = calculate_average_without_nans(pairwise_dists)
+        return dists, sample_sizes
 
     def __init__(
         self,
@@ -758,7 +791,14 @@ class MrVI(PatientsRepresentationMethod):
                 self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
 
         print("Calculating distance matrix between samples")
-        self.adata.uns[self.DISTANCES_UNS_KEY] = self._optimized_distances_calculation(batch_size=batch_size)
+        distances, sample_sizes = self._optimized_distances_calculation(batch_size=batch_size)
+
+        self.uns["mrvi_parameters"] = {
+            "batch_size": batch_size,
+            "sample_sizes": sample_sizes,
+        }
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
 
         return self.adata.uns[self.DISTANCES_UNS_KEY]
 
