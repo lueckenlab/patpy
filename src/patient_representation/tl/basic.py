@@ -1171,7 +1171,7 @@ class SCPoli(PatientsRepresentationMethod):
             self.adata = sc.AnnData(
                 X=self.adata.X,
                 obs=self.adata.obs[[self.sample_key, self.cells_type_key]],
-                var_names=self.adata.var_names,
+                var=pd.DataFrame(index=self.adata.var_names),
             )
 
         assert is_count_data(self.adata.X), "`layer` must contain count data with integer numbers"
