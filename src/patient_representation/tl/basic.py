@@ -106,6 +106,65 @@ def phemd(data, labels, n_clusters=8, random_state=42, n_jobs=-1):
     return dists
 
 
+def calculate_average_without_nans(array, axis=0, return_sample_sizes=True):
+    """Calculate average across `axis` in `array`. Consider only numbers, drop NAs
+
+    Note that sample size can be different for each value in the resulting array
+
+    Parameters
+    ----------
+    array : np.ndarray
+        Array to calculate average for
+    axis : int = 0
+        Axis to calculate average across
+    return_sample_sizes : bool = True
+        If True, return number of NAs for each value in the resulting array
+
+    Returns
+    -------
+    averages : np.ndarray
+        Average across `axis` in `array`
+
+    Examples
+    --------
+    >>> arr = np.array([
+            np.ones(shape=(2, 2)),
+            np.ones(shape=(2, 2)) * 3,
+            [[5, np.nan],
+             [5, np.nan]],
+        ])  # arr now contains 3 2x2 matrices
+    >>> arr[0, 1, 1] = np.nan
+    >>> arr[0, 1, 0] = np.nan
+    >>> arr[1, 1, :] = np.nan
+    >>> arr  # One layer contains 0 nans, another 1, the next on 2, and the last one 4 (all)
+    array([[[ 1.,  1.],
+        [nan, nan]],
+
+       [[ 3.,  3.],
+        [nan, nan]],
+
+       [[ 5., nan],
+        [ 5., nan]]])
+
+    >>> averages, sample_sizes = calculate_average_without_nans(arr, axis=0)
+    >>> averages
+    array([[ 3.,  2.],
+           [ 5., nan]])
+    >>> sample_sizes
+    array([[3, 2],
+           [1, 0]])
+    """
+    not_empty_values = ~np.isnan(array)
+    sample_sizes = not_empty_values.sum(axis=0)
+
+    averages = np.mean(array, axis=axis, where=not_empty_values)
+
+    if return_sample_sizes:
+        return averages, sample_sizes
+
+    return averages
+
+
 class PatientsRepresentationMethod:
     """Base class for patient representation methods"""
 
@@ -542,7 +601,7 @@ class MrVI(PatientsRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_mrvi_distances"
 
-    def _optimized_distances_calculation(self, batch_size=256, mc_samples: int = 10):
+    def _optimized_distances_calculation(self, batch_size=256, mc_samples: int = 10, n_cells_per_sample_threshold=5):
         """Calculate pairwise distances between samples not storing large tensors in memory
 
         This code is based on the following functions from MrVI:
@@ -559,6 +618,9 @@ class MrVI(PatientsRepresentationMethod):
             Batch size to use for computing the local sample representation.
         mc_samples
             Number of Monte Carlo samples to use for computing the local sample representation.
+        n_cells_per_sample_threshold : int = 5
+            Minimum number of cells per cell type in sample to be considered. If there are fewer cells,
+            pairwise distances with other samples are not calculated
 
         Returns
         -------
@@ -570,11 +632,18 @@ class MrVI(PatientsRepresentationMethod):
         from sklearn.metrics import pairwise_distances
         from tqdm import tqdm
 
+        cell_types_to_idx = dict(zip(self.cell_types, np.arange(len(self.cell_types))))
+        n_donors = len(self.samples)
+        n_cell_types = len(self.cell_types)
+        pairwise_dists = np.zeros((n_cell_types, n_donors, n_donors))
+
+        cell_types = self.adata.obs[self.cells_type_key].to_numpy()
+        cell_type_counts = self.adata.obs[self.cells_type_key].value_counts().loc[self.cell_types]
+
+        cell_idx = 0
+
         with torch.no_grad():
             data_loader = self.model._make_data_loader(adata=self.adata, indices=None, batch_size=batch_size)
-
-            n_donors = len(self.samples)
-            pairwise_dists = np.zeros((n_donors, n_donors))
 
             for tensors in tqdm(data_loader):
                 xs = []
@@ -591,11 +660,40 @@ class MrVI(PatientsRepresentationMethod):
                 xs = torch.cat(xs, 2).mean(0)
 
                 for cell in xs:
-                    pairwise_dists += pairwise_distances(cell.cpu().numpy(), metric="euclidean")
+                    cell_type_idx = cell_types_to_idx[cell_types[cell_idx]]
+                    pairwise_dists[cell_type_idx] += pairwise_distances(cell.cpu().numpy(), metric="euclidean")
+                    cell_idx += 1
 
-            pairwise_dists /= self.adata.shape[0]
+        # Normalize distances per cell type size
+        for cell_type_idx in range(n_cell_types):
+            pairwise_dists[cell_type_idx] /= cell_type_counts[cell_type_idx]
 
-        return pairwise_dists
+        for cell_type_idx, cell_type in enumerate(self.cell_types):
+            for sample_idx, sample in enumerate(self.samples):
+                sample_cells = self.adata[
+                    (self.adata.obs[self.sample_key] == sample) & (self.adata.obs[self.cells_type_key] == cell_type)
+                ]
+                n_cells = sample_cells.shape[0]
+
+                if n_cells < n_cells_per_sample_threshold:
+                    # We can't trust distances for that individual of that cell type
+                    pairwise_dists[cell_type_idx, sample_idx, :] = np.nan
+                    pairwise_dists[cell_type_idx, :, sample_idx] = np.nan
+
+        na_distances_percentages = np.isnan(pairwise_dists).sum(axis=1).sum(axis=1) / n_donors**2
+
+        used_cell_types = na_distances_percentages != 1
+
+        warnings.warn(
+            f"{(~used_cell_types).sum()} cell types are too small, removing them for all samples. Filtered cell types: {self.cell_types[~used_cell_types]}",
+            stacklevel=1,
+        )
+
+        self.cell_types = self.cell_types[used_cell_types]
+        pairwise_dists = pairwise_dists[used_cell_types]
+
+        dists, sample_sizes = calculate_average_without_nans(pairwise_dists)
+        return dists, sample_sizes
 
     def __init__(
         self,
@@ -699,7 +797,14 @@ class MrVI(PatientsRepresentationMethod):
                 self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
 
         print("Calculating distance matrix between samples")
-        self.adata.uns[self.DISTANCES_UNS_KEY] = self._optimized_distances_calculation(batch_size=batch_size)
+        distances, sample_sizes = self._optimized_distances_calculation(batch_size=batch_size)
+
+        self.adata.uns["mrvi_parameters"] = {
+            "batch_size": batch_size,
+            "sample_sizes": sample_sizes,
+        }
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
 
         return self.adata.uns[self.DISTANCES_UNS_KEY]
 
@@ -969,13 +1074,14 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
             samples_distances = scipy.spatial.distance.pdist(cell_type_embeddings)
             distances[i] = scipy.spatial.distance.squareform(samples_distances)
 
-        avg_distances = distances.mean(axis=0)
+        avg_distances, sample_sizes = calculate_average_without_nans(distances, axis=0)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = avg_distances
         self.adata.uns["celltypebulk_parameters"] = {
             "sample_key": self.sample_key,
             "cells_type_key": self.cells_type_key,
             "average": average,
+            "sample_sizes": sample_sizes,
         }
 
         return avg_distances
@@ -1171,7 +1277,7 @@ class SCPoli(PatientsRepresentationMethod):
             self.adata = sc.AnnData(
                 X=self.adata.X,
                 obs=self.adata.obs[[self.sample_key, self.cells_type_key]],
-                var_names=self.adata.var_names,
+                var=pd.DataFrame(index=self.adata.var_names),
             )
 
         assert is_count_data(self.adata.X), "`layer` must contain count data with integer numbers"
