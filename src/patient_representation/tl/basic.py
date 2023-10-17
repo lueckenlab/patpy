@@ -683,6 +683,12 @@ class MrVI(PatientsRepresentationMethod):
         na_distances_percentages = np.isnan(pairwise_dists).sum(axis=1).sum(axis=1) / n_donors**2
 
         used_cell_types = na_distances_percentages != 1
+
+        warnings.warn(
+            f"{(~used_cell_types).sum()} cell types are too small, removing them for all samples. Filtered cell types: {self.cell_types[~used_cell_types]}",
+            stacklevel=1,
+        )
+
         self.cell_types = self.cell_types[used_cell_types]
         pairwise_dists = pairwise_dists[used_cell_types]
 
