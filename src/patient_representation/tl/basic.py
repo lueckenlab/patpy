@@ -793,7 +793,7 @@ class MrVI(PatientsRepresentationMethod):
         print("Calculating distance matrix between samples")
         distances, sample_sizes = self._optimized_distances_calculation(batch_size=batch_size)
 
-        self.uns["mrvi_parameters"] = {
+        self.adata.uns["mrvi_parameters"] = {
             "batch_size": batch_size,
             "sample_sizes": sample_sizes,
         }
