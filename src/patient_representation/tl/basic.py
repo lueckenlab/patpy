@@ -773,7 +773,7 @@ class MrVI(PatientsRepresentationMethod):
             return distances
 
         # Make sure that batch size is between 1 and number of cells
-        batch_size = np.clip(batch_size, 1, len(self.adata))
+        batch_size = int(np.clip(batch_size, 1, len(self.adata)))
 
         if calculate_representations:
             if "X_mrvi_z" not in self.adata.obsm or force:
