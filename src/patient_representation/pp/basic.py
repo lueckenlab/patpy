@@ -257,3 +257,14 @@ def is_count_data(matrix, window_size=10000) -> bool:
         return np.all(matrix[:window_size, :window_size].data % 1 == 0)
 
     return np.all(matrix[:window_size, :window_size] % 1 == 0)
+
+
+def fill_nan_distances(distances, n_max_distances=5):
+    """Fill NaN values in `distances` with maximum distance multiplied by `n_max_distances`"""
+    distances = distances.copy()
+    nans = np.isnan(distances)
+    max_distance = distances[~nans].max()
+
+    distances[nans] = n_max_distances * max_distance
+
+    return distances
