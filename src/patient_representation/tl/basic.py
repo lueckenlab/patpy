@@ -6,7 +6,13 @@ import scanpy as sc
 import scipy
 import seaborn as sns
 
-from patient_representation.pp import filter_small_cell_types, filter_small_samples, is_count_data, subsample
+from patient_representation.pp import (
+    fill_nan_distances,
+    filter_small_cell_types,
+    filter_small_samples,
+    is_count_data,
+    subsample,
+)
 from patient_representation.tl._types import _EVALUATION_METHODS
 
 
@@ -333,13 +339,16 @@ class PatientsRepresentationMethod:
         coordinates : array-like
             Coordinates of samples in the embedding space. 2D for TSNE and MDS
         """
+        distances = self.adata.uns[self.DISTANCES_UNS_KEY]
+        distances = fill_nan_distances(distances)
+
         if method == "MDS":
             from sklearn.manifold import MDS
 
             mds = MDS(
                 n_components=2, dissimilarity="precomputed", verbose=verbose, n_jobs=n_jobs, random_state=self.seed
             )
-            coordinates = mds.fit_transform(self.adata.uns[self.DISTANCES_UNS_KEY])
+            coordinates = mds.fit_transform(distances)
         elif method == "TSNE":
             from openTSNE import TSNE
 
@@ -352,12 +361,12 @@ class PatientsRepresentationMethod:
                 verbose=verbose,
                 initialization="spectral",  # pca doesn't work with precomputed distances
             )
-            coordinates = tsne.fit(self.adata.uns[self.DISTANCES_UNS_KEY])
+            coordinates = tsne.fit(distances)
         elif method == "UMAP":
             from umap import UMAP
 
             umap = UMAP(n_components=2, metric="precomputed", random_state=self.seed, verbose=verbose, n_jobs=n_jobs)
-            coordinates = umap.fit_transform(self.adata.uns[self.DISTANCES_UNS_KEY])
+            coordinates = umap.fit_transform(distances)
 
         else:
             raise ValueError(f'Method {method} is not supported, please use one of ["MDS", "TSNE", "UMAP"]')
