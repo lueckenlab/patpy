@@ -962,7 +962,12 @@ class PILOT(PatientsRepresentationMethod):
         -------
         Matrix of distances between samples
         """
-        import PILOT as pt
+        try:
+            import PILOT as pt
+        except ImportError as err:
+            raise ImportError(
+                "PILOT is not installed. Please install it by running `pip install git+https://github.com/CostaLab/PILOT.git`"
+            ) from err
 
         distances = super().calculate_distance_matrix(force=force)
 

@@ -28,7 +28,6 @@ dependencies = [
     "numpy>=1.23",
     "opentsne>=0.6",
     "pandas>=1.5",
-    "pilot @ git+ssh://git@github.com/CostaLab/PILOT.git",
     "SCellBOW>=1.2",
     "scipy>=1.10",
     "scvi-tools~=0.19",
