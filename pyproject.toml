@@ -35,6 +35,9 @@ dependencies = [
     "torch>=1.13",
     "wassersteintsne>=1.1",
     "scarches",
+    "ehrapy",
+    "plottable",
+    "PILOT @ git+https://github.com/CostaLab/PILOT#egg=PILOT",
     # for debug logging (referenced from the issue template)
     "session-info"
 ]
