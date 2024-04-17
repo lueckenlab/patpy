@@ -299,8 +299,28 @@ def _filter_missing(distances, target):
     return distances, target[not_empty_values]
 
 
-def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "knn", **parameters):
-    """Evaluate representation of `target` for the given distance matrix
+def _select_random_subset(distances, target, num_donors_subset=None, proportion_donors_subset=None):
+    """Select a random subset of donors from the distances matrix based on number or proportion."""
+    n_donors = distances.shape[0]
+    if num_donors_subset is not None:
+        if not (2 <= num_donors_subset <= n_donors):
+            raise ValueError("num_donors_subset must be between 2 and the maximum number of donors.")
+        subset_size = num_donors_subset
+    elif proportion_donors_subset is not None:
+        if not (0 < proportion_donors_subset <= 1):
+            raise ValueError("prop_donors_subset must be a proportion between 0 and 1.")
+        subset_size = int(n_donors * proportion_donors_subset)
+    else:
+        raise ValueError("Either num_donors_subset or prop_donors_subset must be specified.")
+
+    selected_indices = np.random.choice(n_donors, subset_size, replace=False)
+    distances_subset = distances[selected_indices, :][:, selected_indices]
+    target_subset = target[selected_indices]
+    return distances_subset, target_subset
+
+
+def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "knn", num_donors_subset=None, proportion_donors_subset=None, **parameters):
+    """Evaluate representation of target for the given distance matrix
 
     Parameters
     ----------
@@ -310,18 +330,22 @@ def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "kn
         Vector with the values of a feature for each sample
     method : Literal["knn", "distances", "proportions", "silhouette"]
         Method to use for evaluation:
-        - knn: predict values of `target` using K-nearest neighbors and evaluate the prediction
+        - knn: predict values of target using K-nearest neighbors and evaluate the prediction
         - distances: test if distances between samples are significantly different from the null distribution
-        - proportions: test if distribution of `target` differs between groups (e.g. clusters)
+        - proportions: test if distribution of target differs between groups (e.g. clusters)
         - silhouette: calculate silhouette score for the given distances
+    num_donors_subset : int, optional
+        Absolute number of donors to include in the evaluation.
+    proportion_donors_subset : float, optional
+        Proportion of donors to include in the evaluation.
     parameters : dict
         Parameters for the evaluation method. The following parameters are used:
         - knn:
             - n_neighbors: number of neighbors to use for prediction
-            - task: type of prediction task. One of "classification", "regression", "ranking". See documentation of `predict_knn` for more information
+            - task: type of prediction task. One of "classification", "regression", "ranking". See documentation of predict_knn for more information
         - distances:
-            - control_level: value of `target` that should be used as a control group
-            - normalization_type: type of normalization to use. One of "total", "shift", "var". See documentation of `test_distances_significance` for more information
+            - control_level: value of target that should be used as a control group
+            - normalization_type: type of normalization to use. One of "total", "shift", "var". See documentation of test_distances_significance for more information
             - n_bootstraps: number of bootstrap iterations to use
             - trimmed_fraction: fraction of the most extreme values to remove from the distribution
             - compare_by_difference: if True, normalization is defined as difference (as in the original paper). Otherwise, it is defined as a ratio
@@ -334,11 +358,15 @@ def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "kn
         Result of evaluation with the following keys:
         - score: a number evaluating the representation. The higher the better
         - metric: name of the metric used for evaluation
-        - n_unique: number of unique values in `target`
+        - n_unique: number of unique values in target
         - n_observations: number of observations used for evaluation. Can be different for different targets, even within one dataset (because of NAs)
         - method: name of the method used for evaluation
         There are other optional keys depending on the method used for evaluation.
     """
+    
+    if num_donors_subset is not None or proportion_donors_subset is not None:
+        distances, target = _select_random_subset(distances, target, num_donors_subset, proportion_donors_subset)
+
     distances, target = _filter_missing(distances, target)
 
     if method == "knn":
