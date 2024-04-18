@@ -320,7 +320,7 @@ def _select_random_subset(distances, target, num_donors_subset=None, proportion_
 
 
 def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "knn", num_donors_subset=None, proportion_donors_subset=None, **parameters):
-    """Evaluate representation of target for the given distance matrix
+    """Evaluate representation of `target` for the given distance matrix
 
     Parameters
     ----------
@@ -330,9 +330,9 @@ def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "kn
         Vector with the values of a feature for each sample
     method : Literal["knn", "distances", "proportions", "silhouette"]
         Method to use for evaluation:
-        - knn: predict values of target using K-nearest neighbors and evaluate the prediction
+        - knn: predict values of `target` using K-nearest neighbors and evaluate the prediction
         - distances: test if distances between samples are significantly different from the null distribution
-        - proportions: test if distribution of target differs between groups (e.g. clusters)
+        - proportions: test if distribution of `target` differs between groups (e.g. clusters)
         - silhouette: calculate silhouette score for the given distances
     num_donors_subset : int, optional
         Absolute number of donors to include in the evaluation.
@@ -342,10 +342,10 @@ def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "kn
         Parameters for the evaluation method. The following parameters are used:
         - knn:
             - n_neighbors: number of neighbors to use for prediction
-            - task: type of prediction task. One of "classification", "regression", "ranking". See documentation of predict_knn for more information
+            - task: type of prediction task. One of "classification", "regression", "ranking". See documentation of `predict_knn` for more information
         - distances:
-            - control_level: value of target that should be used as a control group
-            - normalization_type: type of normalization to use. One of "total", "shift", "var". See documentation of test_distances_significance for more information
+            - control_level: value of `target` that should be used as a control group
+            - normalization_type: type of normalization to use. One of "total", "shift", "var". See documentation of `test_distances_significance` for more information
             - n_bootstraps: number of bootstrap iterations to use
             - trimmed_fraction: fraction of the most extreme values to remove from the distribution
             - compare_by_difference: if True, normalization is defined as difference (as in the original paper). Otherwise, it is defined as a ratio
@@ -358,7 +358,7 @@ def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "kn
         Result of evaluation with the following keys:
         - score: a number evaluating the representation. The higher the better
         - metric: name of the metric used for evaluation
-        - n_unique: number of unique values in target
+        - n_unique: number of unique values in `target`
         - n_observations: number of observations used for evaluation. Can be different for different targets, even within one dataset (because of NAs)
         - method: name of the method used for evaluation
         There are other optional keys depending on the method used for evaluation.
