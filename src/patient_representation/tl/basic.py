@@ -1298,9 +1298,9 @@ class SCPoli(PatientsRepresentationMethod):
 
         self.model = scPoli(
             adata=self.adata,
-            condition_key=self.sample_key,
+            condition_keys=self.sample_key,
             cell_type_keys=self.cells_type_key,
-            embedding_dim=self.latent_dim,
+            embedding_dims=self.latent_dim,
         )
 
         self.model.train(
