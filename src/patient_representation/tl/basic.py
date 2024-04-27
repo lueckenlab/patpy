@@ -1153,6 +1153,7 @@ class CellTypesComposition(PatientsRepresentationMethod):
         self.patient_representations = pd.crosstab(
             self.adata.obs[self.sample_key], self.adata.obs[self.cells_type_key], normalize="index"
         )
+        self.patient_representations = self.patient_representations.loc[self.samples]
 
         distances = scipy.spatial.distance.pdist(self.patient_representations.values)
         distances = scipy.spatial.distance.squareform(distances)
