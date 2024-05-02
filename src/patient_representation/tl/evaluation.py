@@ -300,7 +300,31 @@ def _filter_missing(distances, target):
 
 
 def _select_random_subset(distances, target, num_donors_subset=None, proportion_donors_subset=None):
-    """Select a random subset of donors from the distances matrix based on number or proportion."""
+    """
+    Select a random subset of donors from the distances matrix based on a specified number or proportion of donors.
+    
+    Parameters:
+    ----------
+    distances : square matrix
+        Matrix of distances between samples
+    target : array-like
+        Vector with the values of a feature for each sample
+    num_donors_subset : int, optional
+        Absolute number of donors to include in the evaluation.
+    proportion_donors_subset : float, optional
+        Proportion of donors to include in the evaluation.
+
+    Returns:
+    -------
+    distances_subset: distances among the randomly selected donors.
+    target_subset: array of the targets associated with the randomly selected donors.
+    
+    Raises:
+    -------
+    - ValueError: If neither num_donors_subset nor proportion_donors_subset is specified.
+    - ValueError: If num_donors_subset is not between 2 and the total number of donors.
+    - ValueError: If proportion_donors_subset is not a valid proportion (i.e., not between 0 and 1).
+    """
     n_donors = distances.shape[0]
     if num_donors_subset is not None:
         if not (2 <= num_donors_subset <= n_donors):
