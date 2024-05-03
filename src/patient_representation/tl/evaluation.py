@@ -302,8 +302,8 @@ def _filter_missing(distances, target):
 def _select_random_subset(distances, target, num_donors_subset=None, proportion_donors_subset=None):
     """
     Select a random subset of donors from the distances matrix based on a specified number or proportion of donors.
-    
-    Parameters:
+
+    Parameters
     ----------
     distances : square matrix
         Matrix of distances between samples
@@ -314,13 +314,15 @@ def _select_random_subset(distances, target, num_donors_subset=None, proportion_
     proportion_donors_subset : float, optional
         Proportion of donors to include in the evaluation.
 
-    Returns:
+    Returns
     -------
-    distances_subset: distances among the randomly selected donors.
-    target_subset: array of the targets associated with the randomly selected donors.
-    
-    Raises:
-    -------
+    distances_subset : square matrix
+        Distances among the randomly selected donors.
+    target_subset: array-like
+        Targets associated with the randomly selected donors.
+
+    Raises
+    ------
     - ValueError: If neither num_donors_subset nor proportion_donors_subset is specified.
     - ValueError: If num_donors_subset is not between 2 and the total number of donors.
     - ValueError: If proportion_donors_subset is not a valid proportion (i.e., not between 0 and 1).
@@ -343,7 +345,14 @@ def _select_random_subset(distances, target, num_donors_subset=None, proportion_
     return distances_subset, target_subset
 
 
-def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "knn", num_donors_subset=None, proportion_donors_subset=None, **parameters):
+def evaluate_representation(
+    distances,
+    target,
+    method: _EVALUATION_METHODS = "knn",
+    num_donors_subset=None,
+    proportion_donors_subset=None,
+    **parameters,
+):
     """Evaluate representation of `target` for the given distance matrix
 
     Parameters
@@ -387,7 +396,6 @@ def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "kn
         - method: name of the method used for evaluation
         There are other optional keys depending on the method used for evaluation.
     """
-    
     if num_donors_subset is not None or proportion_donors_subset is not None:
         distances, target = _select_random_subset(distances, target, num_donors_subset, proportion_donors_subset)
 
