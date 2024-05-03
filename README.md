@@ -45,6 +45,23 @@ See the [changelog][changelog].
 For questions and help requests, you can reach out in the [scverse discourse][scverse-discourse].
 If you found a bug, please use the [issue tracker][issue-tracker].
 
+## Building docs
+
+1. Install [sphinx](https://www.sphinx-doc.org/en/master/usage/installation.html)
+
+You may need add path to `sphinx-doc` to the `$PATH`
+
+2. Install other `doc` section dependencies from the [pyproject.toml](https://github.com/lueckenlab/patient_representation/blob/main/pyproject.toml)
+
+3. Build the documentation pages:
+
+```bash
+cd docs
+make html
+```
+
+4. Open `docs/_build/html/index.html`
+
 ## Citation
 
 > t.b.a
