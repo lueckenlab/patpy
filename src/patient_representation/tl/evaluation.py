@@ -299,7 +299,60 @@ def _filter_missing(distances, target):
     return distances, target[not_empty_values]
 
 
-def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "knn", **parameters):
+def _select_random_subset(distances, target, num_donors_subset=None, proportion_donors_subset=None):
+    """
+    Select a random subset of donors from the distances matrix based on a specified number or proportion of donors.
+
+    Parameters
+    ----------
+    distances : square matrix
+        Matrix of distances between samples
+    target : array-like
+        Vector with the values of a feature for each sample
+    num_donors_subset : int, optional
+        Absolute number of donors to include in the evaluation.
+    proportion_donors_subset : float, optional
+        Proportion of donors to include in the evaluation.
+
+    Returns
+    -------
+    distances_subset : square matrix
+        Distances among the randomly selected donors.
+    target_subset: array-like
+        Targets associated with the randomly selected donors.
+
+    Raises
+    ------
+    - ValueError: If neither `num_donors_subset` nor proportion_donors_subset is specified.
+    - ValueError: If `num_donors_subset` is not between 2 and the total number of donors.
+    - ValueError: If `proportion_donors_subset` is not a valid proportion (i.e., not between 0 and 1).
+    """
+    n_donors = distances.shape[0]
+    if num_donors_subset is not None:
+        if not (2 <= num_donors_subset <= n_donors):
+            raise ValueError("num_donors_subset must be between 2 and the maximum number of donors.")
+        subset_size = num_donors_subset
+    elif proportion_donors_subset is not None:
+        if not (0 < proportion_donors_subset <= 1):
+            raise ValueError("prop_donors_subset must be a proportion between 0 and 1.")
+        subset_size = int(n_donors * proportion_donors_subset)
+    else:
+        raise ValueError("Either num_donors_subset or prop_donors_subset must be specified.")
+
+    selected_indices = np.random.choice(n_donors, subset_size, replace=False)
+    distances_subset = distances[selected_indices, :][:, selected_indices]
+    target_subset = target[selected_indices]
+    return distances_subset, target_subset
+
+
+def evaluate_representation(
+    distances,
+    target,
+    method: _EVALUATION_METHODS = "knn",
+    num_donors_subset=None,
+    proportion_donors_subset=None,
+    **parameters,
+):
     """Evaluate representation of `target` for the given distance matrix
 
     Parameters
@@ -314,6 +367,10 @@ def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "kn
         - distances: test if distances between samples are significantly different from the null distribution
         - proportions: test if distribution of `target` differs between groups (e.g. clusters)
         - silhouette: calculate silhouette score for the given distances
+    num_donors_subset : int, optional
+        Absolute number of donors to include in the evaluation.
+    proportion_donors_subset : float, optional
+        Proportion of donors to include in the evaluation.
     parameters : dict
         Parameters for the evaluation method. The following parameters are used:
         - knn:
@@ -339,6 +396,9 @@ def evaluate_representation(distances, target, method: _EVALUATION_METHODS = "kn
         - method: name of the method used for evaluation
         There are other optional keys depending on the method used for evaluation.
     """
+    if num_donors_subset is not None or proportion_donors_subset is not None:
+        distances, target = _select_random_subset(distances, target, num_donors_subset, proportion_donors_subset)
+
     distances, target = _filter_missing(distances, target)
 
     if method == "knn":
