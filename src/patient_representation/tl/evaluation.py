@@ -323,9 +323,9 @@ def _select_random_subset(distances, target, num_donors_subset=None, proportion_
 
     Raises
     ------
-    - ValueError: If neither num_donors_subset nor proportion_donors_subset is specified.
-    - ValueError: If num_donors_subset is not between 2 and the total number of donors.
-    - ValueError: If proportion_donors_subset is not a valid proportion (i.e., not between 0 and 1).
+    - ValueError: If neither `num_donors_subset` nor proportion_donors_subset is specified.
+    - ValueError: If `num_donors_subset` is not between 2 and the total number of donors.
+    - ValueError: If `proportion_donors_subset` is not a valid proportion (i.e., not between 0 and 1).
     """
     n_donors = distances.shape[0]
     if num_donors_subset is not None:
