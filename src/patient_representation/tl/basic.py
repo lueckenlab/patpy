@@ -461,7 +461,7 @@ class PatientsRepresentationMethod:
 
         return axes
 
-    def evaluate_representation(self, target, method: _EVALUATION_METHODS = "knn", metadata=None, **parameters):
+    def evaluate_representation(self, target, method: _EVALUATION_METHODS = "knn", metadata=None, num_donors_subset=None, proportion_donors_subset=None, **parameters):
         """Evaluate representation of `target` for the given distance matrix
 
         Parameters
@@ -474,6 +474,10 @@ class PatientsRepresentationMethod:
             - distances: test if distances between samples are significantly different from the null distribution
             - proportions: test if distribution of `target` differs between groups (e.g. clusters)
             - silhouette: calculate silhouette score for the given distances
+        num_donors_subset : int, optional
+            Absolute number of donors to include in the evaluation.
+        proportion_donors_subset : float, optional
+            Proportion of donors to include in the evaluation.
         parameters : dict
             Parameters for the evaluation method. The following parameters are used:
             - knn:
@@ -500,11 +504,12 @@ class PatientsRepresentationMethod:
             There are other optional keys depending on the method used for evaluation.
         """
         from patient_representation.tl import evaluate_representation
-
+        
         if metadata is None:
             metadata = self._extract_metadata([target])
 
-        return evaluate_representation(self.calculate_distance_matrix(), metadata[target], method, **parameters)
+        return evaluate_representation(self.calculate_distance_matrix(), metadata[target], method, num_donors_subset=num_donors_subset,
+        proportion_donors_subset=proportion_donors_subset, **parameters)
 
     def predict_metadata(self, target, metadata=None, n_neighbors: int = 3, task="classification"):
         """Predict classes from metadata column `target` for samples using K-Nearest Neighbors classifier
@@ -964,12 +969,7 @@ class PILOT(PatientsRepresentationMethod):
         -------
         Matrix of distances between samples
         """
-        try:
-            import PILOT as pt
-        except ImportError as err:
-            raise ImportError(
-                "PILOT is not installed. Please install it by running `pip install git+https://github.com/CostaLab/PILOT.git`"
-            ) from err
+        import PILOT as pt
 
         distances = super().calculate_distance_matrix(force=force)
 
@@ -1155,6 +1155,7 @@ class CellTypesComposition(PatientsRepresentationMethod):
         self.patient_representations = pd.crosstab(
             self.adata.obs[self.sample_key], self.adata.obs[self.cells_type_key], normalize="index"
         )
+        self.patient_representations = self.patient_representations.loc[self.samples]
 
         distances = scipy.spatial.distance.pdist(self.patient_representations.values)
         distances = scipy.spatial.distance.squareform(distances)
