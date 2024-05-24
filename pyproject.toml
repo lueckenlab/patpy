@@ -37,7 +37,7 @@ dependencies = [
     "scarches",
     "ehrapy",
     "plottable",
-    "pilotpy",
+    "pilotpy @ git+https://github.com/CostaLab/PILOT#egg=pilotpy",
     # for debug logging (referenced from the issue template)
     "session-info"
 ]
