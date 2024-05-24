@@ -969,7 +969,7 @@ class PILOT(PatientsRepresentationMethod):
         -------
         Matrix of distances between samples
         """
-        import PILOT as pt
+        import pilotpy as pt
 
         distances = super().calculate_distance_matrix(force=force)
 
