@@ -202,13 +202,15 @@ class PatientsRepresentationMethod:
         if self.layer == "X" or self.layer is None:
             # The data is already in correct slot
             return self.adata
-
+        
+        # getting only those layers with the same shape of the new X mat from adata.obsm[self.layer] to be copied in the new anndata below
+        filtered_layers = {key: np.copy(layer) for key, layer in self.adata.layers.items() if key != self.layer and layer.shape == self.adata.obsm[self.layer].shape}
         # Copy everything except from .var* to new adata, with correct layer in X
         new_adata = sc.AnnData(
             X=self._get_data(),
             obs=self.adata.obs,
             obsm=self.adata.obsm,
-            layers=self.adata.layers,
+            layers=filtered_layers,
             uns=self.adata.uns,
             obsp=self.adata.obsp,
         )
@@ -967,7 +969,7 @@ class PILOT(PatientsRepresentationMethod):
         -------
         Matrix of distances between samples
         """
-        import PILOT as pt
+        import pilotpy as pt
 
         distances = super().calculate_distance_matrix(force=force)
 
@@ -1299,9 +1301,9 @@ class SCPoli(PatientsRepresentationMethod):
 
         self.model = scPoli(
             adata=self.adata,
-            condition_key=self.sample_key,
+            condition_keys=self.sample_key,
             cell_type_keys=self.cells_type_key,
-            embedding_dim=self.latent_dim,
+            embedding_dims=self.latent_dim,
         )
 
         self.model.train(
