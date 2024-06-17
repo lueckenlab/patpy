@@ -1016,33 +1016,34 @@ class TotalPseudobulk(PatientsRepresentationMethod):
 
         self.patient_representations = None
 
-    def calculate_distance_matrix(self, force: bool = False, average="mean"):
+    def calculate_distance_matrix(self, force: bool = False, aggregate="mean", dist="euclidean"):
         """Calculate distances between pseudobulk representations of samples"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
             return distances
 
+        valid_aggregates = {"mean": np.mean, "median": np.median, "sum": np.sum}
+        if aggregate not in valid_aggregates:
+            raise ValueError(f"Aggregation function {aggregate} is not supported")
+        
+        valid_dists = {'euclidean', 'cosine', 'cityblock'}
+        if dist not in valid_dists:
+            raise ValueError(f"Distance metric {dist} is not supported")
+        
         data = self._get_data()
 
         self.patient_representations = np.zeros(shape=(len(self.samples), data.shape[1]))
 
-        if average == "mean":
-            func = np.mean
-        elif average == "median":
-            func = np.median
-        else:
-            raise ValueError(f"Averaging function {average} is not supported")
-
         for i, sample in enumerate(self.samples):
             sample_cells = data[self.adata.obs[self.sample_key] == sample, :]
-            self.patient_representations[i] = func(sample_cells, axis=0)
-
-        distances = scipy.spatial.distance.pdist(self.patient_representations)
+            self.patient_representations[i] = valid_aggregates[aggregate](sample_cells, axis=0)
+        
+        distances = scipy.spatial.distance.pdist(self.patient_representations, metric=dist)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
-        self.adata.uns["bulk_parameters"] = {"sample_key": self.sample_key, "average": average}
+        self.adata.uns["bulk_parameters"] = {"sample_key": self.sample_key, "aggregate": aggregate}
 
         return distances
 
