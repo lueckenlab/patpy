@@ -40,7 +40,6 @@ dependencies = [
     "pilotpy @ git+https://github.com/CostaLab/PILOT#egg=pilotpy",
     # for debug logging (referenced from the issue template)
     "session-info",
-    "harmonypy",
     "phate"
 ]
 
