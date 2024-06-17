@@ -39,7 +39,9 @@ dependencies = [
     "plottable",
     "pilotpy @ git+https://github.com/CostaLab/PILOT#egg=pilotpy",
     # for debug logging (referenced from the issue template)
-    "session-info"
+    "session-info",
+    "harmonypy",
+    "phate"
 ]
 
 [project.optional-dependencies]
