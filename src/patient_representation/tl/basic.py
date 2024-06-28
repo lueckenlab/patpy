@@ -1149,12 +1149,16 @@ class CellTypesComposition(PatientsRepresentationMethod):
 
         self.patient_representations = None
 
-    def calculate_distance_matrix(self, force: bool = False):
+    def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between patients represented as cell type composition vectors"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
             return distances
+        
+        valid_dists = {'euclidean', 'cosine', 'cityblock'}
+        if dist not in valid_dists:
+            raise ValueError(f"Distance metric {dist} is not supported")
 
         # Calculate proportions of the cell types for each sample
         self.patient_representations = pd.crosstab(
@@ -1162,11 +1166,11 @@ class CellTypesComposition(PatientsRepresentationMethod):
         )
         self.patient_representations = self.patient_representations.loc[self.samples]
 
-        distances = scipy.spatial.distance.pdist(self.patient_representations.values)
+        distances = scipy.spatial.distance.pdist(self.patient_representations.values, metric=dist)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
-        self.adata.uns["composition_parameters"] = {"sample_key": self.sample_key, "distance_type": "euclidean"}
+        self.adata.uns["composition_parameters"] = {"sample_key": self.sample_key, "distance_type": dist}
 
         return distances
 
