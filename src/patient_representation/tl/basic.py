@@ -1043,7 +1043,7 @@ class TotalPseudobulk(PatientsRepresentationMethod):
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
-        self.adata.uns["bulk_parameters"] = {"sample_key": self.sample_key, "aggregate": aggregate}
+        self.adata.uns["bulk_parameters"] = {"sample_key": self.sample_key, "aggregate": aggregate, "distance_type": dist}
 
         return distances
 
@@ -1102,6 +1102,7 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
             "sample_key": self.sample_key,
             "cells_type_key": self.cells_type_key,
             "aggregate": aggregate,
+            "distance_type": dist,
             "sample_sizes": sample_sizes,
         }
 
@@ -1342,7 +1343,7 @@ class SCPoli(PatientsRepresentationMethod):
         self.adata.uns["scpoli_parameters"] = {
             "sample_key": self.sample_key,
             "cells_type_key": self.cells_type_key,
-            "distance_type": "euclidean",
+            "distance_type": dist,
             "latent_dim": self.latent_dim,
             "n_epochs": self.n_epochs,
             "pretraining_epochs": self.pretraining_epochs,
