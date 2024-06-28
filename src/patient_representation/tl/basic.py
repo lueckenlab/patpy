@@ -999,10 +999,8 @@ class PILOT(PatientsRepresentationMethod):
         self.adata.uns["pilot_parameters"] = {
             "sample_key": self.sample_key,
             "cells_type_key": self.cells_type_key,
-            "patient_state_col": self.patient_state_col,
             **pilot_parameters,
         }
-
         return distances
 
 
