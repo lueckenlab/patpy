@@ -1083,7 +1083,10 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
                 cells_data = data[
                     (self.adata.obs[self.sample_key] == sample) & (self.adata.obs[self.cells_type_key] == cell_type)
                 ]
-                self.patient_representations[i, j] = valid_aggregates[aggregate](cells_data, axis=0)
+                if cells_data.size == 0:
+                    self.patient_representations[i, j] = np.nan
+                else:
+                    self.patient_representations[i, j] = valid_aggregates[aggregate](cells_data, axis=0)
 
         # Matrix of distances between samples for each cell type
         distances = np.zeros(shape=(len(self.cell_types), len(self.samples), len(self.samples)))
