@@ -1324,14 +1324,18 @@ class SCPoli(PatientsRepresentationMethod):
 
         self.patient_representation = self.model.get_conditional_embeddings().X
 
-    def calculate_distance_matrix(self, force: bool = False):
+    def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between scPoli sample embeddings"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
             return distances
 
-        distances = scipy.spatial.distance.pdist(self.patient_representation)
+        valid_dists = {'euclidean', 'cosine', 'cityblock'}
+        if dist not in valid_dists:
+            raise ValueError(f"Distance metric {dist} is not supported")
+        
+        distances = scipy.spatial.distance.pdist(self.patient_representation, metric=dist)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
