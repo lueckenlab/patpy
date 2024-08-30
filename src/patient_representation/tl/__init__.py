@@ -1,6 +1,7 @@
 from .basic import (
     CellTypePseudobulk,
     CellTypesComposition,
+    DiffusionEarthMoverDistance,
     RandomVector,
     SCPoli,
     TotalPseudobulk,
