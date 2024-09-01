@@ -7,7 +7,7 @@ allow-direct-references = true  # Allow installing packages from git repositorie
 
 [project]
 name = "patient_representation"
-version = "0.1.23"
+version = "0.1.24"
 description = "Representing patients or samples from single-cell data"
 readme = "README.md"
 requires-python = "~=3.10"
@@ -28,7 +28,6 @@ dependencies = [
     "numpy>=1.23",
     "opentsne>=0.6",
     "pandas>=1.5",
-    "SCellBOW>=1.2",
     "scipy>=1.10",
     "scvi-tools @ git+https://github.com/scverse/scvi-tools#egg=scvi-tools",
     "seaborn>=0.12",
@@ -37,9 +36,9 @@ dependencies = [
     "scarches",
     "ehrapy",
     "plottable",
-    "pilotpy @ git+https://github.com/CostaLab/PILOT#egg=pilotpy",
     # for debug logging (referenced from the issue template)
-    "session-info"
+    "session-info",
+    "phate"
 ]
 
 [project.optional-dependencies]
