@@ -999,10 +999,8 @@ class PILOT(PatientsRepresentationMethod):
         self.adata.uns["pilot_parameters"] = {
             "sample_key": self.sample_key,
             "cells_type_key": self.cells_type_key,
-            "patient_state_col": self.patient_state_col,
             **pilot_parameters,
         }
-
         return distances
 
 
@@ -1016,33 +1014,34 @@ class TotalPseudobulk(PatientsRepresentationMethod):
 
         self.patient_representations = None
 
-    def calculate_distance_matrix(self, force: bool = False, average="mean"):
+    def calculate_distance_matrix(self, force: bool = False, aggregate="mean", dist="euclidean"):
         """Calculate distances between pseudobulk representations of samples"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
             return distances
 
+        valid_aggregates = {"mean": np.mean, "median": np.median, "sum": np.sum}
+        if aggregate not in valid_aggregates:
+            raise ValueError(f"Aggregation function {aggregate} is not supported")
+        
+        valid_dists = {'euclidean', 'cosine', 'cityblock'}
+        if dist not in valid_dists:
+            raise ValueError(f"Distance metric {dist} is not supported")
+        
         data = self._get_data()
 
         self.patient_representations = np.zeros(shape=(len(self.samples), data.shape[1]))
 
-        if average == "mean":
-            func = np.mean
-        elif average == "median":
-            func = np.median
-        else:
-            raise ValueError(f"Averaging function {average} is not supported")
-
         for i, sample in enumerate(self.samples):
             sample_cells = data[self.adata.obs[self.sample_key] == sample, :]
-            self.patient_representations[i] = func(sample_cells, axis=0)
-
-        distances = scipy.spatial.distance.pdist(self.patient_representations)
+            self.patient_representations[i] = valid_aggregates[aggregate](sample_cells, axis=0)
+        
+        distances = scipy.spatial.distance.pdist(self.patient_representations, metric=dist)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
-        self.adata.uns["bulk_parameters"] = {"sample_key": self.sample_key, "average": average}
+        self.adata.uns["bulk_parameters"] = {"sample_key": self.sample_key, "aggregate": aggregate, "distance_type": dist}
 
         return distances
 
@@ -1057,37 +1056,41 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
 
         self.patient_representations = None
 
-    def calculate_distance_matrix(self, force: bool = False, average="mean"):
+    def calculate_distance_matrix(self, force: bool = False, aggregate="mean", dist="euclidean"):
         """Calculate distances between patients as average distance between per cell-type pseudobulks"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
             return distances
-
-        if average == "mean":
-            func = np.mean
-        elif average == "median":
-            func = np.median
-        else:
-            raise ValueError(f"Averaging function {average} is not supported")
+        
+        valid_aggregates = {"mean": np.mean, "median": np.median, "sum": np.sum}
+        if aggregate not in valid_aggregates:
+            raise ValueError(f"Aggregation function {aggregate} is not supported")
+        
+        valid_dists = {'euclidean', 'cosine', 'cityblock'}
+        if dist not in valid_dists:
+            raise ValueError(f"Distance metric {dist} is not supported")
+        
 
         data = self._get_data()
 
         # List of matrices with embedding centroids for samples for each cell type
         self.patient_representations = np.zeros(shape=(len(self.cell_types), len(self.samples), data.shape[1]))
-
         for i, cell_type in enumerate(self.cell_types):
             for j, sample in enumerate(self.samples):
                 cells_data = data[
                     (self.adata.obs[self.sample_key] == sample) & (self.adata.obs[self.cells_type_key] == cell_type)
                 ]
-                self.patient_representations[i, j] = func(cells_data, axis=0)
+                if cells_data.size == 0:
+                    self.patient_representations[i, j] = np.nan
+                else:
+                    self.patient_representations[i, j] = valid_aggregates[aggregate](cells_data, axis=0)
 
         # Matrix of distances between samples for each cell type
         distances = np.zeros(shape=(len(self.cell_types), len(self.samples), len(self.samples)))
 
         for i, cell_type_embeddings in enumerate(self.patient_representations):
-            samples_distances = scipy.spatial.distance.pdist(cell_type_embeddings)
+            samples_distances = scipy.spatial.distance.pdist(cell_type_embeddings, metric=dist)                
             distances[i] = scipy.spatial.distance.squareform(samples_distances)
 
         avg_distances, sample_sizes = calculate_average_without_nans(distances, axis=0)
@@ -1096,7 +1099,8 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
         self.adata.uns["celltypebulk_parameters"] = {
             "sample_key": self.sample_key,
             "cells_type_key": self.cells_type_key,
-            "average": average,
+            "aggregate": aggregate,
+            "distance_type": dist,
             "sample_sizes": sample_sizes,
         }
 
@@ -1144,12 +1148,16 @@ class CellTypesComposition(PatientsRepresentationMethod):
 
         self.patient_representations = None
 
-    def calculate_distance_matrix(self, force: bool = False):
+    def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between patients represented as cell type composition vectors"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
             return distances
+        
+        valid_dists = {'euclidean', 'cosine', 'cityblock'}
+        if dist not in valid_dists:
+            raise ValueError(f"Distance metric {dist} is not supported")
 
         # Calculate proportions of the cell types for each sample
         self.patient_representations = pd.crosstab(
@@ -1157,11 +1165,11 @@ class CellTypesComposition(PatientsRepresentationMethod):
         )
         self.patient_representations = self.patient_representations.loc[self.samples]
 
-        distances = scipy.spatial.distance.pdist(self.patient_representations.values)
+        distances = scipy.spatial.distance.pdist(self.patient_representations.values, metric=dist)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
-        self.adata.uns["composition_parameters"] = {"sample_key": self.sample_key, "distance_type": "euclidean"}
+        self.adata.uns["composition_parameters"] = {"sample_key": self.sample_key, "distance_type": dist}
 
         return distances
 
@@ -1315,21 +1323,25 @@ class SCPoli(PatientsRepresentationMethod):
 
         self.patient_representation = self.model.get_conditional_embeddings().X
 
-    def calculate_distance_matrix(self, force: bool = False):
+    def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between scPoli sample embeddings"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
             return distances
 
-        distances = scipy.spatial.distance.pdist(self.patient_representation)
+        valid_dists = {'euclidean', 'cosine', 'cityblock'}
+        if dist not in valid_dists:
+            raise ValueError(f"Distance metric {dist} is not supported")
+        
+        distances = scipy.spatial.distance.pdist(self.patient_representation, metric=dist)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
         self.adata.uns["scpoli_parameters"] = {
             "sample_key": self.sample_key,
             "cells_type_key": self.cells_type_key,
-            "distance_type": "euclidean",
+            "distance_type": dist,
             "latent_dim": self.latent_dim,
             "n_epochs": self.n_epochs,
             "pretraining_epochs": self.pretraining_epochs,
