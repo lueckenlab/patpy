@@ -733,20 +733,19 @@ class MrVI(PatientsRepresentationMethod):
         self,
         sample_key: str,
         cells_type_key: str,
-        categorical_nuisance_keys: list,
+        batch_key: str = None,
         layer=None,
         seed=67,
-        max_epochs=None,
+        max_epochs=400,
         **model_params,
     ):
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
-
-        self.categorical_nuisance_keys = categorical_nuisance_keys
 
         self.model = None
         self.model_params = model_params
         self.patient_representations = None
         self.max_epochs = max_epochs
+        self.batch_key = batch_key
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Train MrVI model
@@ -759,7 +758,7 @@ class MrVI(PatientsRepresentationMethod):
         ----
         model : MrVI model
         """
-        import mrvi
+        from mrvi import MrVI
 
         super().prepare_anndata(
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
@@ -767,14 +766,9 @@ class MrVI(PatientsRepresentationMethod):
 
         assert is_count_data(self._get_data()), "`layer` must contain count data with integer numbers"
 
-        mrvi.MrVI.setup_anndata(
-            self.adata,
-            sample_key=self.sample_key,
-            categorical_nuisance_keys=self.categorical_nuisance_keys,
-            layer=self.layer,
-        )
+        MrVI.setup_anndata(self.adata, sample_key=self.sample_key, layer=self.layer, batch_key=self.batch_key)
 
-        self.model = mrvi.MrVI(self.adata, **self.model_params)
+        self.model = MrVI(self.adata, **self.model_params)
         self.model.train(max_epochs=self.max_epochs)
 
     def calculate_distance_matrix(self, calculate_representations=False, batch_size: int = 1000, force: bool = False):
@@ -831,14 +825,17 @@ class MrVI(PatientsRepresentationMethod):
                 self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
 
         print("Calculating distance matrix between samples")
-        distances, sample_sizes = self._optimized_distances_calculation(batch_size=batch_size)
+        # distances, sample_sizes = self._optimized_distances_calculation(batch_size=batch_size)
+        distances = self.model.get_local_sample_distances(batch_size=batch_size, mc_samples=10)
+        distances_to_average = distances["cell"].values
+        avg_distances, sample_sizes = calculate_average_without_nans(distances_to_average, axis=0)
 
         self.adata.uns["mrvi_parameters"] = {
             "batch_size": batch_size,
             "sample_sizes": sample_sizes,
         }
 
-        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        self.adata.uns[self.DISTANCES_UNS_KEY] = avg_distances
 
         return self.adata.uns[self.DISTANCES_UNS_KEY]
 
