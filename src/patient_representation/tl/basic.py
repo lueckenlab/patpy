@@ -771,7 +771,9 @@ class MrVI(PatientsRepresentationMethod):
         self.model = MrVI(self.adata, **self.model_params)
         self.model.train(max_epochs=self.max_epochs)
 
-    def calculate_distance_matrix(self, calculate_representations=False, batch_size: int = 1000, force: bool = False):
+    def calculate_distance_matrix(
+        self, groupby=None, keep_cell=True, calculate_representations=False, batch_size: int = 32, force: bool = False
+    ):
         """Return sample by sample distances matrix
 
         Parameters
@@ -825,9 +827,13 @@ class MrVI(PatientsRepresentationMethod):
                 self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
 
         print("Calculating distance matrix between samples")
+
         # distances, sample_sizes = self._optimized_distances_calculation(batch_size=batch_size)
-        distances = self.model.get_local_sample_distances(batch_size=batch_size, mc_samples=10)
-        distances_to_average = distances["cell"].values
+        distances = self.model.get_local_sample_distances(
+            groupby=groupby, keep_cell=keep_cell, batch_size=batch_size, mc_samples=10
+        )
+
+        distances_to_average = distances["cell" if groupby is None else groupby].values
         avg_distances, sample_sizes = calculate_average_without_nans(distances_to_average, axis=0)
 
         self.adata.uns["mrvi_parameters"] = {
