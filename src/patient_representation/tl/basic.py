@@ -202,9 +202,13 @@ class PatientsRepresentationMethod:
         if self.layer == "X" or self.layer is None:
             # The data is already in correct slot
             return self.adata
-        
+
         # getting only those layers with the same shape of the new X mat from adata.obsm[self.layer] to be copied in the new anndata below
-        filtered_layers = {key: np.copy(layer) for key, layer in self.adata.layers.items() if key != self.layer and layer.shape == self.adata.obsm[self.layer].shape}
+        filtered_layers = {
+            key: np.copy(layer)
+            for key, layer in self.adata.layers.items()
+            if key != self.layer and layer.shape == self.adata.obsm[self.layer].shape
+        }
         # Copy everything except from .var* to new adata, with correct layer in X
         new_adata = sc.AnnData(
             X=self._get_data(),
@@ -461,7 +465,15 @@ class PatientsRepresentationMethod:
 
         return axes
 
-    def evaluate_representation(self, target, method: _EVALUATION_METHODS = "knn", metadata=None, num_donors_subset=None, proportion_donors_subset=None, **parameters):
+    def evaluate_representation(
+        self,
+        target,
+        method: _EVALUATION_METHODS = "knn",
+        metadata=None,
+        num_donors_subset=None,
+        proportion_donors_subset=None,
+        **parameters,
+    ):
         """Evaluate representation of `target` for the given distance matrix
 
         Parameters
@@ -504,12 +516,18 @@ class PatientsRepresentationMethod:
             There are other optional keys depending on the method used for evaluation.
         """
         from patient_representation.tl import evaluate_representation
-        
+
         if metadata is None:
             metadata = self._extract_metadata([target])
 
-        return evaluate_representation(self.calculate_distance_matrix(), metadata[target], method, num_donors_subset=num_donors_subset,
-        proportion_donors_subset=proportion_donors_subset, **parameters)
+        return evaluate_representation(
+            self.calculate_distance_matrix(),
+            metadata[target],
+            method,
+            num_donors_subset=num_donors_subset,
+            proportion_donors_subset=proportion_donors_subset,
+            **parameters,
+        )
 
     def predict_metadata(self, target, metadata=None, n_neighbors: int = 3, task="classification"):
         """Predict classes from metadata column `target` for samples using K-Nearest Neighbors classifier
@@ -1024,11 +1042,11 @@ class TotalPseudobulk(PatientsRepresentationMethod):
         valid_aggregates = {"mean": np.mean, "median": np.median, "sum": np.sum}
         if aggregate not in valid_aggregates:
             raise ValueError(f"Aggregation function {aggregate} is not supported")
-        
-        valid_dists = {'euclidean', 'cosine', 'cityblock'}
+
+        valid_dists = {"euclidean", "cosine", "cityblock"}
         if dist not in valid_dists:
             raise ValueError(f"Distance metric {dist} is not supported")
-        
+
         data = self._get_data()
 
         self.patient_representations = np.zeros(shape=(len(self.samples), data.shape[1]))
@@ -1036,12 +1054,16 @@ class TotalPseudobulk(PatientsRepresentationMethod):
         for i, sample in enumerate(self.samples):
             sample_cells = data[self.adata.obs[self.sample_key] == sample, :]
             self.patient_representations[i] = valid_aggregates[aggregate](sample_cells, axis=0)
-        
+
         distances = scipy.spatial.distance.pdist(self.patient_representations, metric=dist)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
-        self.adata.uns["bulk_parameters"] = {"sample_key": self.sample_key, "aggregate": aggregate, "distance_type": dist}
+        self.adata.uns["bulk_parameters"] = {
+            "sample_key": self.sample_key,
+            "aggregate": aggregate,
+            "distance_type": dist,
+        }
 
         return distances
 
@@ -1062,15 +1084,14 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
 
         if distances is not None:
             return distances
-        
+
         valid_aggregates = {"mean": np.mean, "median": np.median, "sum": np.sum}
         if aggregate not in valid_aggregates:
             raise ValueError(f"Aggregation function {aggregate} is not supported")
-        
-        valid_dists = {'euclidean', 'cosine', 'cityblock'}
+
+        valid_dists = {"euclidean", "cosine", "cityblock"}
         if dist not in valid_dists:
             raise ValueError(f"Distance metric {dist} is not supported")
-        
 
         data = self._get_data()
 
@@ -1090,7 +1111,7 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
         distances = np.zeros(shape=(len(self.cell_types), len(self.samples), len(self.samples)))
 
         for i, cell_type_embeddings in enumerate(self.patient_representations):
-            samples_distances = scipy.spatial.distance.pdist(cell_type_embeddings, metric=dist)                
+            samples_distances = scipy.spatial.distance.pdist(cell_type_embeddings, metric=dist)
             distances[i] = scipy.spatial.distance.squareform(samples_distances)
 
         avg_distances, sample_sizes = calculate_average_without_nans(distances, axis=0)
@@ -1154,8 +1175,8 @@ class CellTypesComposition(PatientsRepresentationMethod):
 
         if distances is not None:
             return distances
-        
-        valid_dists = {'euclidean', 'cosine', 'cityblock'}
+
+        valid_dists = {"euclidean", "cosine", "cityblock"}
         if dist not in valid_dists:
             raise ValueError(f"Distance metric {dist} is not supported")
 
@@ -1330,10 +1351,10 @@ class SCPoli(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        valid_dists = {'euclidean', 'cosine', 'cityblock'}
+        valid_dists = {"euclidean", "cosine", "cityblock"}
         if dist not in valid_dists:
             raise ValueError(f"Distance metric {dist} is not supported")
-        
+
         distances = scipy.spatial.distance.pdist(self.patient_representation, metric=dist)
         distances = scipy.spatial.distance.squareform(distances)
 
