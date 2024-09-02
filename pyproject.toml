@@ -7,7 +7,7 @@ allow-direct-references = true  # Allow installing packages from git repositorie
 
 [project]
 name = "patient_representation"
-version = "0.1.24"
+version = "0.1.26"
 description = "Representing patients or samples from single-cell data"
 readme = "README.md"
 requires-python = "~=3.10"
@@ -29,7 +29,7 @@ dependencies = [
     "opentsne>=0.6",
     "pandas>=1.5",
     "scipy>=1.10",
-    "scvi-tools @ git+https://github.com/scverse/scvi-tools#egg=scvi-tools",
+    "scvi-tools>=1.1.6",
     "seaborn>=0.12",
     "torch>=1.13",
     "wassersteintsne>=1.1",
