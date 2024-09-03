@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import scipy
-import scipy.sparse as sp
 import seaborn as sns
 
 from patient_representation.pp import (
@@ -1484,11 +1483,9 @@ class DiffusionEarthMoverDistance(PatientsRepresentationMethod):
 
         sc.pp.neighbors(self.adata, use_rep=self.layer, method="gauss", n_neighbors=self.n_neighbors)
 
-        connectivities = self.adata.obsp["connectivities"]
-        degrees = connectivities.sum(axis=1).A1
-        D_inv_sqrt = sp.diags(1 / np.sqrt(degrees))
-        L = sp.eye(connectivities.shape[0]) - D_inv_sqrt @ connectivities @ D_inv_sqrt
-        self.adata.obsp["laplacian"] = L
+        self.adata.obsp["connectivities"] = (
+            self.adata.obsp["connectivities"] + self.adata.obsp["connectivities"].T
+        ) / 2
 
         self.model = DiffusionCheb(n_scales=self.n_scales)
 
@@ -1500,7 +1497,7 @@ class DiffusionEarthMoverDistance(PatientsRepresentationMethod):
             return distances
 
         # Embeddings where the L1 distance approximates the Earth Mover's Distance
-        self.patient_representations = self.model.fit_transform(self.adata.obsp["laplacian"], self.labels)
+        self.patient_representations = self.model.fit_transform(self.adata.obsp["connectivities"], self.labels)
         distances = scipy.spatial.distance.pdist(self.patient_representations, metric="cityblock")
         distances = scipy.spatial.distance.squareform(distances)
 
