@@ -16,6 +16,30 @@ from patient_representation.pp import (
 from patient_representation.tl._types import _EVALUATION_METHODS
 
 
+def make_matrix_symmetric(matrix, matrix_name="Matrix"):
+    """Make a matrix symmetric by averaging it with its transpose
+
+    Parameters
+    ----------
+    matrix : np.ndarray
+        The input matrix to be made symmetric
+    matrix_name : str, optional
+        Name of the matrix for the warning message, by default "Matrix"
+
+    Returns
+    -------
+    np.ndarray
+        Symmetric matrix
+    """
+    if (matrix == matrix.T).all():
+        return matrix
+
+    unsymmetry = matrix - matrix.T
+    warnings.warn(f"{matrix_name} is not symmetric. Highest deviation: {unsymmetry.max()}. Fixing", stacklevel=2)
+
+    return (matrix + matrix.T) / 2
+
+
 def create_colormap(df, col, palette="Spectral"):
     """Create a color map for the unique values of the column `col` of data frame `df`"""
     unique_values = df[col].unique()
@@ -935,17 +959,6 @@ class PILOT(PatientsRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_pilot_distances"
 
-    @staticmethod
-    def _make_matrix_symmetric(matrix):
-        """Distances matrix returned by pilot.wasserstein_d is slightly not symmetric. This method fixes it"""
-        if (matrix == matrix.T).all():
-            return matrix
-
-        unsymmetry = matrix - matrix.T
-        warnings.warn(f"Distances matrix is not symmetric. Highest deviation: {unsymmetry.max()}. Fixing", stacklevel=1)
-
-        return (matrix + matrix.T) / 2
-
     def __init__(
         self,
         sample_key,
@@ -1011,7 +1024,7 @@ class PILOT(PatientsRepresentationMethod):
         )
 
         distances = self.adata.uns["EMD_df"].loc[self.samples, self.samples].to_numpy()
-        distances = self._make_matrix_symmetric(distances)
+        distances = make_matrix_symmetric(distances, "wasserstein distances matrix in PILOT")
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
         self.adata.uns["pilot_parameters"] = {
@@ -1483,9 +1496,9 @@ class DiffusionEarthMoverDistance(PatientsRepresentationMethod):
 
         sc.pp.neighbors(self.adata, use_rep=self.layer, method="gauss", n_neighbors=self.n_neighbors)
 
-        self.adata.obsp["connectivities"] = (
-            self.adata.obsp["connectivities"] + self.adata.obsp["connectivities"].T
-        ) / 2
+        self.adata.obsp["connectivities"] = make_matrix_symmetric(
+            self.adata.obsp["connectivities"], "Connectivities matrix in DiffusionEarthMoverDistance"
+        )
 
         self.model = DiffusionCheb(n_scales=self.n_scales)
 
