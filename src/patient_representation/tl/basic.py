@@ -162,8 +162,6 @@ def calculate_average_without_nans(array, axis=0, return_sample_sizes=True, defa
     array([[3, 2],
            [1, 0]])
     """
-    print(f"NaNs in array? {np.isnan(array).any()}")
-
     not_empty_values = ~np.isnan(array)
     sample_sizes = not_empty_values.sum(axis=axis)
 
@@ -175,10 +173,7 @@ def calculate_average_without_nans(array, axis=0, return_sample_sizes=True, defa
 
     array_filled = np.where(not_empty_values, array, mean_values)
 
-    print(f"NaNs in array after filling? {np.isnan(array_filled).any()}")
-
     averages = np.mean(array_filled, axis=axis)
-    print(f"Averages calculated, shape of averages: {averages.shape}")
 
     if return_sample_sizes:
         return averages, sample_sizes
