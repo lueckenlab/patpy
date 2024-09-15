@@ -112,8 +112,10 @@ def phemd(data, labels, n_clusters=8, random_state=42, n_jobs=-1):
     return dists
 
 
-def calculate_average_without_nans(array, axis=0, return_sample_sizes=True):
+def calculate_average_without_nans(array, axis=0, return_sample_sizes=True, default_value=0):
     """Calculate average across `axis` in `array`. Consider only numbers, drop NAs
+
+        If all values along the axis are NaN, fill with a default value
 
     Note that sample size can be different for each value in the resulting array
 
@@ -160,10 +162,23 @@ def calculate_average_without_nans(array, axis=0, return_sample_sizes=True):
     array([[3, 2],
            [1, 0]])
     """
-    not_empty_values = ~np.isnan(array)
-    sample_sizes = not_empty_values.sum(axis=0)
+    print(f"NaNs in array? {np.isnan(array).any()}")
 
-    averages = np.mean(array, axis=axis, where=not_empty_values)
+    not_empty_values = ~np.isnan(array)
+    sample_sizes = not_empty_values.sum(axis=axis)
+
+    # Fill NaNs with the mean of non-NaN values
+    mean_values = np.nanmean(array, axis=axis, keepdims=True)
+
+    # Replace remaining NaNs with default_value
+    mean_values = np.where(np.isnan(mean_values), default_value, mean_values)
+
+    array_filled = np.where(not_empty_values, array, mean_values)
+
+    print(f"NaNs in array after filling? {np.isnan(array_filled).any()}")
+
+    averages = np.mean(array_filled, axis=axis)
+    print(f"Averages calculated, shape of averages: {averages.shape}")
 
     if return_sample_sizes:
         return averages, sample_sizes
