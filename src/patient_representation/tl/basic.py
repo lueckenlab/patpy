@@ -1123,8 +1123,6 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
                 ]
                 if cells_data.size == 0:
                     self.patient_representations[i, j] = np.nan
-                    # self.patient_representations[i, j] = np.zeros(data.shape[1])
-
                 else:
                     self.patient_representations[i, j] = aggregation_func(cells_data, axis=0)
 
@@ -1135,22 +1133,7 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
             samples_distances = scipy.spatial.distance.pdist(cell_type_embeddings, metric=distance_metric)
             distances[i] = scipy.spatial.distance.squareform(samples_distances)
 
-        print("_____________________BEFORE________________________")
-        print(f"NaNs in arr BEFORE aggregation? {np.isnan(distances).any()}")
-        # print(f"Number of NaNs in distances array: {np.isnan(distances).sum()}")
-        print(
-            f"Number of NaNs: {np.isnan(distances).sum()}, Number of non-NaNs: {np.count_nonzero(~np.isnan(distances))}"
-        )
-
         avg_distances, sample_sizes = calculate_average_without_nans(distances, axis=0)
-
-        print("_____________________AFTER________________________")
-        print(f"NaNs in avg_distances AFTER aggregation? {np.isnan(avg_distances).any()}")
-        print(f"Number of NaNs in avg_distances: {np.isnan(avg_distances).sum()}")
-        print("++++++++++++++++++++++++++++++++++++++++++++++++")
-
-        if np.isnan(avg_distances).any():
-            raise ValueError("Distance matrix contains NaN values after applying calculate_average_without_nans.")
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = avg_distances
         self.adata.uns["celltypebulk_parameters"] = {
