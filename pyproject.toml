@@ -39,7 +39,7 @@ dependencies = [
     # for debug logging (referenced from the issue template)
     "session-info",
     "phate",
-    "DiffusionEMD==0.5.0",
+    "DiffusionEMD @ git+https://github.com/farhadmd7/DiffusionEMD.git@main",
 ]
 
 [project.optional-dependencies]
