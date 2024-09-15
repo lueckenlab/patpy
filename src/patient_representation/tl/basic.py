@@ -16,6 +16,22 @@ from patient_representation.pp import (
 from patient_representation.tl._types import _EVALUATION_METHODS
 
 
+def valid_aggregate(aggregate: str):
+    """Returns a valid aggregation function or raises an error if invalid"""
+    valid_aggregates = {"mean": np.mean, "median": np.median, "sum": np.sum}
+    if aggregate not in valid_aggregates:
+        raise ValueError(f"Aggregation function '{aggregate}' is not supported")
+    return valid_aggregates[aggregate]
+
+
+def valid_distance_metric(dist: str):
+    """Returns if the distance metric is valid or raises an error"""
+    valid_dists = {"euclidean", "cosine", "cityblock"}
+    if dist not in valid_dists:
+        raise ValueError(f"Distance metric '{dist}' is not supported")
+    return dist
+
+
 def create_colormap(df, col, palette="Spectral"):
     """Create a color map for the unique values of the column `col` of data frame `df`"""
     unique_values = df[col].unique()
@@ -1052,13 +1068,8 @@ class TotalPseudobulk(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        valid_aggregates = {"mean": np.mean, "median": np.median, "sum": np.sum}
-        if aggregate not in valid_aggregates:
-            raise ValueError(f"Aggregation function {aggregate} is not supported")
-
-        valid_dists = {"euclidean", "cosine", "cityblock"}
-        if dist not in valid_dists:
-            raise ValueError(f"Distance metric {dist} is not supported")
+        aggregation_func = valid_aggregate(aggregate)
+        distance_metric = valid_distance_metric(dist)
 
         data = self._get_data()
 
@@ -1066,16 +1077,16 @@ class TotalPseudobulk(PatientsRepresentationMethod):
 
         for i, sample in enumerate(self.samples):
             sample_cells = data[self.adata.obs[self.sample_key] == sample, :]
-            self.patient_representations[i] = valid_aggregates[aggregate](sample_cells, axis=0)
+            self.patient_representations[i] = aggregation_func(sample_cells, axis=0)
 
-        distances = scipy.spatial.distance.pdist(self.patient_representations, metric=dist)
+        distances = scipy.spatial.distance.pdist(self.patient_representations, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
         self.adata.uns["bulk_parameters"] = {
             "sample_key": self.sample_key,
             "aggregate": aggregate,
-            "distance_type": dist,
+            "distance_type": distance_metric,
         }
 
         return distances
@@ -1098,13 +1109,8 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        valid_aggregates = {"mean": np.mean, "median": np.median, "sum": np.sum}
-        if aggregate not in valid_aggregates:
-            raise ValueError(f"Aggregation function {aggregate} is not supported")
-
-        valid_dists = {"euclidean", "cosine", "cityblock"}
-        if dist not in valid_dists:
-            raise ValueError(f"Distance metric {dist} is not supported")
+        aggregation_func = valid_aggregate(aggregate)
+        distance_metric = valid_distance_metric(dist)
 
         data = self._get_data()
 
@@ -1117,24 +1123,41 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
                 ]
                 if cells_data.size == 0:
                     self.patient_representations[i, j] = np.nan
+                    # self.patient_representations[i, j] = np.zeros(data.shape[1])
+
                 else:
-                    self.patient_representations[i, j] = valid_aggregates[aggregate](cells_data, axis=0)
+                    self.patient_representations[i, j] = aggregation_func(cells_data, axis=0)
 
         # Matrix of distances between samples for each cell type
         distances = np.zeros(shape=(len(self.cell_types), len(self.samples), len(self.samples)))
 
         for i, cell_type_embeddings in enumerate(self.patient_representations):
-            samples_distances = scipy.spatial.distance.pdist(cell_type_embeddings, metric=dist)
+            samples_distances = scipy.spatial.distance.pdist(cell_type_embeddings, metric=distance_metric)
             distances[i] = scipy.spatial.distance.squareform(samples_distances)
 
+        print("_____________________BEFORE________________________")
+        print(f"NaNs in arr BEFORE aggregation? {np.isnan(distances).any()}")
+        # print(f"Number of NaNs in distances array: {np.isnan(distances).sum()}")
+        print(
+            f"Number of NaNs: {np.isnan(distances).sum()}, Number of non-NaNs: {np.count_nonzero(~np.isnan(distances))}"
+        )
+
         avg_distances, sample_sizes = calculate_average_without_nans(distances, axis=0)
+
+        print("_____________________AFTER________________________")
+        print(f"NaNs in avg_distances AFTER aggregation? {np.isnan(avg_distances).any()}")
+        print(f"Number of NaNs in avg_distances: {np.isnan(avg_distances).sum()}")
+        print("++++++++++++++++++++++++++++++++++++++++++++++++")
+
+        if np.isnan(avg_distances).any():
+            raise ValueError("Distance matrix contains NaN values after applying calculate_average_without_nans.")
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = avg_distances
         self.adata.uns["celltypebulk_parameters"] = {
             "sample_key": self.sample_key,
             "cells_type_key": self.cells_type_key,
             "aggregate": aggregate,
-            "distance_type": dist,
+            "distance_type": distance_metric,
             "sample_sizes": sample_sizes,
         }
 
@@ -1189,9 +1212,7 @@ class CellTypesComposition(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        valid_dists = {"euclidean", "cosine", "cityblock"}
-        if dist not in valid_dists:
-            raise ValueError(f"Distance metric {dist} is not supported")
+        distance_metric = valid_distance_metric(dist)
 
         # Calculate proportions of the cell types for each sample
         self.patient_representations = pd.crosstab(
@@ -1199,11 +1220,11 @@ class CellTypesComposition(PatientsRepresentationMethod):
         )
         self.patient_representations = self.patient_representations.loc[self.samples]
 
-        distances = scipy.spatial.distance.pdist(self.patient_representations.values, metric=dist)
+        distances = scipy.spatial.distance.pdist(self.patient_representations.values, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
-        self.adata.uns["composition_parameters"] = {"sample_key": self.sample_key, "distance_type": dist}
+        self.adata.uns["composition_parameters"] = {"sample_key": self.sample_key, "distance_type": distance_metric}
 
         return distances
 
@@ -1364,18 +1385,16 @@ class SCPoli(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        valid_dists = {"euclidean", "cosine", "cityblock"}
-        if dist not in valid_dists:
-            raise ValueError(f"Distance metric {dist} is not supported")
+        distance_metric = valid_distance_metric(dist)
 
-        distances = scipy.spatial.distance.pdist(self.patient_representation, metric=dist)
+        distances = scipy.spatial.distance.pdist(self.patient_representation, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
         self.adata.uns["scpoli_parameters"] = {
             "sample_key": self.sample_key,
             "cells_type_key": self.cells_type_key,
-            "distance_type": dist,
+            "distance_type": distance_metric,
             "latent_dim": self.latent_dim,
             "n_epochs": self.n_epochs,
             "pretraining_epochs": self.pretraining_epochs,
