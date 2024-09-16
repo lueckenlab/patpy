@@ -7,6 +7,7 @@ import scipy
 import seaborn as sns
 
 from patient_representation.pp import (
+    extract_metadata,
     fill_nan_distances,
     filter_small_cell_types,
     filter_small_samples,
@@ -248,22 +249,7 @@ class PatientsRepresentationMethod:
 
     def _extract_metadata(self, columns) -> pd.DataFrame:
         """Return dataframe with requested `columns` in the correct rows order"""
-        metadata = self.adata.obs[[self.sample_key, *columns]].drop_duplicates()
-
-        # If sample_key is in `columns`, it will cause error, when reindexing data frame
-        need_to_rename_sample_key = self.sample_key in columns
-
-        # To avoid error, we rename column with sample key, reindex dataframe, and then rename sample column back
-        if need_to_rename_sample_key:
-            # Rename the first column with sample key to sample_key_dupl
-            metadata.columns = [self.sample_key + "_dupl"] + list(metadata.columns[1:])
-
-        metadata = metadata.set_index(self.sample_key)
-
-        if need_to_rename_sample_key:
-            metadata.rename(columns={self.sample_key + "_dupl": self.sample_key}, inplace=True)
-
-        return metadata.loc[self.samples]
+        return extract_metadata(self.adata, self.sample_key, columns, samples=self.samples)
 
     def __init__(self, sample_key, cells_type_key, layer=None, seed=67):
         """Initialize the model
