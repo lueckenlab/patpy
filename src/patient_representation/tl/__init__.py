@@ -1,11 +1,8 @@
 from .basic import (
-    PILOT,
     CellTypePseudobulk,
     CellTypesComposition,
-    MrVI,
-    PhEMD,
+    DiffusionEarthMoverDistance,
     RandomVector,
-    SCellBOW,
     SCPoli,
     TotalPseudobulk,
     WassersteinTSNE,
