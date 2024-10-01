@@ -17,6 +17,22 @@ from patient_representation.pp import (
 from patient_representation.tl._types import _EVALUATION_METHODS
 
 
+def valid_aggregate(aggregate: str):
+    """Returns a valid aggregation function or raises an error if invalid"""
+    valid_aggregates = {"mean": np.mean, "median": np.median, "sum": np.sum}
+    if aggregate not in valid_aggregates:
+        raise ValueError(f"Aggregation function '{aggregate}' is not supported")
+    return valid_aggregates[aggregate]
+
+
+def valid_distance_metric(dist: str):
+    """Returns if the distance metric is valid or raises an error"""
+    valid_dists = {"euclidean", "cosine", "cityblock"}
+    if dist not in valid_dists:
+        raise ValueError(f"Distance metric '{dist}' is not supported")
+    return dist
+
+
 def make_matrix_symmetric(matrix, matrix_name="Matrix"):
     """Make a matrix symmetric by averaging it with its transpose
 
@@ -137,8 +153,10 @@ def phemd(data, labels, n_clusters=8, random_state=42, n_jobs=-1):
     return dists
 
 
-def calculate_average_without_nans(array, axis=0, return_sample_sizes=True):
+def calculate_average_without_nans(array, axis=0, return_sample_sizes=True, default_value=0):
     """Calculate average across `axis` in `array`. Consider only numbers, drop NAs
+
+        If all values along the axis are NaN, fill with a default value
 
     Note that sample size can be different for each value in the resulting array
 
@@ -186,9 +204,17 @@ def calculate_average_without_nans(array, axis=0, return_sample_sizes=True):
            [1, 0]])
     """
     not_empty_values = ~np.isnan(array)
-    sample_sizes = not_empty_values.sum(axis=0)
+    sample_sizes = not_empty_values.sum(axis=axis)
 
-    averages = np.mean(array, axis=axis, where=not_empty_values)
+    # Fill NaNs with the mean of non-NaN values
+    mean_values = np.nanmean(array, axis=axis, keepdims=True)
+
+    # Replace remaining NaNs with default_value
+    mean_values = np.where(np.isnan(mean_values), default_value, mean_values)
+
+    array_filled = np.where(not_empty_values, array, mean_values)
+
+    averages = np.mean(array_filled, axis=axis)
 
     if return_sample_sizes:
         return averages, sample_sizes
@@ -640,123 +666,28 @@ class PatientsRepresentationMethod:
 class MrVI(PatientsRepresentationMethod):
     """Deep generative modeling for quantifying sample-level heterogeneity in single-cell omics.
 
-    Source: https://www.biorxiv.org/content/10.1101/2022.10.04.510898v1
+    Source: https://www.biorxiv.org/content/10.1101/2022.10.04.510898v2
     """
 
     DISTANCES_UNS_KEY = "X_mrvi_distances"
-
-    def _optimized_distances_calculation(self, batch_size=256, mc_samples: int = 10, n_cells_per_sample_threshold=5):
-        """Calculate pairwise distances between samples not storing large tensors in memory
-
-        This code is based on the following functions from MrVI:
-        1. https://github.com/YosefLab/mrvi/blob/d1934e4889bbf383e411d2d39558488e1568fb0c/mrvi/_model.py#L208
-        2. https://github.com/YosefLab/mrvi/blob/d1934e4889bbf383e411d2d39558488e1568fb0c/mrvi/_model.py#L187
-
-        However, it calculates the mean distance between samples instead of storing tensors of
-        representations and distances in memory. According to local tests, the result is the same
-        with a small numerical error (up to 4%).
-
-        Parameters
-        ----------
-        batch_size
-            Batch size to use for computing the local sample representation.
-        mc_samples
-            Number of Monte Carlo samples to use for computing the local sample representation.
-        n_cells_per_sample_threshold : int = 5
-            Minimum number of cells per cell type in sample to be considered. If there are fewer cells,
-            pairwise distances with other samples are not calculated
-
-        Returns
-        -------
-        pairwise_dists : np.ndarray
-            Pairwise distances between samples
-        """
-        import torch
-        from mrvi._constants import MRVI_REGISTRY_KEYS
-        from sklearn.metrics import pairwise_distances
-        from tqdm import tqdm
-
-        cell_types_to_idx = dict(zip(self.cell_types, np.arange(len(self.cell_types))))
-        n_donors = len(self.samples)
-        n_cell_types = len(self.cell_types)
-        pairwise_dists = np.zeros((n_cell_types, n_donors, n_donors))
-
-        cell_types = self.adata.obs[self.cells_type_key].to_numpy()
-        cell_type_counts = self.adata.obs[self.cells_type_key].value_counts().loc[self.cell_types]
-
-        cell_idx = 0
-
-        with torch.no_grad():
-            data_loader = self.model._make_data_loader(adata=self.adata, indices=None, batch_size=batch_size)
-
-            for tensors in tqdm(data_loader):
-                xs = []
-                for sample in range(self.model.summary_stats.n_sample):
-                    cf_sample = sample * torch.ones_like(tensors[MRVI_REGISTRY_KEYS.SAMPLE_KEY])
-                    inference_inputs = self.model.module._get_inference_input(tensors)
-                    inference_outputs = self.model.module.inference(
-                        mc_samples=mc_samples, cf_sample=cf_sample, **inference_inputs
-                    )
-                    new = inference_outputs["z"]
-
-                    xs.append(new[:, :, None])
-
-                xs = torch.cat(xs, 2).mean(0)
-
-                for cell in xs:
-                    cell_type_idx = cell_types_to_idx[cell_types[cell_idx]]
-                    pairwise_dists[cell_type_idx] += pairwise_distances(cell.cpu().numpy(), metric="euclidean")
-                    cell_idx += 1
-
-        # Normalize distances per cell type size
-        for cell_type_idx in range(n_cell_types):
-            pairwise_dists[cell_type_idx] /= cell_type_counts[cell_type_idx]
-
-        for cell_type_idx, cell_type in enumerate(self.cell_types):
-            for sample_idx, sample in enumerate(self.samples):
-                sample_cells = self.adata[
-                    (self.adata.obs[self.sample_key] == sample) & (self.adata.obs[self.cells_type_key] == cell_type)
-                ]
-                n_cells = sample_cells.shape[0]
-
-                if n_cells < n_cells_per_sample_threshold:
-                    # We can't trust distances for that individual of that cell type
-                    pairwise_dists[cell_type_idx, sample_idx, :] = np.nan
-                    pairwise_dists[cell_type_idx, :, sample_idx] = np.nan
-
-        na_distances_percentages = np.isnan(pairwise_dists).sum(axis=1).sum(axis=1) / n_donors**2
-
-        used_cell_types = na_distances_percentages != 1
-
-        warnings.warn(
-            f"{(~used_cell_types).sum()} cell types are too small, removing them for all samples. Filtered cell types: {self.cell_types[~used_cell_types]}",
-            stacklevel=1,
-        )
-
-        self.cell_types = self.cell_types[used_cell_types]
-        pairwise_dists = pairwise_dists[used_cell_types]
-
-        dists, sample_sizes = calculate_average_without_nans(pairwise_dists)
-        return dists, sample_sizes
 
     def __init__(
         self,
         sample_key: str,
         cells_type_key: str,
-        categorical_nuisance_keys: list,
+        batch_key: str = None,
         layer=None,
         seed=67,
-        max_epochs=None,
+        max_epochs=400,
         **model_params,
     ):
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
-
-        self.categorical_nuisance_keys = categorical_nuisance_keys
 
         self.model = None
         self.model_params = model_params
         self.patient_representations = None
         self.max_epochs = max_epochs
+        self.batch_key = batch_key
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Train MrVI model
@@ -769,7 +700,7 @@ class MrVI(PatientsRepresentationMethod):
         ----
         model : MrVI model
         """
-        import mrvi
+        from scvi.external import MRVI
 
         super().prepare_anndata(
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
@@ -777,17 +708,22 @@ class MrVI(PatientsRepresentationMethod):
 
         assert is_count_data(self._get_data()), "`layer` must contain count data with integer numbers"
 
-        mrvi.MrVI.setup_anndata(
-            self.adata,
-            sample_key=self.sample_key,
-            categorical_nuisance_keys=self.categorical_nuisance_keys,
-            layer=self.layer,
-        )
+        MRVI.setup_anndata(self.adata, sample_key=self.sample_key, layer=self.layer, batch_key=self.batch_key)
 
-        self.model = mrvi.MrVI(self.adata, **self.model_params)
+        self.model = MRVI(self.adata, **self.model_params)
         self.model.train(max_epochs=self.max_epochs)
 
-    def calculate_distance_matrix(self, calculate_representations=False, batch_size: int = 1000, force: bool = False):
+        self.samples = self.model.sample_order
+
+    def calculate_distance_matrix(
+        self,
+        groupby=None,
+        keep_cell=True,
+        calculate_representations=False,
+        batch_size: int = 32,
+        mc_samples: int = 10,
+        force: bool = False,
+    ):
         """Return sample by sample distances matrix
 
         Parameters
@@ -829,9 +765,8 @@ class MrVI(PatientsRepresentationMethod):
 
             print("Calculating cells representations")
             # This is a tensor of shape (n_cells, n_samples, n_latent_variables)
-            cell_sample_representations = self.model.get_local_sample_representation(
-                batch_size=batch_size, return_distances=False
-            )
+            cell_sample_representations = self.model.get_local_sample_representation(batch_size=batch_size)
+
             self.patient_representations = np.zeros(shape=(len(self.samples), cell_sample_representations.shape[2]))
 
             print("Calculating samples representations")
@@ -840,15 +775,32 @@ class MrVI(PatientsRepresentationMethod):
                 sample_mask = self.adata.obs[self.sample_key] == sample
                 self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
 
+            # Here, we obtain distances between samples in a different way
+            # MrVI calculates sample-sample distances per cell and then aggregates them (see below)
+            # Here, we first aggregate cells and then calculate sample-sample distances. Note that it produces different results
+            print(
+                f"Using aggregated cell representation approach, distances are stored in self.adata.uns[{self.DISTANCES_UNS_KEY}_cell_based"
+            )
+            distances = scipy.spatial.distance.pdist(self.patient_representations)
+            distances = scipy.spatial.distance.squareform(distances)
+            self.adata.uns[self.DISTANCES_UNS_KEY + "_cell_based"] = distances
+
         print("Calculating distance matrix between samples")
-        distances, sample_sizes = self._optimized_distances_calculation(batch_size=batch_size)
+
+        # Calculate distances in MrVI recommended way with counterfactuals
+        distances = self.model.get_local_sample_distances(
+            groupby=groupby, keep_cell=keep_cell, batch_size=batch_size, mc_samples=mc_samples
+        )
+
+        distances_to_average = distances["cell" if groupby is None else groupby].values
+        avg_distances, sample_sizes = calculate_average_without_nans(distances_to_average, axis=0)
 
         self.adata.uns["mrvi_parameters"] = {
             "batch_size": batch_size,
             "sample_sizes": sample_sizes,
         }
 
-        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        self.adata.uns[self.DISTANCES_UNS_KEY] = avg_distances
 
         return self.adata.uns[self.DISTANCES_UNS_KEY]
 
@@ -1038,13 +990,8 @@ class TotalPseudobulk(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        valid_aggregates = {"mean": np.mean, "median": np.median, "sum": np.sum}
-        if aggregate not in valid_aggregates:
-            raise ValueError(f"Aggregation function {aggregate} is not supported")
-
-        valid_dists = {"euclidean", "cosine", "cityblock"}
-        if dist not in valid_dists:
-            raise ValueError(f"Distance metric {dist} is not supported")
+        aggregation_func = valid_aggregate(aggregate)
+        distance_metric = valid_distance_metric(dist)
 
         data = self._get_data()
 
@@ -1052,16 +999,16 @@ class TotalPseudobulk(PatientsRepresentationMethod):
 
         for i, sample in enumerate(self.samples):
             sample_cells = data[self.adata.obs[self.sample_key] == sample, :]
-            self.patient_representations[i] = valid_aggregates[aggregate](sample_cells, axis=0)
+            self.patient_representations[i] = aggregation_func(sample_cells, axis=0)
 
-        distances = scipy.spatial.distance.pdist(self.patient_representations, metric=dist)
+        distances = scipy.spatial.distance.pdist(self.patient_representations, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
         self.adata.uns["bulk_parameters"] = {
             "sample_key": self.sample_key,
             "aggregate": aggregate,
-            "distance_type": dist,
+            "distance_type": distance_metric,
         }
 
         return distances
@@ -1084,13 +1031,8 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        valid_aggregates = {"mean": np.mean, "median": np.median, "sum": np.sum}
-        if aggregate not in valid_aggregates:
-            raise ValueError(f"Aggregation function {aggregate} is not supported")
-
-        valid_dists = {"euclidean", "cosine", "cityblock"}
-        if dist not in valid_dists:
-            raise ValueError(f"Distance metric {dist} is not supported")
+        aggregation_func = valid_aggregate(aggregate)
+        distance_metric = valid_distance_metric(dist)
 
         data = self._get_data()
 
@@ -1104,13 +1046,13 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
                 if cells_data.size == 0:
                     self.patient_representations[i, j] = np.nan
                 else:
-                    self.patient_representations[i, j] = valid_aggregates[aggregate](cells_data, axis=0)
+                    self.patient_representations[i, j] = aggregation_func(cells_data, axis=0)
 
         # Matrix of distances between samples for each cell type
         distances = np.zeros(shape=(len(self.cell_types), len(self.samples), len(self.samples)))
 
         for i, cell_type_embeddings in enumerate(self.patient_representations):
-            samples_distances = scipy.spatial.distance.pdist(cell_type_embeddings, metric=dist)
+            samples_distances = scipy.spatial.distance.pdist(cell_type_embeddings, metric=distance_metric)
             distances[i] = scipy.spatial.distance.squareform(samples_distances)
 
         avg_distances, sample_sizes = calculate_average_without_nans(distances, axis=0)
@@ -1120,7 +1062,7 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
             "sample_key": self.sample_key,
             "cells_type_key": self.cells_type_key,
             "aggregate": aggregate,
-            "distance_type": dist,
+            "distance_type": distance_metric,
             "sample_sizes": sample_sizes,
         }
 
@@ -1175,9 +1117,7 @@ class CellTypesComposition(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        valid_dists = {"euclidean", "cosine", "cityblock"}
-        if dist not in valid_dists:
-            raise ValueError(f"Distance metric {dist} is not supported")
+        distance_metric = valid_distance_metric(dist)
 
         # Calculate proportions of the cell types for each sample
         self.patient_representations = pd.crosstab(
@@ -1185,11 +1125,11 @@ class CellTypesComposition(PatientsRepresentationMethod):
         )
         self.patient_representations = self.patient_representations.loc[self.samples]
 
-        distances = scipy.spatial.distance.pdist(self.patient_representations.values, metric=dist)
+        distances = scipy.spatial.distance.pdist(self.patient_representations.values, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
-        self.adata.uns["composition_parameters"] = {"sample_key": self.sample_key, "distance_type": dist}
+        self.adata.uns["composition_parameters"] = {"sample_key": self.sample_key, "distance_type": distance_metric}
 
         return distances
 
@@ -1350,18 +1290,16 @@ class SCPoli(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        valid_dists = {"euclidean", "cosine", "cityblock"}
-        if dist not in valid_dists:
-            raise ValueError(f"Distance metric {dist} is not supported")
+        distance_metric = valid_distance_metric(dist)
 
-        distances = scipy.spatial.distance.pdist(self.patient_representation, metric=dist)
+        distances = scipy.spatial.distance.pdist(self.patient_representation, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
         self.adata.uns["scpoli_parameters"] = {
             "sample_key": self.sample_key,
             "cells_type_key": self.cells_type_key,
-            "distance_type": dist,
+            "distance_type": distance_metric,
             "latent_dim": self.latent_dim,
             "n_epochs": self.n_epochs,
             "pretraining_epochs": self.pretraining_epochs,
