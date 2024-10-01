@@ -37,7 +37,8 @@ dependencies = [
     "plottable",
     # for debug logging (referenced from the issue template)
     "session-info",
-    "phate"
+    "phate",
+    "DiffusionEMD @ git+https://github.com/farhadmd7/DiffusionEMD.git@main",
 ]
 
 [project.optional-dependencies]

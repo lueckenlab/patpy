@@ -7,6 +7,7 @@ import scipy
 import seaborn as sns
 
 from patient_representation.pp import (
+    extract_metadata,
     fill_nan_distances,
     filter_small_cell_types,
     filter_small_samples,
@@ -30,6 +31,30 @@ def valid_distance_metric(dist: str):
     if dist not in valid_dists:
         raise ValueError(f"Distance metric '{dist}' is not supported")
     return dist
+
+
+def make_matrix_symmetric(matrix, matrix_name="Matrix"):
+    """Make a matrix symmetric by averaging it with its transpose
+
+    Parameters
+    ----------
+    matrix : np.ndarray
+        The input matrix to be made symmetric
+    matrix_name : str, optional
+        Name of the matrix for the warning message, by default "Matrix"
+
+    Returns
+    -------
+    np.ndarray
+        Symmetric matrix
+    """
+    if (matrix == matrix.T).all():
+        return matrix
+
+    unsymmetry = matrix - matrix.T
+    warnings.warn(f"{matrix_name} is not symmetric. Highest deviation: {unsymmetry.max()}. Fixing", stacklevel=2)
+
+    return (matrix + matrix.T) / 2
 
 
 def create_colormap(df, col, palette="Spectral"):
@@ -250,22 +275,7 @@ class PatientsRepresentationMethod:
 
     def _extract_metadata(self, columns) -> pd.DataFrame:
         """Return dataframe with requested `columns` in the correct rows order"""
-        metadata = self.adata.obs[[self.sample_key, *columns]].drop_duplicates()
-
-        # If sample_key is in `columns`, it will cause error, when reindexing data frame
-        need_to_rename_sample_key = self.sample_key in columns
-
-        # To avoid error, we rename column with sample key, reindex dataframe, and then rename sample column back
-        if need_to_rename_sample_key:
-            # Rename the first column with sample key to sample_key_dupl
-            metadata.columns = [self.sample_key + "_dupl"] + list(metadata.columns[1:])
-
-        metadata = metadata.set_index(self.sample_key)
-
-        if need_to_rename_sample_key:
-            metadata.rename(columns={self.sample_key + "_dupl": self.sample_key}, inplace=True)
-
-        return metadata.loc[self.samples]
+        return extract_metadata(self.adata, self.sample_key, columns, samples=self.samples)
 
     def __init__(self, sample_key, cells_type_key, layer=None, seed=67):
         """Initialize the model
@@ -882,17 +892,6 @@ class PILOT(PatientsRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_pilot_distances"
 
-    @staticmethod
-    def _make_matrix_symmetric(matrix):
-        """Distances matrix returned by pilot.wasserstein_d is slightly not symmetric. This method fixes it"""
-        if (matrix == matrix.T).all():
-            return matrix
-
-        unsymmetry = matrix - matrix.T
-        warnings.warn(f"Distances matrix is not symmetric. Highest deviation: {unsymmetry.max()}. Fixing", stacklevel=1)
-
-        return (matrix + matrix.T) / 2
-
     def __init__(
         self,
         sample_key,
@@ -958,7 +957,7 @@ class PILOT(PatientsRepresentationMethod):
         )
 
         distances = self.adata.uns["EMD_df"].loc[self.samples, self.samples].to_numpy()
-        distances = self._make_matrix_symmetric(distances)
+        distances = make_matrix_symmetric(distances, "wasserstein distances matrix in PILOT")
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
         self.adata.uns["pilot_parameters"] = {
@@ -1382,3 +1381,64 @@ class PhEMD(PatientsRepresentationMethod):
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
 
         return distances
+
+
+class DiffusionEarthMoverDistance(PatientsRepresentationMethod):
+    """Diffusion Earth Mover's Distance. Source: https://arxiv.org/pdf/2102.12833"""
+
+    DISTANCES_UNS_KEY = "X_diffusion_emd"
+
+    def __init__(self, sample_key, cells_type_key, layer=None, seed=67, n_neighbors: int = 15, n_scales: int = 6):
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
+
+        self.n_neighbors = n_neighbors
+        self.n_scales = n_scales
+        self.labels = None
+        self.model = None
+        self.patient_representations = None
+
+    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
+        """Prepare anndata, calculate neighbors and convert labels to distributions as required by DiffusionEMD"""
+        from DiffusionEMD import DiffusionCheb
+
+        super().prepare_anndata(
+            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
+        )
+
+        # Encode labels as one-hot and normalize them per sample
+        samples_encoding = pd.get_dummies(self.adata.obs[self.sample_key])
+        labels = samples_encoding.to_numpy().astype(int)
+        self.labels = labels / labels.sum(axis=0)
+
+        # Make sure that the order is correct
+        self.samples = samples_encoding.columns
+
+        sc.pp.neighbors(self.adata, use_rep=self.layer, method="gauss", n_neighbors=self.n_neighbors)
+
+        self.adata.obsp["connectivities"] = make_matrix_symmetric(
+            self.adata.obsp["connectivities"], "Connectivities matrix in DiffusionEarthMoverDistance"
+        )
+
+        self.model = DiffusionCheb(n_scales=self.n_scales)
+
+    def calculate_distance_matrix(self, force: bool = False):
+        """Calculate distances between samples"""
+        distances = super().calculate_distance_matrix(force=force)
+
+        if distances is not None:
+            return distances
+
+        # Embeddings where the L1 distance approximates the Earth Mover's Distance
+        self.patient_representations = self.model.fit_transform(self.adata.obsp["connectivities"], self.labels)
+        distances = scipy.spatial.distance.pdist(self.patient_representations, metric="cityblock")
+        distances = scipy.spatial.distance.squareform(distances)
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        self.adata.uns["diffusion_emd_parameters"] = {
+            "sample_key": self.sample_key,
+            "cells_type_key": self.cells_type_key,
+            "n_neighbors": self.n_neighbors,
+            "n_scales": self.n_scales,
+        }
+
+        return self.adata.uns[self.DISTANCES_UNS_KEY]

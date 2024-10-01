@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import scanpy as sc
 
 
 def prepare_data_for_phemd(adata, sample_col, n_top_var_genes: int = 100):
@@ -105,6 +106,41 @@ def calculate_compositional_metrics(adata, sample_key, composition_keys, normali
     compositional_metrics = pd.concat(compositional_metrics, axis=1)
 
     return compositional_metrics
+
+
+def extract_metadata(adata: sc.AnnData, sample_key: str, columns: list, samples: list = None) -> pd.DataFrame:
+    """
+    Return a dataframe with requested `columns` in the correct rows order.
+
+    Parameters
+    ----------
+    - adata (sc.AnnData): The AnnData object containing the data.
+    - sample_key (str): The key identifying the sample in the observation metadata.
+    - columns (list): A list of column names to extract from the observation metadata.
+
+    Returns
+    -------
+    - pd.DataFrame: A dataframe with the requested columns, indexed by the sample key.
+    """
+    if samples is None:
+        samples = adata.obs[sample_key].unique()
+
+    metadata = adata.obs[[sample_key, *columns]].drop_duplicates()
+
+    # Check if the sample key is also in columns to avoid reindexing errors
+    need_to_rename_sample_key = sample_key in columns
+
+    # To avoid error, we rename column with sample key, reindex dataframe, and then rename sample column back
+    if need_to_rename_sample_key:
+        # Rename the first column with sample key to sample_key_dupl
+        metadata.columns = [sample_key + "_dupl"] + list(metadata.columns[1:])
+
+    metadata = metadata.set_index(sample_key)
+
+    if need_to_rename_sample_key:
+        metadata.rename(columns={sample_key + "_dupl": sample_key}, inplace=True)
+
+    return metadata.loc[samples]
 
 
 def calculate_cell_qc_metrics(adata, sample_key, cell_qc_vars, agg_function=np.median) -> pd.DataFrame:
