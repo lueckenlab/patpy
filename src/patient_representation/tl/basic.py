@@ -661,100 +661,6 @@ class MrVI(PatientsRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_mrvi_distances"
 
-    def _optimized_distances_calculation(self, batch_size=256, mc_samples: int = 10, n_cells_per_sample_threshold=5):
-        """Calculate pairwise distances between samples not storing large tensors in memory
-
-        This code is based on the following functions from MrVI:
-        1. https://github.com/YosefLab/mrvi/blob/d1934e4889bbf383e411d2d39558488e1568fb0c/mrvi/_model.py#L208
-        2. https://github.com/YosefLab/mrvi/blob/d1934e4889bbf383e411d2d39558488e1568fb0c/mrvi/_model.py#L187
-
-        However, it calculates the mean distance between samples instead of storing tensors of
-        representations and distances in memory. According to local tests, the result is the same
-        with a small numerical error (up to 4%).
-
-        Parameters
-        ----------
-        batch_size
-            Batch size to use for computing the local sample representation.
-        mc_samples
-            Number of Monte Carlo samples to use for computing the local sample representation.
-        n_cells_per_sample_threshold : int = 5
-            Minimum number of cells per cell type in sample to be considered. If there are fewer cells,
-            pairwise distances with other samples are not calculated
-
-        Returns
-        -------
-        pairwise_dists : np.ndarray
-            Pairwise distances between samples
-        """
-        import torch
-        from mrvi._constants import MRVI_REGISTRY_KEYS
-        from sklearn.metrics import pairwise_distances
-        from tqdm import tqdm
-
-        cell_types_to_idx = dict(zip(self.cell_types, np.arange(len(self.cell_types))))
-        n_donors = len(self.samples)
-        n_cell_types = len(self.cell_types)
-        pairwise_dists = np.zeros((n_cell_types, n_donors, n_donors))
-
-        cell_types = self.adata.obs[self.cells_type_key].to_numpy()
-        cell_type_counts = self.adata.obs[self.cells_type_key].value_counts().loc[self.cell_types]
-
-        cell_idx = 0
-
-        with torch.no_grad():
-            data_loader = self.model._make_data_loader(adata=self.adata, indices=None, batch_size=batch_size)
-
-            for tensors in tqdm(data_loader):
-                xs = []
-                for sample in range(self.model.summary_stats.n_sample):
-                    cf_sample = sample * torch.ones_like(tensors[MRVI_REGISTRY_KEYS.SAMPLE_KEY])
-                    inference_inputs = self.model.module._get_inference_input(tensors)
-                    inference_outputs = self.model.module.inference(
-                        mc_samples=mc_samples, cf_sample=cf_sample, **inference_inputs
-                    )
-                    new = inference_outputs["z"]
-
-                    xs.append(new[:, :, None])
-
-                xs = torch.cat(xs, 2).mean(0)
-
-                for cell in xs:
-                    cell_type_idx = cell_types_to_idx[cell_types[cell_idx]]
-                    pairwise_dists[cell_type_idx] += pairwise_distances(cell.cpu().numpy(), metric="euclidean")
-                    cell_idx += 1
-
-        # Normalize distances per cell type size
-        for cell_type_idx in range(n_cell_types):
-            pairwise_dists[cell_type_idx] /= cell_type_counts[cell_type_idx]
-
-        for cell_type_idx, cell_type in enumerate(self.cell_types):
-            for sample_idx, sample in enumerate(self.samples):
-                sample_cells = self.adata[
-                    (self.adata.obs[self.sample_key] == sample) & (self.adata.obs[self.cells_type_key] == cell_type)
-                ]
-                n_cells = sample_cells.shape[0]
-
-                if n_cells < n_cells_per_sample_threshold:
-                    # We can't trust distances for that individual of that cell type
-                    pairwise_dists[cell_type_idx, sample_idx, :] = np.nan
-                    pairwise_dists[cell_type_idx, :, sample_idx] = np.nan
-
-        na_distances_percentages = np.isnan(pairwise_dists).sum(axis=1).sum(axis=1) / n_donors**2
-
-        used_cell_types = na_distances_percentages != 1
-
-        warnings.warn(
-            f"{(~used_cell_types).sum()} cell types are too small, removing them for all samples. Filtered cell types: {self.cell_types[~used_cell_types]}",
-            stacklevel=1,
-        )
-
-        self.cell_types = self.cell_types[used_cell_types]
-        pairwise_dists = pairwise_dists[used_cell_types]
-
-        dists, sample_sizes = calculate_average_without_nans(pairwise_dists)
-        return dists, sample_sizes
-
     def __init__(
         self,
         sample_key: str,
@@ -841,9 +747,8 @@ class MrVI(PatientsRepresentationMethod):
 
             print("Calculating cells representations")
             # This is a tensor of shape (n_cells, n_samples, n_latent_variables)
-            cell_sample_representations = self.model.get_local_sample_representation(
-                batch_size=batch_size, return_distances=False
-            )
+            cell_sample_representations = self.model.get_local_sample_representation(batch_size=batch_size)
+
             self.patient_representations = np.zeros(shape=(len(self.samples), cell_sample_representations.shape[2]))
 
             print("Calculating samples representations")
@@ -854,7 +759,6 @@ class MrVI(PatientsRepresentationMethod):
 
         print("Calculating distance matrix between samples")
 
-        # distances, sample_sizes = self._optimized_distances_calculation(batch_size=batch_size)
         distances = self.model.get_local_sample_distances(
             groupby=groupby, keep_cell=keep_cell, batch_size=batch_size, mc_samples=10
         )
