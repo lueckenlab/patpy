@@ -23,5 +23,3 @@
     pp.is_count_data
     pp.fill_nan_distances
 ```
-
-
