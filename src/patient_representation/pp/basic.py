@@ -1,7 +1,9 @@
+import warnings
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import scipy.io
 
 
 def prepare_data_for_phemd(adata, sample_col, n_top_var_genes: int = 100):
@@ -47,6 +49,64 @@ def convert_cell_types_to_phemd_format(
         pd.DataFrame(all_genes).to_csv(cell_type_dir / "all_genes.csv", index=False, header=False)
         pd.DataFrame(selected_genes).to_csv(cell_type_dir / "selected_genes.csv", index=False, header=False)
         pd.DataFrame(samples_names).to_csv(cell_type_dir / "samples.csv", index=False, header=False)
+
+
+def save_scitd_input_files(adata, output_dir, sample_col, cell_type_col, metadata_columns=None, raw_counts_layer=None):
+    """Save the input files for ScITD (R implementation)
+
+    It requires:
+    1. Raw counts matrix: sparse matrix with cells in rows and genes in columns
+    2. Cells metadata: sample and cell type annotations, optionally other covariates:
+    dataframe with columns "donors", "ctypes", and optionally others
+    3. Gene names mapping: dataframe without column names with two columns containing
+    Ensembl IDs in the first column and gene names in the second. This is typically
+    stored in various ways in `adata.var`, so this function does not creates such file.
+    Please, do it manually.
+
+    Parameters
+    ----------
+    adata : AnnData
+        Annotated data object
+    output_dir : Union[str, Path]
+        Directory to save the input files
+    sample_col : str
+        Column in `adata.obs` containing sample annotations
+    cell_type_col : str
+        Column in `adata.obs` containing cell type annotations
+    metadata_columns : list[str] = None
+        List of other columns in `adata.obs` to include in the metadata file
+    raw_counts_layer : str = "X"
+        Layer in `adata` containing raw counts
+    """
+    if raw_counts_layer is None:
+        expression_data = adata.X
+    elif raw_counts_layer in adata.layers:
+        expression_data = adata.layers[raw_counts_layer]
+    elif raw_counts_layer in adata.obsm:
+        expression_data = adata.obsm[raw_counts_layer]
+    else:
+        raise ValueError(f"Layer {raw_counts_layer} not found in adata")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check if expression_data is sparse, if not, convert it to sparse
+    if not scipy.sparse.issparse(expression_data):
+        warnings.warn(
+            "Expression data is not sparse. Converting to sparse matrix. Please make sure you provided the correct raw counts layer",
+            stacklevel=1,
+        )
+        expression_data = scipy.sparse.csr_matrix(expression_data)
+
+    scipy.io.mmwrite(output_dir / "expression_data.mtx", expression_data)
+
+    metadata_cols = [sample_col, cell_type_col]
+
+    if metadata_columns is not None:
+        metadata_cols.extend(metadata_columns)
+
+    metadata = adata.obs[metadata_cols].rename(columns={sample_col: "donors", cell_type_col: "ctypes"})
+    metadata.to_csv(output_dir / "metadata.csv", index=True)
 
 
 def calculate_compositional_metrics(adata, sample_key, composition_keys, normalize_to: int = 100) -> pd.DataFrame:
