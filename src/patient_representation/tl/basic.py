@@ -773,16 +773,19 @@ class MrVI(PatientsRepresentationMethod):
                 sample_mask = self.adata.obs[self.sample_key] == sample
                 self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
 
-            # TODO: decide between different approaches
-            # approach 1
-            print(f"using approach 1, distances are stored in self.adata.uns[{self.DISTANCES_UNS_KEY}_approach1")
+            # Here, we obtain distances between samples in a different way
+            # MrVI calculates sample-sample distances per cell and then aggregates them (see below)
+            # Here, we first aggregate cells and then calculate sample-sample distances. Note that it produces different results
+            print(
+                f"Using aggregated cell representation approach, distances are stored in self.adata.uns[{self.DISTANCES_UNS_KEY}_cell_based"
+            )
             distances = scipy.spatial.distance.pdist(self.patient_representations)
             distances = scipy.spatial.distance.squareform(distances)
-            self.adata.uns[self.DISTANCES_UNS_KEY + "_approach1"] = distances
+            self.adata.uns[self.DISTANCES_UNS_KEY + "_cell_based"] = distances
 
         print("Calculating distance matrix between samples")
 
-        # approach 2
+        # Calculate distances in MrVI recommended way with counterfactuals
         distances = self.model.get_local_sample_distances(
             groupby=groupby, keep_cell=keep_cell, batch_size=batch_size, mc_samples=mc_samples
         )
