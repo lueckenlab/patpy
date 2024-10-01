@@ -704,7 +704,13 @@ class MrVI(PatientsRepresentationMethod):
         self.model.train(max_epochs=self.max_epochs)
 
     def calculate_distance_matrix(
-        self, groupby=None, keep_cell=True, calculate_representations=False, batch_size: int = 32, force: bool = False
+        self,
+        groupby=None,
+        keep_cell=True,
+        calculate_representations=False,
+        batch_size: int = 32,
+        mc_samples: int = 10,
+        force: bool = False,
     ):
         """Return sample by sample distances matrix
 
@@ -757,10 +763,18 @@ class MrVI(PatientsRepresentationMethod):
                 sample_mask = self.adata.obs[self.sample_key] == sample
                 self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
 
+            # TODO: decide between different approaches
+            # approach 1
+            print(f"using approach 1, distances are stored in self.adata.uns[{self.DISTANCES_UNS_KEY}_approach1")
+            distances = scipy.spatial.distance.pdist(self.patient_representations)
+            distances = scipy.spatial.distance.squareform(distances)
+            self.adata.uns[self.DISTANCES_UNS_KEY + "_approach1"] = distances
+
         print("Calculating distance matrix between samples")
 
+        # approach 2
         distances = self.model.get_local_sample_distances(
-            groupby=groupby, keep_cell=keep_cell, batch_size=batch_size, mc_samples=10
+            groupby=groupby, keep_cell=keep_cell, batch_size=batch_size, mc_samples=mc_samples
         )
 
         distances_to_average = distances["cell" if groupby is None else groupby].values
