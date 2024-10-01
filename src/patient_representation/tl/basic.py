@@ -656,7 +656,7 @@ class PatientsRepresentationMethod:
 class MrVI(PatientsRepresentationMethod):
     """Deep generative modeling for quantifying sample-level heterogeneity in single-cell omics.
 
-    Source: https://www.biorxiv.org/content/10.1101/2022.10.04.510898v1
+    Source: https://www.biorxiv.org/content/10.1101/2022.10.04.510898v2
     """
 
     DISTANCES_UNS_KEY = "X_mrvi_distances"
@@ -690,7 +690,7 @@ class MrVI(PatientsRepresentationMethod):
         ----
         model : MrVI model
         """
-        from mrvi import MrVI
+        from scvi.external import MRVI
 
         super().prepare_anndata(
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
@@ -698,9 +698,9 @@ class MrVI(PatientsRepresentationMethod):
 
         assert is_count_data(self._get_data()), "`layer` must contain count data with integer numbers"
 
-        MrVI.setup_anndata(self.adata, sample_key=self.sample_key, layer=self.layer, batch_key=self.batch_key)
+        MRVI.setup_anndata(self.adata, sample_key=self.sample_key, layer=self.layer, batch_key=self.batch_key)
 
-        self.model = MrVI(self.adata, **self.model_params)
+        self.model = MRVI(self.adata, **self.model_params)
         self.model.train(max_epochs=self.max_epochs)
 
     def calculate_distance_matrix(
