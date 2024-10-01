@@ -713,6 +713,8 @@ class MrVI(PatientsRepresentationMethod):
         self.model = MRVI(self.adata, **self.model_params)
         self.model.train(max_epochs=self.max_epochs)
 
+        self.samples = self.model.sample_order
+
     def calculate_distance_matrix(
         self,
         groupby=None,
