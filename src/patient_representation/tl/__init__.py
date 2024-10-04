@@ -3,6 +3,7 @@ from .basic import (
     CellTypesComposition,
     DiffusionEarthMoverDistance,
     MrVI,
+    PILOT,
     RandomVector,
     SCPoli,
     TotalPseudobulk,
