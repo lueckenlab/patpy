@@ -708,7 +708,8 @@ class MrVI(PatientsRepresentationMethod):
 
         assert is_count_data(self._get_data()), "`layer` must contain count data with integer numbers"
 
-        MRVI.setup_anndata(self.adata, sample_key=self.sample_key, layer=self.layer, batch_key=self.batch_key)
+        layer = None if self.layer == 'X' else self.layer
+        MRVI.setup_anndata(self.adata, sample_key=self.sample_key, layer=layer, batch_key=self.batch_key)
 
         self.model = MRVI(self.adata, **self.model_params)
         self.model.train(max_epochs=self.max_epochs)
