@@ -48,29 +48,34 @@ def make_matrix_symmetric(matrix, matrix_name="Matrix"):
     np.ndarray or scipy.sparse.spmatrix
         Symmetric matrix.
     """
+    import warnings
+
+    import numpy as np
     import scipy.sparse
 
-    if scipy.sparse.issparse(matrix):
-        diff = matrix - matrix.T
-        if diff.nnz == 0:
-            return matrix
+    is_sparse = scipy.sparse.issparse(matrix)
+
+    def is_symmetric(mat):
+        if is_sparse:
+            diff = mat - mat.T
+            return np.allclose(diff.data, 0)
         else:
-            unsymmetry = np.abs(diff.data).max()
-            warnings.warn(
-                f"{matrix_name} is not symmetric. Highest deviation: {unsymmetry}. Fixing",
-                stacklevel=2,
-            )
-            sym_matrix = (matrix + matrix.T).multiply(0.5)
-            return sym_matrix
+            return np.allclose(mat, mat.T)
+
+    def symmetrize(mat):
+        if is_sparse:
+            return (mat + mat.T).multiply(0.5)
+        else:
+            return (mat + mat.T) * 0.5
+
+    if is_symmetric(matrix):
+        return matrix
     else:
-        if (matrix == matrix.T).all():
-            return matrix
-        unsymmetry = np.abs(matrix - matrix.T).max()
         warnings.warn(
-            f"{matrix_name} is not symmetric. Highest deviation: {unsymmetry}. Fixing",
+            f"{matrix_name} is not symmetric. Fixing by symmetrizing.",
             stacklevel=2,
         )
-        return (matrix + matrix.T) / 2
+        return symmetrize(matrix)
 
 
 def create_colormap(df, col, palette="Spectral"):
