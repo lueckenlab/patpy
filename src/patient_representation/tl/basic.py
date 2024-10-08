@@ -34,27 +34,43 @@ def valid_distance_metric(dist: str):
 
 
 def make_matrix_symmetric(matrix, matrix_name="Matrix"):
-    """Make a matrix symmetric by averaging it with its transpose
+    """Make a matrix symmetric by averaging it with its transpose.
 
     Parameters
     ----------
-    matrix : np.ndarray
-        The input matrix to be made symmetric
+    matrix : np.ndarray or scipy.sparse.spmatrix
+        The input matrix to be made symmetric.
     matrix_name : str, optional
-        Name of the matrix for the warning message, by default "Matrix"
+        Name of the matrix for the warning message, by default "Matrix".
 
     Returns
     -------
-    np.ndarray
-        Symmetric matrix
+    np.ndarray or scipy.sparse.spmatrix
+        Symmetric matrix.
     """
-    if (matrix == matrix.T).all():
-        return matrix
+    import scipy.sparse
 
-    unsymmetry = matrix - matrix.T
-    warnings.warn(f"{matrix_name} is not symmetric. Highest deviation: {unsymmetry.max()}. Fixing", stacklevel=2)
-
-    return (matrix + matrix.T) / 2
+    if scipy.sparse.issparse(matrix):
+        diff = matrix - matrix.T
+        if diff.nnz == 0:
+            return matrix
+        else:
+            unsymmetry = np.abs(diff.data).max()
+            warnings.warn(
+                f"{matrix_name} is not symmetric. Highest deviation: {unsymmetry}. Fixing",
+                stacklevel=2,
+            )
+            sym_matrix = (matrix + matrix.T).multiply(0.5)
+            return sym_matrix
+    else:
+        if (matrix == matrix.T).all():
+            return matrix
+        unsymmetry = np.abs(matrix - matrix.T).max()
+        warnings.warn(
+            f"{matrix_name} is not symmetric. Highest deviation: {unsymmetry}. Fixing",
+            stacklevel=2,
+        )
+        return (matrix + matrix.T) / 2
 
 
 def create_colormap(df, col, palette="Spectral"):
@@ -708,7 +724,7 @@ class MrVI(PatientsRepresentationMethod):
 
         assert is_count_data(self._get_data()), "`layer` must contain count data with integer numbers"
 
-        layer = None if self.layer == 'X' else self.layer
+        layer = None if self.layer == "X" else self.layer
         MRVI.setup_anndata(self.adata, sample_key=self.sample_key, layer=layer, batch_key=self.batch_key)
 
         self.model = MRVI(self.adata, **self.model_params)
