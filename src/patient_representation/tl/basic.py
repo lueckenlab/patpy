@@ -33,7 +33,7 @@ def valid_distance_metric(dist: str):
     return dist
 
 
-def make_matrix_symmetric(matrix, matrix_name="Matrix"):
+def make_matrix_symmetric(matrix):
     """Make a matrix symmetric by averaging it with its transpose.
 
     Parameters
@@ -72,7 +72,7 @@ def make_matrix_symmetric(matrix, matrix_name="Matrix"):
         return matrix
     else:
         warnings.warn(
-            f"{matrix_name} is not symmetric. Fixing by symmetrizing.",
+            "Data matrix is not symmetric. Fixing by symmetrizing.",
             stacklevel=2,
         )
         return symmetrize(matrix)
@@ -984,7 +984,7 @@ class PILOT(PatientsRepresentationMethod):
         )
 
         distances = self.adata.uns["EMD_df"].loc[self.samples, self.samples].to_numpy()
-        distances = make_matrix_symmetric(distances, "wasserstein distances matrix in PILOT")
+        distances = make_matrix_symmetric(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
         self.adata.uns["pilot_parameters"] = {
@@ -1442,9 +1442,7 @@ class DiffusionEarthMoverDistance(PatientsRepresentationMethod):
 
         sc.pp.neighbors(self.adata, use_rep=self.layer, method="gauss", n_neighbors=self.n_neighbors)
 
-        self.adata.obsp["connectivities"] = make_matrix_symmetric(
-            self.adata.obsp["connectivities"], "Connectivities matrix in DiffusionEarthMoverDistance"
-        )
+        self.adata.obsp["connectivities"] = make_matrix_symmetric(self.adata.obsp["connectivities"])
 
         self.model = DiffusionCheb(n_scales=self.n_scales)
 
