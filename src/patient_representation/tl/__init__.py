@@ -4,6 +4,7 @@ from .basic import (
     CellTypesComposition,
     DiffusionEarthMoverDistance,
     MOFA2MethodPatientsAsSamples,
+    MOFA2MethodPatientsAsSamplesCellTypesAsViews,
     MrVI,
     RandomVector,
     SCPoli,
