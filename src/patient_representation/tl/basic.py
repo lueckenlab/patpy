@@ -1553,7 +1553,7 @@ class MOFA2MethodPatientsAsSamples(PatientsRepresentationMethod):
 
         factors_expectation = expectations["Z"]  # Dict with keys 'E' and 'V'
 
-        factors_matrix = factors_expectation["E"]  # Shape: (n_samples, n_factors)
+        factors_matrix = factors_expectation["E"]
 
         # Store patient representations
         self.patient_representations = factors_matrix  # Shape: (n_patients, n_factors)
@@ -1582,7 +1582,6 @@ class MOFA2MethodPatientsAsSamplesCellTypesAsViews(PatientsRepresentationMethod)
         self.mofa_params = mofa_params
         self.model = None
         self.patient_representations = None
-        self.patient_ids = None
         self.views = None  # Dictionary of views (cell types)
         self.cell_types = None
 
@@ -1635,9 +1634,6 @@ class MOFA2MethodPatientsAsSamplesCellTypesAsViews(PatientsRepresentationMethod)
 
         self.views = views  # numpy arr list, one per view (here cell type)
 
-        print("Number of patients:", len(self.samples))
-        print("Number of views (cell types):", len(self.views))
-
     def calculate_distance_matrix(self, force=False):
         """Calculate distances between patients using MOFA factors."""
         distances = super().calculate_distance_matrix(force=force)
@@ -1680,17 +1676,11 @@ class MOFA2MethodPatientsAsSamplesCellTypesAsViews(PatientsRepresentationMethod)
         expectations = self.model.getExpectations()
 
         factors_expectation = expectations["Z"]
-
-        # Check if 'E' key exists
-        if "E" in factors_expectation:
-            factors_matrix = factors_expectation["E"]  # Shape: (n_samples, n_factors)
-        else:
-            print(f"factors_expectation keys: {factors_expectation.keys()}")
-            raise KeyError("Unexpected keys in factors_expectation")
+        factors_matrix = factors_expectation["E"]
 
         self.patient_representations = factors_matrix  # Shape: (n_patients, n_factors)
 
-        # Compute distances between patients
+        # Compute distances between patients, TODO: diff metrics
         distances = scipy.spatial.distance.pdist(self.patient_representations, metric="euclidean")
         distances = scipy.spatial.distance.squareform(distances)
 
