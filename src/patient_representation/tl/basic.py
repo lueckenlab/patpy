@@ -1508,9 +1508,6 @@ class MOFA2MethodPatientsAsSamples(PatientsRepresentationMethod):
         # update the samples
         self.samples = aggregated_data.index.tolist()
 
-        print("+++++++++++++self.samples:")
-        print(self.samples)
-
         self.data_matrix = aggregated_data.values  # Shape: (n_patients, n_genes)
 
     def calculate_distance_matrix(self, force=False):
@@ -1556,11 +1553,7 @@ class MOFA2MethodPatientsAsSamples(PatientsRepresentationMethod):
 
         factors_expectation = expectations["Z"]  # Dict with keys 'E' and 'V'
 
-        if "E" in factors_expectation:
-            factors_matrix = factors_expectation["E"]  # Shape: (n_samples, n_factors)
-        else:
-            print(f"factors_expectation keys: {factors_expectation.keys()}")
-            raise KeyError("???????????????????????? no['E']  ")
+        factors_matrix = factors_expectation["E"]  # Shape: (n_samples, n_factors)
 
         # Store patient representations
         self.patient_representations = factors_matrix  # Shape: (n_patients, n_factors)
