@@ -1480,3 +1480,40 @@ class MOFA2MethodPatientsAsSamples(PatientsRepresentationMethod):
         self.mofa_params = mofa_params
         self.model = None
         self.patient_representations = None
+
+    def prepare_anndata(self, adata, sample_size_threshold=1, cluster_size_threshold=0):
+        """Prepare data for MOFA2, treating patients as samples, aggregating gene expression."""
+        super().prepare_anndata(
+            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
+        )
+
+        data = self._get_data()
+        # --> MOFA only accepts dense arr (TODO: to be investigated)
+        if scipy.sparse.issparse(data):
+            data = data.toarray()
+
+        # get gene
+        genes = self.adata.var_names.astype(str)
+
+        # get patient IDs
+        patient_ids = self.adata.obs[self.sample_key].astype(str).values
+
+        # Create DataFrame from the gene expression
+        data_df = pd.DataFrame(data, columns=genes)
+        data_df["patient_id"] = patient_ids
+
+        # TODO: add diff aggregation -> aggregate gene expression per patient
+        aggregated_data = data_df.groupby("patient_id").mean()
+
+        # Store the aggregated data and patient IDs
+        self.patient_ids = aggregated_data.index.tolist()
+
+        # self.samples = aggregated_data.index.tolist()
+
+        print("+++++++++++++self.samples:")
+        print(self.samples)
+
+        self.data_matrix = aggregated_data.values  # Shape: (n_patients, n_genes)
+
+        print("Number of patients:", len(self.patient_ids))
+        print("Number of features (genes):", self.data_matrix.shape[1])
