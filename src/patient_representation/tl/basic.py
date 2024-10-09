@@ -1585,3 +1585,55 @@ class MOFA2MethodPatientsAsSamplesCellTypesAsViews(PatientsRepresentationMethod)
         self.patient_ids = None
         self.views = None  # Dictionary of views (cell types)
         self.cell_types = None
+
+    def prepare_anndata(self, adata, sample_size_threshold=1, cluster_size_threshold=0):
+        """Prepare data for MOFA2, treating patients as samples, cell types as views."""
+        super().prepare_anndata(
+            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
+        )
+
+        # --> MOFA only accepts dense arr (TODO: to be investigated)
+        data = self._get_data()
+        if scipy.sparse.issparse(data):
+            data = data.toarray()
+
+        # get gene
+        genes = self.adata.var_names.astype(str)
+
+        # get patient IDs AND cell types
+        patient_ids = self.adata.obs[self.sample_key].astype(str).values
+        cell_types = self.adata.obs[self.cells_type_key].astype(str).values
+
+        # DataFrame from the gene expression
+        data_df = pd.DataFrame(data, columns=genes)
+        data_df["patient_id"] = patient_ids
+        data_df["cell_type"] = cell_types
+
+        # Get list of unique patients and cell types
+        unique_patients = data_df["patient_id"].unique()
+        self.samples = unique_patients.tolist()
+        unique_cell_types = data_df["cell_type"].unique()
+        self.cell_types = unique_cell_types.tolist()
+
+        # TODO: add differenet aggregation
+        aggregated_data = data_df.groupby(["patient_id", "cell_type"]).mean()
+
+        # Each cell type is a view
+        views = []
+        for cell_type in unique_cell_types:
+            # Get data for this cell type
+            if cell_type in aggregated_data.index.get_level_values("cell_type"):
+                cell_type_data = aggregated_data.xs(
+                    cell_type, level="cell_type"
+                )  # -> Return cross-section at cell type level
+                # Reindex to ensure all patients are included, if patient not existed -> fills with zero
+                cell_type_data = cell_type_data.reindex(unique_patients, fill_value=0)
+                cell_type_matrix = cell_type_data.values  # Shape: (n_patients, n_genes)
+                views.append(cell_type_matrix)
+            else:
+                print(f"Cell type {cell_type} not found in aggregated data.")
+
+        self.views = views  # numpy arr list, one per view (here cell type)
+
+        print("Number of patients:", len(self.samples))
+        print("Number of views (cell types):", len(self.views))
