@@ -1512,3 +1512,67 @@ class MOFA2MethodPatientsAsSamples(PatientsRepresentationMethod):
         print(self.samples)
 
         self.data_matrix = aggregated_data.values  # Shape: (n_patients, n_genes)
+
+    def calculate_distance_matrix(self, force=False):
+        """Calculate distances between patients using MOFA factors."""
+        distances = super().calculate_distance_matrix(force=force)
+        if distances is not None:
+            return distances
+
+        from mofapy2.run.entry_point import entry_point
+
+        ent = entry_point()
+
+        # Set data options
+        ent.set_data_options(
+            scale_groups=False,
+            scale_views=True,
+            center_groups=False,
+        )
+
+        # Prepare data as a single view with one group
+        data_matrix = [[self.data_matrix]]  # -> cuz MOFA expects data[view][group][samples, features]
+
+        ent.set_data_matrix(
+            data=data_matrix, samples_names=[self.samples], views_names=["gene_expression"], groups_names=["group1"]
+        )
+
+        ent.set_model_options(
+            factors=self.n_factors,
+            ard_factors=True,
+            ard_weights=True,
+            spikeslab_weights=True,
+        )
+
+        ent.set_train_options(seed=self.seed, verbose=True, **self.mofa_params)
+
+        ent.build()
+        ent.run()
+
+        self.model = ent.model
+
+        # Retrieve expectations
+        expectations = self.model.getExpectations()
+
+        factors_expectation = expectations["Z"]  # Dict with keys 'E' and 'V'
+
+        if "E" in factors_expectation:
+            factors_matrix = factors_expectation["E"]  # Shape: (n_samples, n_factors)
+        else:
+            print(f"factors_expectation keys: {factors_expectation.keys()}")
+            raise KeyError("???????????????????????? no['E']  ")
+
+        # Store patient representations
+        self.patient_representations = factors_matrix  # Shape: (n_patients, n_factors)
+
+        # Compute distances between patients
+        distances = scipy.spatial.distance.pdist(self.patient_representations, metric="euclidean")
+        distances = scipy.spatial.distance.squareform(distances)
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        self.adata.uns["mofa_parameters"] = {
+            "sample_key": self.sample_key,
+            "n_factors": self.n_factors,
+        }
+
+        return distances
