@@ -1505,15 +1505,10 @@ class MOFA2MethodPatientsAsSamples(PatientsRepresentationMethod):
         # TODO: add diff aggregation -> aggregate gene expression per patient
         aggregated_data = data_df.groupby("patient_id").mean()
 
-        # Store the aggregated data and patient IDs
-        self.patient_ids = aggregated_data.index.tolist()
-
-        # self.samples = aggregated_data.index.tolist()
+        # update the samples
+        self.samples = aggregated_data.index.tolist()
 
         print("+++++++++++++self.samples:")
         print(self.samples)
 
         self.data_matrix = aggregated_data.values  # Shape: (n_patients, n_genes)
-
-        print("Number of patients:", len(self.patient_ids))
-        print("Number of features (genes):", self.data_matrix.shape[1])
