@@ -1472,7 +1472,7 @@ class DiffusionEarthMoverDistance(PatientsRepresentationMethod):
 class MOFA2MethodPatientsAsSamples(PatientsRepresentationMethod):
     """Patient representation using MOFA2 model, treating patients as samples (single view)."""
 
-    DISTANCES_UNS_KEY = "X_mofa_distances"
+    DISTANCES_UNS_KEY = "X_mofa_one_view_distances"
 
     def __init__(self, sample_key, cells_type_key, layer=None, seed=67, n_factors=10, **mofa_params):
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
@@ -1574,7 +1574,7 @@ class MOFA2MethodPatientsAsSamples(PatientsRepresentationMethod):
 class MOFA2MethodPatientsAsSamplesCellTypesAsViews(PatientsRepresentationMethod):
     """Patient representation using MOFA2 model, treating patients as samples and cell types as views."""
 
-    DISTANCES_UNS_KEY = "X_mofa_distances"
+    DISTANCES_UNS_KEY = "X_mofa_multi_view_distances"
 
     def __init__(self, sample_key, cells_type_key, layer=None, seed=67, n_factors=10, **mofa_params):
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
