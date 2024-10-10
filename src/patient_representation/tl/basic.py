@@ -1469,178 +1469,132 @@ class DiffusionEarthMoverDistance(PatientsRepresentationMethod):
         return self.adata.uns[self.DISTANCES_UNS_KEY]
 
 
-class MOFA2MethodPatientsAsSamples(PatientsRepresentationMethod):
-    """Patient representation using MOFA2 model, treating patients as samples (single view)."""
+class MOFA(PatientsRepresentationMethod):
+    """Patient representation using MOFA2 model, treating patients as samples with optional cell type views."""
 
-    DISTANCES_UNS_KEY = "X_mofa_one_view_distances"
+    DISTANCES_UNS_KEY = "X_mofa_distances"
 
-    def __init__(self, sample_key, cells_type_key, layer=None, seed=67, n_factors=10, **mofa_params):
+    def __init__(
+        self,
+        sample_key,
+        cells_type_key,
+        layer=None,
+        seed=67,
+        n_factors=10,
+        aggregate_cell_types: bool = False,
+        **mofa_params,
+    ):
+        """
+        Initialize the MOFA2Method class.
+
+        Parameters
+        ----------
+        sample_key : str
+            Column in .obs containing sample (patient) IDs.
+        cells_type_key : str
+            Column in .obs containing cell type information.
+        layer : Optional[str] = None
+            Layer in AnnData to use for gene expression data. If None, uses .X.
+        seed : int = 67
+            Random seed for reproducibility.
+        n_factors : int = 10
+            Number of latent factors to learn.
+        aggregate_cell_types : bool = False
+            If True, treat each cell type as a separate view. If False, aggregate gene expression across all cell types into a single view.
+        mofa_params : dict
+            Additional parameters for MOFA2.
+        """
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
         self.n_factors = n_factors
+        self.aggregate_cell_types = aggregate_cell_types
         self.mofa_params = mofa_params
         self.model = None
         self.patient_representations = None
-
-    def prepare_anndata(self, adata, sample_size_threshold=1, cluster_size_threshold=0):
-        """Prepare data for MOFA2, treating patients as samples, aggregating gene expression."""
-        super().prepare_anndata(
-            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
-        )
-
-        data = self._get_data()
-        # --> MOFA only accepts dense arr (TODO: to be investigated)
-        if scipy.sparse.issparse(data):
-            data = data.toarray()
-
-        # get gene
-        genes = self.adata.var_names.astype(str)
-
-        # get patient IDs
-        patient_ids = self.adata.obs[self.sample_key].astype(str).values
-
-        # Create DataFrame from the gene expression
-        data_df = pd.DataFrame(data, columns=genes)
-        data_df["patient_id"] = patient_ids
-
-        # TODO: add diff aggregation -> aggregate gene expression per patient
-        aggregated_data = data_df.groupby("patient_id").mean()
-
-        # update the samples
-        self.samples = aggregated_data.index.tolist()
-
-        self.data_matrix = aggregated_data.values  # Shape: (n_patients, n_genes)
-
-    def calculate_distance_matrix(self, force=False):
-        """Calculate distances between patients using MOFA factors."""
-        distances = super().calculate_distance_matrix(force=force)
-        if distances is not None:
-            return distances
-
-        from mofapy2.run.entry_point import entry_point
-
-        ent = entry_point()
-
-        # Set data options
-        ent.set_data_options(
-            scale_groups=False,
-            scale_views=True,
-            center_groups=False,
-        )
-
-        # Prepare data as a single view with one group
-        data_matrix = [[self.data_matrix]]  # -> cuz MOFA expects data[view][group][samples, features]
-
-        ent.set_data_matrix(
-            data=data_matrix, samples_names=[self.samples], views_names=["gene_expression"], groups_names=["group1"]
-        )
-
-        ent.set_model_options(
-            factors=self.n_factors,
-            ard_factors=True,
-            ard_weights=True,
-            spikeslab_weights=True,
-        )
-
-        ent.set_train_options(seed=self.seed, verbose=True, **self.mofa_params)
-
-        ent.build()
-        ent.run()
-
-        self.model = ent.model
-
-        # Retrieve expectations
-        expectations = self.model.getExpectations()
-
-        factors_expectation = expectations["Z"]  # Dict with keys 'E' and 'V'
-
-        factors_matrix = factors_expectation["E"]
-
-        # Store patient representations
-        self.patient_representations = factors_matrix  # Shape: (n_patients, n_factors)
-
-        # Compute distances between patients
-        distances = scipy.spatial.distance.pdist(self.patient_representations, metric="euclidean")
-        distances = scipy.spatial.distance.squareform(distances)
-
-        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
-        self.adata.uns["mofa_parameters"] = {
-            "sample_key": self.sample_key,
-            "n_factors": self.n_factors,
-        }
-
-        return distances
-
-
-class MOFA2MethodPatientsAsSamplesCellTypesAsViews(PatientsRepresentationMethod):
-    """Patient representation using MOFA2 model, treating patients as samples and cell types as views."""
-
-    DISTANCES_UNS_KEY = "X_mofa_multi_view_distances"
-
-    def __init__(self, sample_key, cells_type_key, layer=None, seed=67, n_factors=10, **mofa_params):
-        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
-        self.n_factors = n_factors
-        self.mofa_params = mofa_params
-        self.model = None
-        self.patient_representations = None
-        self.views = None  # Dictionary of views (cell types)
+        self.views = None  # List of views (cell types) or single view
         self.cell_types = None
 
     def prepare_anndata(self, adata, sample_size_threshold=1, cluster_size_threshold=0):
-        """Prepare data for MOFA2, treating patients as samples, cell types as views."""
+        """
+        Prepare AnnData for MOFA2, optionally treating cell types as separate views.
+
+        Parameters
+        ----------
+        adata : AnnData
+            Annotated data matrix.
+        sample_size_threshold : int = 1
+            Minimum number of cells per sample to retain.
+        cluster_size_threshold : int = 0
+            Minimum number of cells per cell type within a sample to retain.
+        """
         super().prepare_anndata(
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
 
-        # --> MOFA only accepts dense arr (TODO: to be investigated)
         data = self._get_data()
         if scipy.sparse.issparse(data):
             data = data.toarray()
 
-        # get gene
         genes = self.adata.var_names.astype(str)
 
-        # get patient IDs AND cell types
         patient_ids = self.adata.obs[self.sample_key].astype(str).values
-        cell_types = self.adata.obs[self.cells_type_key].astype(str).values
 
-        # DataFrame from the gene expression
+        # Create DataFrame from gene expression data
         data_df = pd.DataFrame(data, columns=genes)
         data_df["patient_id"] = patient_ids
-        data_df["cell_type"] = cell_types
 
-        # Get list of unique patients and cell types
-        unique_patients = data_df["patient_id"].unique()
-        self.samples = unique_patients.tolist()
-        unique_cell_types = data_df["cell_type"].unique()
-        self.cell_types = unique_cell_types.tolist()
+        if self.aggregate_cell_types:
+            cell_types = self.adata.obs[self.cells_type_key].astype(str).values
+            data_df["cell_type"] = cell_types
+            unique_patients = data_df["patient_id"].unique()
+            self.samples = unique_patients.tolist()
+            unique_cell_types = data_df["cell_type"].unique()
+            self.cell_types = unique_cell_types.tolist()
 
-        # TODO: add differenet aggregation
-        aggregated_data = data_df.groupby(["patient_id", "cell_type"]).mean()
+            # Aggregate gene expression by patient and cell type using mean
+            aggregated_data = data_df.groupby(["patient_id", "cell_type"]).mean()
 
-        # Each cell type is a view
-        views = []
-        for cell_type in unique_cell_types:
-            # Get data for this cell type
-            if cell_type in aggregated_data.index.get_level_values("cell_type"):
-                cell_type_data = aggregated_data.xs(
-                    cell_type, level="cell_type"
-                )  # -> Return cross-section at cell type level
-                # Reindex to ensure all patients are included, if patient not existed -> fills with zero
-                cell_type_data = cell_type_data.reindex(unique_patients, fill_value=0)
-                cell_type_matrix = cell_type_data.values  # Shape: (n_patients, n_genes)
-                views.append(cell_type_matrix)
-            else:
-                print(f"Cell type {cell_type} not found in aggregated data.")
+            # Initialize list to store views
+            views = []
+            for cell_type in unique_cell_types:
+                # Check if cell type exists in aggregated data
+                if cell_type in aggregated_data.index.get_level_values("cell_type"):
+                    # Extract data for the current cell type
+                    cell_type_data = aggregated_data.xs(cell_type, level="cell_type")
+                    # Reindex to include all patients, filling missing with zeros
+                    cell_type_data = cell_type_data.reindex(unique_patients, fill_value=0)
+                    # Convert to NumPy array (shape: n_patients x n_genes)
+                    cell_type_matrix = cell_type_data.values
+                    views.append(cell_type_matrix)
+                else:
+                    print(f"Cell type {cell_type} not found in aggregated data.")
 
-        self.views = views  # numpy arr list, one per view (here cell type)
+            self.views = [[view_matrix] for view_matrix in views]  # List of NumPy arrays, one per cell type
+        else:
+            # Aggregate gene expression across all cell types for each patient using mean
+            aggregated_data = data_df.groupby("patient_id").mean()
+            self.samples = aggregated_data.index.tolist()
+            data_matrix = aggregated_data.values  # Shape: (n_patients, n_genes)
+            self.views = [[data_matrix]]  # Single view with one group
 
     def calculate_distance_matrix(self, force=False):
-        """Calculate distances between patients using MOFA factors."""
+        """
+        Calculate distances between patients using MOFA2 latent factors.
+
+        Parameters
+        ----------
+        force : bool = False
+            If True, recalculate the distance matrix even if it exists.
+
+        Returns
+        -------
+        distances : np.ndarray
+            Matrix of distances between patients.
+        """
+        from mofapy2.run.entry_point import entry_point
+
         distances = super().calculate_distance_matrix(force=force)
         if distances is not None:
             return distances
-
-        from mofapy2.run.entry_point import entry_point
 
         ent = entry_point()
 
@@ -1650,14 +1604,17 @@ class MOFA2MethodPatientsAsSamplesCellTypesAsViews(PatientsRepresentationMethod)
             center_groups=False,
         )
 
-        data_matrix = [[view_matrix] for view_matrix in self.views]  # -> List of views, each with one group
-        views_names = self.cell_types
-        groups_names = ["group1"]
+        if self.aggregate_cell_types:
+            views_names = self.cell_types
+        else:
+            views_names = ["gene_expression"]
 
+        # Set data matrix for MOFA2
         ent.set_data_matrix(
-            data=data_matrix, samples_names=[self.samples], views_names=views_names, groups_names=groups_names
+            data=self.views, samples_names=[self.samples], views_names=views_names, groups_names=["group1"]
         )
 
+        # Set model options
         ent.set_model_options(
             factors=self.n_factors,
             ard_factors=True,
@@ -1665,22 +1622,23 @@ class MOFA2MethodPatientsAsSamplesCellTypesAsViews(PatientsRepresentationMethod)
             spikeslab_weights=True,
         )
 
+        # Set training options
         ent.set_train_options(seed=self.seed, verbose=True, **self.mofa_params)
 
+        # Build and run the MOFA2 model
         ent.build()
         ent.run()
 
+        # Retrieve the trained model
         self.model = ent.model
 
-        # Retrieve expectations
         expectations = self.model.getExpectations()
 
-        factors_expectation = expectations["Z"]
-        factors_matrix = factors_expectation["E"]
+        factors_expectation = expectations["Z"]  # Dictionary with keys 'E' and 'V'
+        factors_matrix = factors_expectation["E"]  # Shape: (n_patients, n_factors)
 
-        self.patient_representations = factors_matrix  # Shape: (n_patients, n_factors)
+        self.patient_representations = factors_matrix
 
-        # Compute distances between patients, TODO: diff metrics
         distances = scipy.spatial.distance.pdist(self.patient_representations, metric="euclidean")
         distances = scipy.spatial.distance.squareform(distances)
 
@@ -1688,6 +1646,8 @@ class MOFA2MethodPatientsAsSamplesCellTypesAsViews(PatientsRepresentationMethod)
         self.adata.uns["mofa_parameters"] = {
             "sample_key": self.sample_key,
             "n_factors": self.n_factors,
+            "aggregate_cell_types": self.aggregate_cell_types,
+            **self.mofa_params,
         }
 
         return distances
