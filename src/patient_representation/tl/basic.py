@@ -715,8 +715,8 @@ class PatientsRepresentationMethod:
 
         Returns
         -------
-        list of numpy.ndarray
-            Pseudobulk data for each cell type, with shape (n_patients, n_genes).
+        numpy.ndarray or list of numpy.ndarray
+            Pseudobulk data, either as a 3D array (for each cell type) or 2D array (for each patient).
         """
         aggregation_func = valid_aggregate(aggregation)
 
@@ -753,7 +753,7 @@ class PatientsRepresentationMethod:
                 else:
                     pseudobulk_data[j] = aggregation_func(cells_data, axis=0)
 
-            return [pseudobulk_data]
+            return pseudobulk_data
 
 
 class MrVI(PatientsRepresentationMethod):
@@ -1598,7 +1598,7 @@ class MOFA(PatientsRepresentationMethod):
         else:
             # Aggregate ONLY by patient
             pseudobulk_data = self._get_pseudobulk(aggregation="mean", fill_value=np.nan, aggregate_cell_types=False)
-            self.views = [pseudobulk_data]  # -> single view appraoch
+            self.views = [[pseudobulk_data]]  # -> single view appraoch
 
     def calculate_distance_matrix(self, force=False):
         """
