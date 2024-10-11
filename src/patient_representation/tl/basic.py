@@ -701,7 +701,7 @@ class PatientsRepresentationMethod:
         aggregation : str
             Name of the aggregation function to use (e.g., 'mean', 'median', 'sum').
         fill_value : float
-            Value to use for missing data (e.g., np.nan for CellTypePseudobulk, 0 for MOFA).
+            Value to use for missing data (e.g., np.nan for CellTypePseudobulk and MOFA).
         aggregate_cell_types : bool
             If True, aggregate by both sample and cell type. If False, aggregate only by sample.
         sample_key : str, optional
@@ -1593,11 +1593,11 @@ class MOFA(PatientsRepresentationMethod):
 
         if self.aggregate_cell_types:
             # Aggregate by BOTH sample and cell type
-            pseudobulk_data = self._get_pseudobulk(aggregation="mean", fill_value=0, aggregate_cell_types=True)
+            pseudobulk_data = self._get_pseudobulk(aggregation="mean", fill_value=np.nan, aggregate_cell_types=True)
             self.views = [[view_matrix] for view_matrix in pseudobulk_data]  # -> multiple  celltype view appraoch
         else:
             # Aggregate ONLY by patient
-            pseudobulk_data = self._get_pseudobulk(aggregation="mean", fill_value=0, aggregate_cell_types=False)
+            pseudobulk_data = self._get_pseudobulk(aggregation="mean", fill_value=np.nan, aggregate_cell_types=False)
             self.views = [pseudobulk_data]  # -> single view appraoch
 
     def calculate_distance_matrix(self, force=False):
