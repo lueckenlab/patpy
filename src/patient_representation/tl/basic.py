@@ -683,6 +683,78 @@ class PatientsRepresentationMethod:
 
         return results
 
+    def _get_pseudobulk(
+        self,
+        aggregation: str,
+        fill_value,
+        aggregate_cell_types=True,
+        sample_key=None,
+        cells_type_key=None,
+        samples=None,
+        cell_types=None,
+    ):
+        """
+        Generate pseudobulk data by aggregating gene expression data per patient and optionally per cell type.
+
+        Parameters
+        ----------
+        aggregation : str
+            Name of the aggregation function to use (e.g., 'mean', 'median', 'sum').
+        fill_value : float
+            Value to use for missing data (e.g., np.nan for CellTypePseudobulk, 0 for MOFA).
+        aggregate_cell_types : bool
+            If True, aggregate by both sample and cell type. If False, aggregate only by sample.
+        sample_key : str, optional
+            Key in `adata.obs` for sample (patient) IDs. Defaults to `self.sample_key`.
+        cells_type_key : str, optional
+            Key in `adata.obs` for cell types. Defaults to `self.cells_type_key`.
+        samples : list, optional
+            List of sample IDs. Defaults to `self.samples`.
+        cell_types : list, optional
+            List of cell types. Defaults to `self.cell_types`.
+
+        Returns
+        -------
+        list of numpy.ndarray
+            Pseudobulk data for each cell type, with shape (n_patients, n_genes).
+        """
+        aggregation_func = valid_aggregate(aggregation)
+
+        sample_key = sample_key or self.sample_key
+        cells_type_key = cells_type_key or self.cells_type_key
+        samples = samples or self.samples
+        cell_types = cell_types or self.cell_types
+
+        data = self._get_data()
+
+        if aggregate_cell_types:
+            pseudobulk_data = np.zeros(shape=(len(cell_types), len(samples), data.shape[1]))
+
+            for i, cell_type in enumerate(cell_types):
+                for j, sample in enumerate(samples):
+                    cells_data = data[
+                        (self.adata.obs[sample_key] == sample) & (self.adata.obs[cells_type_key] == cell_type)
+                    ]
+
+                    if cells_data.size == 0:
+                        pseudobulk_data[i, j] = fill_value
+                    else:
+                        pseudobulk_data[i, j] = aggregation_func(cells_data, axis=0)
+
+            return pseudobulk_data
+        else:
+            pseudobulk_data = np.zeros(shape=(len(samples), data.shape[1]))
+
+            for j, sample in enumerate(samples):
+                cells_data = data[self.adata.obs[sample_key] == sample]
+
+                if cells_data.size == 0:
+                    pseudobulk_data[j] = fill_value
+                else:
+                    pseudobulk_data[j] = aggregation_func(cells_data, axis=0)
+
+            return [pseudobulk_data]
+
 
 class MrVI(PatientsRepresentationMethod):
     """Deep generative modeling for quantifying sample-level heterogeneity in single-cell omics.
@@ -1614,7 +1686,6 @@ class MOFA(PatientsRepresentationMethod):
             data=self.views, samples_names=[self.samples], views_names=views_names, groups_names=["group1"]
         )
 
-        # Set model options
         ent.set_model_options(
             factors=self.n_factors,
             ard_factors=True,
@@ -1622,16 +1693,12 @@ class MOFA(PatientsRepresentationMethod):
             spikeslab_weights=True,
         )
 
-        # Set training options
         ent.set_train_options(seed=self.seed, verbose=True, **self.mofa_params)
 
-        # Build and run the MOFA2 model
         ent.build()
         ent.run()
 
-        # Retrieve the trained model
         self.model = ent.model
-
         expectations = self.model.getExpectations()
 
         factors_expectation = expectations["Z"]  # Dictionary with keys 'E' and 'V'
