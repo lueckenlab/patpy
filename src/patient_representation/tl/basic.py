@@ -1591,51 +1591,14 @@ class MOFA(PatientsRepresentationMethod):
             adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
         )
 
-        data = self._get_data()
-        if scipy.sparse.issparse(data):
-            data = data.toarray()
-
-        genes = self.adata.var_names.astype(str)
-
-        patient_ids = self.adata.obs[self.sample_key].astype(str).values
-
-        # Create DataFrame from gene expression data
-        data_df = pd.DataFrame(data, columns=genes)
-        data_df["patient_id"] = patient_ids
-
         if self.aggregate_cell_types:
-            cell_types = self.adata.obs[self.cells_type_key].astype(str).values
-            data_df["cell_type"] = cell_types
-            unique_patients = data_df["patient_id"].unique()
-            self.samples = unique_patients.tolist()
-            unique_cell_types = data_df["cell_type"].unique()
-            self.cell_types = unique_cell_types.tolist()
-
-            # Aggregate gene expression by patient and cell type using mean
-            aggregated_data = data_df.groupby(["patient_id", "cell_type"]).mean()
-
-            # Initialize list to store views
-            views = []
-            for cell_type in unique_cell_types:
-                # Check if cell type exists in aggregated data
-                if cell_type in aggregated_data.index.get_level_values("cell_type"):
-                    # Extract data for the current cell type
-                    cell_type_data = aggregated_data.xs(cell_type, level="cell_type")
-                    # Reindex to include all patients, filling missing with zeros
-                    cell_type_data = cell_type_data.reindex(unique_patients, fill_value=0)
-                    # Convert to NumPy array (shape: n_patients x n_genes)
-                    cell_type_matrix = cell_type_data.values
-                    views.append(cell_type_matrix)
-                else:
-                    print(f"Cell type {cell_type} not found in aggregated data.")
-
-            self.views = [[view_matrix] for view_matrix in views]  # List of NumPy arrays, one per cell type
+            # Aggregate by BOTH sample and cell type
+            pseudobulk_data = self._get_pseudobulk(aggregation="mean", fill_value=0, aggregate_cell_types=True)
+            self.views = [[view_matrix] for view_matrix in pseudobulk_data]  # -> multiple  celltype view appraoch
         else:
-            # Aggregate gene expression across all cell types for each patient using mean
-            aggregated_data = data_df.groupby("patient_id").mean()
-            self.samples = aggregated_data.index.tolist()
-            data_matrix = aggregated_data.values  # Shape: (n_patients, n_genes)
-            self.views = [[data_matrix]]  # Single view with one group
+            # Aggregate ONLY by patient
+            pseudobulk_data = self._get_pseudobulk(aggregation="mean", fill_value=0, aggregate_cell_types=False)
+            self.views = [pseudobulk_data]  # -> single view appraoch
 
     def calculate_distance_matrix(self, force=False):
         """
@@ -1670,7 +1633,6 @@ class MOFA(PatientsRepresentationMethod):
         else:
             views_names = ["gene_expression"]
 
-        # Set data matrix for MOFA2
         ent.set_data_matrix(
             data=self.views, samples_names=[self.samples], views_names=views_names, groups_names=["group1"]
         )
