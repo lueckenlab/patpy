@@ -1,10 +1,9 @@
 from .basic import (
+    MOFA,
     PILOT,
     CellTypePseudobulk,
     CellTypesComposition,
     DiffusionEarthMoverDistance,
-    MOFA2MethodPatientsAsSamples,
-    MOFA2MethodPatientsAsSamplesCellTypesAsViews,
     MrVI,
     RandomVector,
     SCPoli,
