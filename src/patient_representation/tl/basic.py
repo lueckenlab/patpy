@@ -1125,22 +1125,11 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        aggregation_func = valid_aggregate(aggregate)
         distance_metric = valid_distance_metric(dist)
 
-        data = self._get_data()
+        pseudobulk_data = self._get_pseudobulk(aggregation=aggregate, fill_value=np.nan, aggregate_cell_types=True)
 
-        # List of matrices with embedding centroids for samples for each cell type
-        self.patient_representations = np.zeros(shape=(len(self.cell_types), len(self.samples), data.shape[1]))
-        for i, cell_type in enumerate(self.cell_types):
-            for j, sample in enumerate(self.samples):
-                cells_data = data[
-                    (self.adata.obs[self.sample_key] == sample) & (self.adata.obs[self.cells_type_key] == cell_type)
-                ]
-                if cells_data.size == 0:
-                    self.patient_representations[i, j] = np.nan
-                else:
-                    self.patient_representations[i, j] = aggregation_func(cells_data, axis=0)
+        self.patient_representations = pseudobulk_data
 
         # Matrix of distances between samples for each cell type
         distances = np.zeros(shape=(len(self.cell_types), len(self.samples), len(self.samples)))
