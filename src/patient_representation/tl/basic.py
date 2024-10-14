@@ -679,6 +679,7 @@ class MrVI(PatientsRepresentationMethod):
         layer=None,
         seed=67,
         max_epochs=400,
+        accelerator='auto',
         **model_params,
     ):
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
@@ -687,6 +688,7 @@ class MrVI(PatientsRepresentationMethod):
         self.model_params = model_params
         self.patient_representations = None
         self.max_epochs = max_epochs
+        self.accelerator = accelerator
         self.batch_key = batch_key
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
@@ -712,7 +714,7 @@ class MrVI(PatientsRepresentationMethod):
         MRVI.setup_anndata(self.adata, sample_key=self.sample_key, layer=layer, batch_key=self.batch_key)
 
         self.model = MRVI(self.adata, **self.model_params)
-        self.model.train(max_epochs=self.max_epochs)
+        self.model.train(max_epochs=self.max_epochs, accelerator=self.accelerator)
 
         self.samples = self.model.sample_order
 
