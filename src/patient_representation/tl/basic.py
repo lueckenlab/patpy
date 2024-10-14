@@ -1239,6 +1239,7 @@ class SCPoli(PatientsRepresentationMethod):
         n_epochs: int = 50,
         pretraining_epochs: int = 40,
         eta: float = 5,
+        unknown_ct_names: list[str] = None,
     ):
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
@@ -1248,6 +1249,7 @@ class SCPoli(PatientsRepresentationMethod):
         self.n_epochs = n_epochs
         self.pretraining_epochs = pretraining_epochs
         self.eta = eta
+        self.unknown_ct_names = unknown_ct_names
 
     def prepare_anndata(
         self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0, optimize_adata=True
@@ -1281,6 +1283,7 @@ class SCPoli(PatientsRepresentationMethod):
             n_epochs=self.n_epochs,
             pretraining_epochs=self.pretraining_epochs,
             early_stopping_kwargs=self.early_stopping_kwargs,
+            unknown_ct_names=self.unknown_ct_names,
             eta=self.eta,
         )
 
