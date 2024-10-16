@@ -1542,7 +1542,7 @@ class MOFA(PatientsRepresentationMethod):
         layer=None,
         seed=67,
         n_factors=10,
-        aggregate_cell_types: bool = False,
+        aggregate_cell_types: bool = True,
         **mofa_params,
     ):
         """
