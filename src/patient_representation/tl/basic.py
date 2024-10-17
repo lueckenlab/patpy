@@ -243,8 +243,8 @@ def calculate_average_without_nans(array, axis=0, return_sample_sizes=True, defa
     return averages
 
 
-class PatientsRepresentationMethod:
-    """Base class for patient representation methods"""
+class SampleRepresentationMethod:
+    """Base class for sample representation methods"""
 
     DISTANCES_UNS_KEY = "X_method-name_distances"
 
@@ -453,11 +453,11 @@ class PatientsRepresentationMethod:
             AnnData object with samples data
         """
         if (
-            self.patient_representation is not None
-            and self.patient_representation.ndim == 2
-            and self.patient_representation.shape[0] == len(self.samples)
+            self.sample_representation is not None
+            and self.sample_representation.ndim == 2
+            and self.sample_representation.shape[0] == len(self.samples)
         ):
-            representation = self.patient_representation
+            representation = self.sample_representation
         else:
             representation = np.array(self.embed())
 
@@ -536,7 +536,7 @@ class PatientsRepresentationMethod:
         Parameters
         ----------
         target : "str"
-            A patient covariate to evaluate representation for
+            A sample-level covariate to evaluate representation for
         method : Literal["knn", "distances", "proportions", "silhouette"]
             Method to use for evaluation:
             - knn: predict values of `target` using K-nearest neighbors and evaluate the prediction
@@ -684,7 +684,7 @@ class PatientsRepresentationMethod:
         return results
 
 
-class MrVI(PatientsRepresentationMethod):
+class MrVI(SampleRepresentationMethod):
     """Deep generative modeling for quantifying sample-level heterogeneity in single-cell omics.
 
     Source: https://www.biorxiv.org/content/10.1101/2022.10.04.510898v2
@@ -706,7 +706,7 @@ class MrVI(PatientsRepresentationMethod):
 
         self.model = None
         self.model_params = model_params
-        self.patient_representation = None
+        self.sample_representation = None
         self.max_epochs = max_epochs
         self.batch_key = batch_key
 
@@ -789,13 +789,13 @@ class MrVI(PatientsRepresentationMethod):
             # This is a tensor of shape (n_cells, n_samples, n_latent_variables)
             cell_sample_representations = self.model.get_local_sample_representation(batch_size=batch_size)
 
-            self.patient_representation = np.zeros(shape=(len(self.samples), cell_sample_representations.shape[2]))
+            self.sample_representation = np.zeros(shape=(len(self.samples), cell_sample_representations.shape[2]))
 
             print("Calculating samples representations")
-            # For a patient representation we will take centroid of cells of this sample
+            # For a sample representation we will take centroid of cells of this sample
             for i, sample in enumerate(self.samples):
                 sample_mask = self.adata.obs[self.sample_key] == sample
-                self.patient_representation[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
+                self.sample_representation[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
 
             # Here, we obtain distances between samples in a different way
             # MrVI calculates sample-sample distances per cell and then aggregates them (see below)
@@ -803,7 +803,7 @@ class MrVI(PatientsRepresentationMethod):
             print(
                 f"Using aggregated cell representation approach, distances are stored in self.adata.uns[{self.DISTANCES_UNS_KEY}_cell_based"
             )
-            distances = scipy.spatial.distance.pdist(self.patient_representation)
+            distances = scipy.spatial.distance.pdist(self.sample_representation)
             distances = scipy.spatial.distance.squareform(distances)
             self.adata.uns[self.DISTANCES_UNS_KEY + "_cell_based"] = distances
 
@@ -827,7 +827,7 @@ class MrVI(PatientsRepresentationMethod):
         return self.adata.uns[self.DISTANCES_UNS_KEY]
 
 
-class WassersteinTSNE(PatientsRepresentationMethod):
+class WassersteinTSNE(SampleRepresentationMethod):
     """Method based on the matrix of pairwise Wasserstein distances between units.
 
     Source: https://arxiv.org/abs/2205.07531
@@ -911,7 +911,7 @@ class WassersteinTSNE(PatientsRepresentationMethod):
         return super().clustermap(covariance_weight=covariance_weight)
 
 
-class PILOT(PatientsRepresentationMethod):
+class PILOT(SampleRepresentationMethod):
     """Optimal transport based method to compute the Wasserstein distance between two single single-cell experiments.
 
     Source: https://www.biorxiv.org/content/10.1101/2022.12.16.520739v1
@@ -923,20 +923,20 @@ class PILOT(PatientsRepresentationMethod):
         self,
         sample_key,
         cell_group_key,
-        patient_state_col,
+        sample_state_col,
         dataset_name="pilot_dataset",
         layer="X_pca",
         seed=67,
     ):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
-        self.patient_state_col = patient_state_col
+        self.sample_state_col = sample_state_col
         self.dataset_name = dataset_name
 
         self.results_dir = None
         self.pc = None
         self.annotation = None
-        self.patient_representation = None
+        self.sample_representation = None
 
     def calculate_distance_matrix(self, force: bool = False, **pilot_parameters):
         """Calculate matrix of distances between samples
@@ -972,14 +972,14 @@ class PILOT(PatientsRepresentationMethod):
             self.adata,
             clusters_col=self.cell_group_key,
             sample_col=self.sample_key,
-            status=self.patient_state_col,
+            status=self.sample_state_col,
             emb_matrix=self.layer,
             data_type="scRNA",
             **pilot_parameters,
         )
 
         # Matrix of cell group proportions for each sample
-        self.patient_representation = (
+        self.sample_representation = (
             pd.DataFrame(self.adata.uns["proportions"], index=self.cell_groups).T.loc[self.samples].to_numpy()
         )
 
@@ -995,15 +995,15 @@ class PILOT(PatientsRepresentationMethod):
         return distances
 
 
-class TotalPseudobulk(PatientsRepresentationMethod):
-    """A simple baseline, which represents patients as pseudobulk of their gene expression"""
+class TotalPseudobulk(SampleRepresentationMethod):
+    """A simple baseline, which represents samples as pseudobulk of their gene expression"""
 
     DISTANCES_UNS_KEY = "X_pseudobulk_distances"
 
     def __init__(self, sample_key, cell_group_key, layer="X_pca", seed=67):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
-        self.patient_representation = None
+        self.sample_representation = None
 
     def calculate_distance_matrix(self, force: bool = False, aggregate="mean", dist="euclidean"):
         """Calculate distances between pseudobulk representations of samples"""
@@ -1017,13 +1017,13 @@ class TotalPseudobulk(PatientsRepresentationMethod):
 
         data = self._get_data()
 
-        self.patient_representation = np.zeros(shape=(len(self.samples), data.shape[1]))
+        self.sample_representation = np.zeros(shape=(len(self.samples), data.shape[1]))
 
         for i, sample in enumerate(self.samples):
             sample_cells = data[self.adata.obs[self.sample_key] == sample, :]
-            self.patient_representation[i] = aggregation_func(sample_cells, axis=0)
+            self.sample_representation[i] = aggregation_func(sample_cells, axis=0)
 
-        distances = scipy.spatial.distance.pdist(self.patient_representation, metric=distance_metric)
+        distances = scipy.spatial.distance.pdist(self.sample_representation, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
@@ -1036,18 +1036,18 @@ class TotalPseudobulk(PatientsRepresentationMethod):
         return distances
 
 
-class GroupedPseudobulk(PatientsRepresentationMethod):
-    """Baseline, where distances between patients are average distances between their cell group pseudobulks"""
+class GroupedPseudobulk(SampleRepresentationMethod):
+    """Baseline, where distances between samples are average distances between their cell group pseudobulks"""
 
     DISTANCES_UNS_KEY = "X_ct_pseudobulk_distances"
 
     def __init__(self, sample_key, cell_group_key, layer="X_pca", seed=67):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
-        self.patient_representation = None
+        self.sample_representation = None
 
     def calculate_distance_matrix(self, force: bool = False, aggregate="mean", dist="euclidean"):
-        """Calculate distances between patients as average distance between per cell-type pseudobulks"""
+        """Calculate distances between samples as average distance between per cell-type pseudobulks"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
@@ -1059,21 +1059,21 @@ class GroupedPseudobulk(PatientsRepresentationMethod):
         data = self._get_data()
 
         # List of matrices with embedding centroids for samples for each cell group
-        self.patient_representation = np.zeros(shape=(len(self.cell_groups), len(self.samples), data.shape[1]))
+        self.sample_representation = np.zeros(shape=(len(self.cell_groups), len(self.samples), data.shape[1]))
         for i, cell_group in enumerate(self.cell_groups):
             for j, sample in enumerate(self.samples):
                 cells_data = data[
                     (self.adata.obs[self.sample_key] == sample) & (self.adata.obs[self.cell_group_key] == cell_group)
                 ]
                 if cells_data.size == 0:
-                    self.patient_representation[i, j] = np.nan
+                    self.sample_representation[i, j] = np.nan
                 else:
-                    self.patient_representation[i, j] = aggregation_func(cells_data, axis=0)
+                    self.sample_representation[i, j] = aggregation_func(cells_data, axis=0)
 
         # Matrix of distances between samples for each cell group
         distances = np.zeros(shape=(len(self.cell_groups), len(self.samples), len(self.samples)))
 
-        for i, cell_group_embeddings in enumerate(self.patient_representation):
+        for i, cell_group_embeddings in enumerate(self.sample_representation):
             samples_distances = scipy.spatial.distance.pdist(cell_group_embeddings, metric=distance_metric)
             distances[i] = scipy.spatial.distance.squareform(samples_distances)
 
@@ -1091,8 +1091,8 @@ class GroupedPseudobulk(PatientsRepresentationMethod):
         return avg_distances
 
 
-class RandomVector(PatientsRepresentationMethod):
-    """A dummy baseline, which represents patients as random embeddings"""
+class RandomVector(SampleRepresentationMethod):
+    """A dummy baseline, which represents samples as random embeddings"""
 
     DISTANCES_UNS_KEY = "X_random_vector_distances"
 
@@ -1100,18 +1100,18 @@ class RandomVector(PatientsRepresentationMethod):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, seed=seed)
 
         self.latent_dim = latent_dim
-        self.patient_representation = None
+        self.sample_representation = None
 
     def calculate_distance_matrix(self, force: bool = False):
-        """Calculate distances between patients represented as random vectors"""
+        """Calculate distances between samples represented as random vectors"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
             return distances
 
-        self.patient_representation = np.random.normal(size=(len(self.samples), self.latent_dim))
+        self.sample_representation = np.random.normal(size=(len(self.samples), self.latent_dim))
 
-        distances = scipy.spatial.distance.pdist(self.patient_representation)
+        distances = scipy.spatial.distance.pdist(self.sample_representation)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
@@ -1122,18 +1122,18 @@ class RandomVector(PatientsRepresentationMethod):
         return distances
 
 
-class CellGroupComposition(PatientsRepresentationMethod):
-    """A simple baseline, which represents patients as composition of their cell groups (for example, cell type fractions)"""
+class CellGroupComposition(SampleRepresentationMethod):
+    """A simple baseline, which represents samples as composition of their cell groups (for example, cell type fractions)"""
 
     DISTANCES_UNS_KEY = "X_composition"
 
     def __init__(self, sample_key, cell_group_key, layer=None, seed=67):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
-        self.patient_representation = None
+        self.sample_representation = None
 
     def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
-        """Calculate distances between patients represented as cell group composition vectors"""
+        """Calculate distances between samples represented as cell group composition vectors"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
@@ -1142,12 +1142,12 @@ class CellGroupComposition(PatientsRepresentationMethod):
         distance_metric = valid_distance_metric(dist)
 
         # Calculate proportions of the cell groups for each sample
-        self.patient_representation = pd.crosstab(
+        self.sample_representation = pd.crosstab(
             self.adata.obs[self.sample_key], self.adata.obs[self.cell_group_key], normalize="index"
         )
-        self.patient_representation = self.patient_representation.loc[self.samples]
+        self.sample_representation = self.sample_representation.loc[self.samples]
 
-        distances = scipy.spatial.distance.pdist(self.patient_representation.values, metric=distance_metric)
+        distances = scipy.spatial.distance.pdist(self.sample_representation.values, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
@@ -1156,7 +1156,7 @@ class CellGroupComposition(PatientsRepresentationMethod):
         return distances
 
 
-class SCPoli(PatientsRepresentationMethod):
+class SCPoli(SampleRepresentationMethod):
     """A semi-supervised conditional deep generative model from https://www.biorxiv.org/content/10.1101/2022.11.28.517803v1"""
 
     early_stopping_kwargs = {
@@ -1186,7 +1186,7 @@ class SCPoli(PatientsRepresentationMethod):
 
         self.latent_dim = latent_dim
         self.model = None
-        self.patient_representation = None
+        self.sample_representation = None
         self.n_epochs = n_epochs
         self.pretraining_epochs = pretraining_epochs
         self.eta = eta
@@ -1226,7 +1226,7 @@ class SCPoli(PatientsRepresentationMethod):
             eta=self.eta,
         )
 
-        self.patient_representation = self.model.get_conditional_embeddings().X
+        self.sample_representation = self.model.get_conditional_embeddings().X
 
     def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between scPoli sample embeddings"""
@@ -1237,7 +1237,7 @@ class SCPoli(PatientsRepresentationMethod):
 
         distance_metric = valid_distance_metric(dist)
 
-        distances = scipy.spatial.distance.pdist(self.patient_representation, metric=distance_metric)
+        distances = scipy.spatial.distance.pdist(self.sample_representation, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
@@ -1254,7 +1254,7 @@ class SCPoli(PatientsRepresentationMethod):
         return distances
 
 
-class PhEMD(PatientsRepresentationMethod):
+class PhEMD(SampleRepresentationMethod):
     """Phenotypic Earth Mover's Distance. Source: https://pubmed.ncbi.nlm.nih.gov/31932777/
 
     Python implementation source: https://github.com/atong01/MultiscaleEMD/blob/main/comparison/phemd.py
@@ -1333,7 +1333,7 @@ class PhEMD(PatientsRepresentationMethod):
         return distances
 
 
-class DiffusionEarthMoverDistance(PatientsRepresentationMethod):
+class DiffusionEarthMoverDistance(SampleRepresentationMethod):
     """Diffusion Earth Mover's Distance. Source: https://arxiv.org/pdf/2102.12833"""
 
     DISTANCES_UNS_KEY = "X_diffusion_emd"
@@ -1345,7 +1345,7 @@ class DiffusionEarthMoverDistance(PatientsRepresentationMethod):
         self.n_scales = n_scales
         self.labels = None
         self.model = None
-        self.patient_representation = None
+        self.sample_representation = None
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Prepare anndata, calculate neighbors and convert labels to distributions as required by DiffusionEMD"""
@@ -1377,8 +1377,8 @@ class DiffusionEarthMoverDistance(PatientsRepresentationMethod):
             return distances
 
         # Embeddings where the L1 distance approximates the Earth Mover's Distance
-        self.patient_representation = self.model.fit_transform(self.adata.obsp["connectivities"], self.labels)
-        distances = scipy.spatial.distance.pdist(self.patient_representation, metric="cityblock")
+        self.sample_representation = self.model.fit_transform(self.adata.obsp["connectivities"], self.labels)
+        distances = scipy.spatial.distance.pdist(self.sample_representation, metric="cityblock")
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
