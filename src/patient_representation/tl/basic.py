@@ -1122,10 +1122,10 @@ class RandomVector(PatientsRepresentationMethod):
         return distances
 
 
-class CellTypesComposition(PatientsRepresentationMethod):
-    """A simple baseline, which represents patients as composition of their cell types"""
+class CellGroupComposition(PatientsRepresentationMethod):
+    """A simple baseline, which represents patients as composition of their cell groups (for example, cell type fractions)"""
 
-    DISTANCES_UNS_KEY = "X_celltype_composition"
+    DISTANCES_UNS_KEY = "X_composition"
 
     def __init__(self, sample_key, cell_group_key, layer=None, seed=67):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
