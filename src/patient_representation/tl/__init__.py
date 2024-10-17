@@ -1,6 +1,6 @@
 from .basic import (
     PILOT,
-    CellTypesComposition,
+    CellGroupComposition,
     DiffusionEarthMoverDistance,
     GroupedPseudobulk,
     MrVI,
