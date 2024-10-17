@@ -9,7 +9,7 @@ import seaborn as sns
 from patient_representation.pp import (
     extract_metadata,
     fill_nan_distances,
-    filter_small_cell_types,
+    filter_small_cell_groups,
     filter_small_samples,
     is_count_data,
     subsample,
@@ -346,7 +346,7 @@ class SampleRepresentationMethod:
         self.samples = self.adata.obs[self.sample_key].unique()
 
         # Filter cell groups with too few cells
-        self.adata = filter_small_cell_types(
+        self.adata = filter_small_cell_groups(
             adata=self.adata,
             sample_key=self.sample_key,
             cell_group_key=self.cell_group_key,
