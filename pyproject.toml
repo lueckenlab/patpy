@@ -31,14 +31,11 @@ dependencies = [
     "scvi-tools>=1.2.0",
     "seaborn>=0.12",
     "torch>=1.13",
-    "wassersteintsne>=1.1",
     "scarches",
     "ehrapy",
     "plottable",
     # for debug logging (referenced from the issue template)
     "session-info",
-    "phate",
-    "DiffusionEMD @ git+https://github.com/farhadmd7/DiffusionEMD.git@main",
 ]
 
 [project.optional-dependencies]
@@ -61,6 +58,14 @@ doc = [
 test = [
     "pytest",
     "pytest-cov",
+]
+wassersteintsne = [
+    "wassersteintsne>=1.1",
+]
+
+diffusionemd = [
+    "DiffusionEMD @ git+https://github.com/farhadmd7/DiffusionEMD.git@main",
+    "phate>=1.0.11",
 ]
 
 [tool.coverage.run]
