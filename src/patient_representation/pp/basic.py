@@ -214,26 +214,26 @@ def filter_small_samples(adata, sample_key, sample_size_threshold: int = 300):
     return adata
 
 
-def filter_small_cell_types(adata, sample_key, cells_type_key, cluster_size_threshold: int = 5):
-    """Leave only cell types with not less than `cluster_size_threshold` cells"""
-    cells_counts = adata.obs[[sample_key, cells_type_key]].value_counts().reset_index(name="count")
+def filter_small_cell_groups(adata, sample_key, cell_group_key, cluster_size_threshold: int = 5):
+    """Leave only cell groups with not less than `cluster_size_threshold` cells"""
+    cells_counts = adata.obs[[sample_key, cell_group_key]].value_counts().reset_index(name="count")
 
     # This step does not filter cell types with 0 counts
-    small_cell_types = cells_counts.loc[cells_counts["count"] < cluster_size_threshold, cells_type_key].unique()
+    small_cell_types = cells_counts.loc[cells_counts["count"] < cluster_size_threshold, cell_group_key].unique()
     small_cell_types = set(small_cell_types)
 
     if cluster_size_threshold > 0:
         # Add cell types with 0 counts in some samples
         for sample in adata.obs[sample_key].unique():
-            for cell_type in adata.obs[cells_type_key].unique():
-                sample_cells = adata[(adata.obs[sample_key] == sample) & (adata.obs[cells_type_key] == cell_type)]
+            for cell_type in adata.obs[cell_group_key].unique():
+                sample_cells = adata[(adata.obs[sample_key] == sample) & (adata.obs[cell_group_key] == cell_type)]
                 if not sample_cells:
                     small_cell_types.add(cell_type)
 
-    filtered_cell_types = set(adata.obs[cells_type_key]) - set(small_cell_types)
+    filtered_cell_types = set(adata.obs[cell_group_key]) - set(small_cell_types)
     print(len(small_cell_types), "cell types removed:", ", ".join(small_cell_types))
 
-    adata = adata[adata.obs[cells_type_key].isin(filtered_cell_types)].copy()
+    adata = adata[adata.obs[cell_group_key].isin(filtered_cell_types)].copy()
 
     return adata
 

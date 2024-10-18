@@ -1,9 +1,9 @@
 from .basic import (
-    CellTypePseudobulk,
-    CellTypesComposition,
-    DiffusionEarthMoverDistance,
-    MrVI,
     PILOT,
+    CellGroupComposition,
+    DiffusionEarthMoverDistance,
+    GroupedPseudobulk,
+    MrVI,
     RandomVector,
     SCPoli,
     TotalPseudobulk,
