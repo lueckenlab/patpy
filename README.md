@@ -44,6 +44,16 @@ pip install git+https://github.com/lueckenlab/patient_representation.git@main[pi
 
 All the available dependency groups: `diffusionemd`, `mrvi`, `pilot`, `scpoli`, `wassersteintsne`.
 
+### Using R dependencies
+
+To use some of the sample representation methods, which are implemented in R (for example, GloScope), you need to install additional dependencies. The easiest way to do it is via `conda`. To not break things, it is highly recommended to do it in a separate environment. You can find environments for R methods in the [environments](environments) directory. Here is an example of installing the gloscope environment:
+
+```bash
+conda env create -f environments/gloscope.yaml
+conda activate gloscope
+pip install git+https://github.com/lueckenlab/patient_representation.git@main
+```
+
 ## Release notes
 
 See the [changelog][changelog].
