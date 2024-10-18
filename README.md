@@ -36,6 +36,12 @@ pip install patient_representation
 pip install git+https://github.com/lueckenlab/patient_representation.git@main
 ```
 
+To install specific dependencies for some sample representation tools, use the following command:
+
+```bash
+pip install git+https://github.com/lueckenlab/patient_representation.git@main[pilot]
+```
+
 ## Release notes
 
 See the [changelog][changelog].
