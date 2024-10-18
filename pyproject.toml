@@ -59,6 +59,11 @@ test = [
     "pytest",
     "pytest-cov",
 ]
+
+pilot = [
+    "pilotpy @ git+https://github.com/CostaLab/PILOT#egg=pilotpy"
+]
+
 wassersteintsne = [
     "wassersteintsne>=1.1",
 ]
