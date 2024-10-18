@@ -42,6 +42,8 @@ To install specific dependencies for some sample representation tools, use the f
 pip install git+https://github.com/lueckenlab/patient_representation.git@main[pilot]
 ```
 
+All the available dependency groups: `diffusionemd`, `mrvi`, `pilot`, `scpoli`, `wassersteintsne`.
+
 ## Release notes
 
 See the [changelog][changelog].
