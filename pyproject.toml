@@ -28,10 +28,7 @@ dependencies = [
     "opentsne>=0.6",
     "pandas>=1.5",
     "scipy>=1.10",
-    "scvi-tools>=1.2.0",
     "seaborn>=0.12",
-    "torch>=1.13",
-    "scarches",
     "ehrapy",
     "plottable",
     # for debug logging (referenced from the issue template)
@@ -60,8 +57,17 @@ test = [
     "pytest-cov",
 ]
 
+mrvi = [
+    "scvi-tools>=1.2.0",
+    "torch>=1.13",
+]
+
 pilot = [
     "pilotpy @ git+https://github.com/CostaLab/PILOT#egg=pilotpy"
+]
+
+scpoli = [
+    "scarches>=0.5.1",
 ]
 
 wassersteintsne = [
