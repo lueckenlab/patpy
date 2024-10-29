@@ -1,4 +1,27 @@
-# patient_representation
+# patpy – sample-level analysis framework for single-cell data
+
+scverse-compatible package for sample (or patient) representation, representation methods evaluation, and sample-level analysis.
+
+# ⚠️ Warning: Development in Progress ⚠️
+
+> **This repository is currently under active development**
+> Features and functionalities may change unexpectedly, and some aspects of the project are not yet complete.
+
+---
+
+**Please proceed with caution** and feel free to contribute, but be aware that:
+
+-   The codebase is still evolving.
+-   Documentation may be incomplete.
+-   Some features may be unstable or subject to change.
+
+If you have any questions or face bugs, feel free to open an [issue](https://github.com/lueckenlab/patient_representation/issues).
+
+---
+
+Thank you for your patience and interest. Stay tuned for updates!
+
+---
 
 [![Tests][badge-tests]][link-tests]
 [![Documentation][badge-docs]][link-docs]
@@ -6,8 +29,6 @@
 [badge-tests]: https://img.shields.io/github/actions/workflow/status/VladimirShitov/patient_representation/test.yaml?branch=main
 [link-tests]: https://github.com/lueckenlab/patient_representation/actions/workflows/test.yml
 [badge-docs]: https://img.shields.io/readthedocs/patient_representation
-
-Representing patients or samples from single-cell data
 
 ## Getting started
 
