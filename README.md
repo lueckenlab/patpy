@@ -15,7 +15,7 @@ scverse-compatible package for sample (or patient) representation, representatio
 -   Documentation may be incomplete.
 -   Some features may be unstable or subject to change.
 
-If you have any questions or face bugs, feel free to open an [issue](https://github.com/lueckenlab/patient_representation/issues).
+If you have any questions or face bugs, feel free to open an [issue](https://github.com/lueckenlab/patpy/issues).
 
 ---
 
@@ -26,9 +26,9 @@ Thank you for your patience and interest. Stay tuned for updates!
 [![Tests][badge-tests]][link-tests]
 [![Documentation][badge-docs]][link-docs]
 
-[badge-tests]: https://img.shields.io/github/actions/workflow/status/VladimirShitov/patient_representation/test.yaml?branch=main
-[link-tests]: https://github.com/lueckenlab/patient_representation/actions/workflows/test.yml
-[badge-docs]: https://img.shields.io/readthedocs/patient_representation
+[badge-tests]: https://img.shields.io/github/actions/workflow/status/VladimirShitov/patpy/test.yaml?branch=main
+[link-tests]: https://github.com/lueckenlab/patpy/actions/workflows/test.yml
+[badge-docs]: https://img.shields.io/readthedocs/patpy
 
 ## Getting started
 
@@ -41,20 +41,20 @@ Please refer to the [documentation][link-docs]. In particular, the
 You need to have Python 3.9 or newer installed on your system. If you don't have
 Python installed, we recommend installing [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge).
 
-There are several alternative options to install patient_representation:
+There are several alternative options to install patpy:
 
 <!--
-1) Install the latest release of `patient_representation` from `PyPI <https://pypi.org/project/patient_representation/>`_:
+1) Install the latest release of `patpy` from `PyPI <https://pypi.org/project/patpy/>`_:
 
 ```bash
-pip install patient_representation
+pip install patpy
 ```
 -->
 
 1. Install the latest development version:
 
 ```bash
-pip install git+https://github.com/lueckenlab/patient_representation.git@main
+pip install git+https://github.com/lueckenlab/patpy.git@main
 ```
 
 ## Release notes
@@ -72,7 +72,7 @@ If you found a bug, please use the [issue tracker][issue-tracker].
 
 You may need add path to `sphinx-doc` to the `$PATH`
 
-2. Install other `doc` section dependencies from the [pyproject.toml](https://github.com/lueckenlab/patient_representation/blob/main/pyproject.toml)
+2. Install other `doc` section dependencies from the [pyproject.toml](https://github.com/lueckenlab/patpy/blob/main/pyproject.toml)
 
 3. Build the documentation pages:
 
@@ -104,7 +104,7 @@ Shitov, V. (2024). patpy – sample-level analysis framework for single-cell dat
 ```
 
 [scverse-discourse]: https://discourse.scverse.org/
-[issue-tracker]: https://github.com/lueckenlab/patient_representation/issues
-[changelog]: https://patient_representation.readthedocs.io/latest/changelog.html
-[link-docs]: https://patient_representation.readthedocs.io
-[link-api]: https://patient_representation.readthedocs.io/latest/api.html
+[issue-tracker]: https://github.com/lueckenlab/patpy/issues
+[changelog]: https://patpy.readthedocs.io/latest/changelog.html
+[link-docs]: https://patpy.readthedocs.io
+[link-api]: https://patpy.readthedocs.io/latest/api.html
