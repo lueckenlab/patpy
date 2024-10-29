@@ -1,13 +1,15 @@
 from .basic import (
+    PILOT,
     CellTypePseudobulk,
     CellTypesComposition,
     DiffusionEarthMoverDistance,
     MrVI,
-    PILOT,
     RandomVector,
     SCPoli,
     TotalPseudobulk,
     WassersteinTSNE,
+    correlate_cell_type_expression,
+    correlate_composition,
     describe_metadata,
 )
 from .evaluation import evaluate_representation

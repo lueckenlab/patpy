@@ -5,6 +5,8 @@ import pandas as pd
 import scanpy as sc
 import scipy
 import seaborn as sns
+from scipy.stats import pearsonr, spearmanr
+from statsmodels.stats.multitest import multipletests
 
 from patient_representation.pp import (
     extract_metadata,
@@ -241,6 +243,178 @@ def calculate_average_without_nans(array, axis=0, return_sample_sizes=True, defa
         return averages, sample_sizes
 
     return averages
+
+
+def correlate_composition(meta_adata, expression_adata, sample_key, cell_type_key, target, method="spearman"):
+    """
+    Correlate cell type composition with a target variable.
+
+    Parameters
+    ----------
+    meta_adata : AnnData
+        AnnData object containing metadata for each sample.
+    expression_adata : AnnData
+        AnnData object containing gene expression data.
+    sample_key : str
+        Key in expression_adata.obs for sample identifiers.
+    cell_type_key : str
+        Key in expression_adata.obs for cell type annotations.
+    target : str
+        Key in meta_adata.obs for the target variable to correlate with.
+    method : str, optional
+        Correlation method to use. Either "spearman" (default) or "pearson".
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing correlation results for each cell type. It contains the following columns:
+        - "correlation": Correlation coefficient between cell type proportion and target variable
+        - "p_value": Raw p-value for the correlation
+        - "p_value_adj": Adjusted p-value after Benjamini-Hochberg correction
+        - "-log_p_value_adj": negative logarithm of adjusted p-value
+    """
+    # Select the correlation function
+    if method == "spearman":
+        correlation_fun = spearmanr
+    elif method == "pearson":
+        correlation_fun = pearsonr
+    else:
+        raise ValueError('Method must be either "spearman" or "pearson"')
+
+    # Calculate cell type composition using patpy tool
+    composition = CellTypesComposition(sample_key, cell_type_key)
+    composition.prepare_anndata(expression_adata, sample_size_threshold=1, cluster_size_threshold=0)
+    _ = (
+        composition.calculate_distance_matrix()
+    )  # We don't need distance matrix but this method calculates cell type proportions as well
+
+    cell_type_fractions = composition.patient_representations
+    cell_type_fractions = cell_type_fractions.loc[
+        meta_adata.obs_names
+    ]  # make sure that the order is the same as in input data
+
+    cell_type_corrs = {}
+
+    for cell_type in cell_type_fractions.columns:
+        correlation, p_value = correlation_fun(meta_adata.obs[target], cell_type_fractions[cell_type])
+        cell_type_corrs[cell_type] = {"correlation": correlation, "p_value": p_value}
+
+    cell_type_corrs = pd.DataFrame(cell_type_corrs).T
+
+    # Perform Benjamini-Hochberg correction
+    cell_type_corrs["p_value_adj"] = multipletests(cell_type_corrs["p_value"], method="fdr_bh")[1]
+
+    cell_type_corrs["-log_p_value_adj"] = -np.log(cell_type_corrs["p_value_adj"])
+
+    # Sort the DataFrame by adjusted p-value
+    cell_type_corrs = cell_type_corrs.sort_values(["p_value_adj", "correlation"], ascending=[True, False])
+
+    return cell_type_corrs
+
+
+def correlate_cell_type_expression(
+    meta_adata,
+    expression_adata,
+    sample_key,
+    cell_type_key,
+    target,
+    layer="X",
+    min_sample_size=50,
+    method="spearman",
+    keep_pseudobulks_in_data=True,
+):
+    """
+    Calculate correlation between gene expression and a target variable for each cell type.
+
+    Parameters
+    ----------
+    meta_adata : AnnData
+        AnnData object containing metadata and target variable.
+    expression_adata : AnnData
+        AnnData object containing gene expression data.
+    sample_key : str
+        Key in adata.obs for sample information.
+    cell_type_key : str
+        Key in adata.obs for cell type information.
+    target : str
+        Column name in meta_adata.obs containing the target variable.
+    layer : str
+        slot in .obsm or .layers of `expression_adata` to use for getting pseudobulks. Default is "X" to use .X
+    min_sample_size : int, optional
+        Minimum number of cells required for a sample to be included. Default is 50.
+    method : str, optional
+        Correlation method to use. Either "spearman" or "pearson". Default is "spearman".
+    keep_pseudobulks_in_data : bool, optional
+        If True (default), keep cell type pseudobulks in the meta_adata. They will be stored in .obsm slot
+        with the name <cell_type>_pseudobulk
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing correlation results for each cell type and gene. It contains the following columns:
+        - cell_type: The cell type
+        - gene_name: The gene name
+        - correlation: Correlation coefficient between gene expression and target variable
+        - p_value: Raw p-value for the correlation
+        - n_observations: Number of observations used for the correlation
+        - "-log_p_value_adj": negative logarithm of adjusted p-value
+    """
+    # Select the correlation function
+    if method == "spearman":
+        correlation_fun = spearmanr
+    elif method == "pearson":
+        correlation_fun = pearsonr
+    else:
+        raise ValueError('Method must be either "spearman" or "pearson"')
+
+    cell_type_pseudobulk = CellTypePseudobulk(sample_key, cell_type_key, layer=layer)
+    cell_type_pseudobulk.prepare_anndata(
+        expression_adata, sample_size_threshold=min_sample_size, cluster_size_threshold=0
+    )
+    _ = cell_type_pseudobulk.calculate_distance_matrix()
+
+    expression_correlations = []
+
+    for i, cell_type in enumerate(cell_type_pseudobulk.cell_types):
+        pseudobulks = cell_type_pseudobulk.patient_representations[i]
+
+        if keep_pseudobulks_in_data:
+            meta_adata.obsm[f"{cell_type}_pseudobulk"] = pd.DataFrame(
+                pseudobulks, index=cell_type_pseudobulk.samples, columns=expression_adata.var_names
+            ).loc[meta_adata.obs_names]
+
+        # Get the target values for the samples. Always make sure that the order is the same!
+        target_values = meta_adata.obs.loc[cell_type_pseudobulk.samples, target].values
+
+        # Calculate correlation for each gene
+        for gene_idx, gene_name in enumerate(
+            expression_adata.var_names
+        ):  # TODO: potential bug when a layer with different n features is used
+            gene_expression = pseudobulks[:, gene_idx]
+            correlation, p_value = correlation_fun(gene_expression, target_values, nan_policy="omit")
+
+            # Save the sample size. Nans appear when a cell type in a sample doesn't have any cells
+            n_observations = (~np.isnan(gene_expression)).sum()
+            expression_correlations.append((cell_type, gene_name, correlation, p_value, n_observations))
+
+    # Convert the results to a DataFrame
+    expression_correlation_df = pd.DataFrame(
+        expression_correlations, columns=["cell_type", "gene_name", "correlation", "p_value", "n_observations"]
+    )
+
+    expression_correlation_df = expression_correlation_df[expression_correlation_df["correlation"].notna()]
+
+    # Calculate adjusted p-values
+    expression_correlation_df["p_value_adj"] = multipletests(expression_correlation_df["p_value"], method="fdr_bh")[1]
+
+    expression_correlation_df["-log_p_value_adj"] = -np.log(expression_correlation_df["p_value_adj"])
+
+    # Sort the DataFrame by p-value (ascending) and correlation (descending)
+    expression_correlation_df = expression_correlation_df.sort_values(
+        ["p_value_adj", "correlation"], ascending=[True, False]
+    )
+
+    return expression_correlation_df
 
 
 class PatientsRepresentationMethod:
