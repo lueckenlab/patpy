@@ -85,7 +85,23 @@ make html
 
 ## Citation
 
-> t.b.a
+Preprint is coming soon. So far, you can refer to this repository as following:
+
+### APA
+
+Shitov, V. (2024). patpy – sample-level analysis framework for single-cell data (Version 0.1.29) [Computer software]. https://github.com/lueckenlab/patpy/
+
+### BibTeX
+
+```bibtex
+@misc{shitov_patpy_2024,
+  author = {Shitov, Vladimir},
+  title = {patpy – sample-level analysis framework for single-cell data},
+  year = {2024},
+  url = {https://github.com/lueckenlab/patpy/},
+  note = {Version 0.1.29}
+}
+```
 
 [scverse-discourse]: https://discourse.scverse.org/
 [issue-tracker]: https://github.com/lueckenlab/patient_representation/issues
