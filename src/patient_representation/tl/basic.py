@@ -1693,6 +1693,8 @@ class MOFA(PatientsRepresentationMethod):
         ----------
         force : bool = False
             If True, recalculate the distance matrix even if it exists.
+        store_weights : bool, default: False
+            If True, store the weights (relation of factors to genes) in `self.adata.uns`.
 
         Returns
         -------
@@ -1726,12 +1728,18 @@ class MOFA(PatientsRepresentationMethod):
         ent.run()
 
         self.model = ent.model
-        expectations = self.model.getExpectations()
 
-        factors_expectation = expectations["Z"]  # Dictionary with keys 'E' and 'V'
-        factors_matrix = factors_expectation["E"]  # Shape: (n_patients, n_factors)
+        # get factors expectation (latent representations of samples)
+        self.patient_representation = self.model.nodes["Z"].getExpectation()  # Shape: (n_patients, n_factors)
 
-        self.patient_representation = factors_matrix
+        # store weights (relation of factors to genes)
+        if store_weights:
+            weights = self.model.nodes["W"].getExpectation()
+            # weights is a list with one matrix per view
+            if self.aggregate_cell_types:
+                mofa_weights = {view_name: weights[i] for i, view_name in enumerate(self.views_names)}
+            else:
+                mofa_weights = weights[0]
 
         distances = scipy.spatial.distance.pdist(self.patient_representation, metric="euclidean")
         distances = scipy.spatial.distance.squareform(distances)
@@ -1743,5 +1751,7 @@ class MOFA(PatientsRepresentationMethod):
             "aggregate_cell_types": self.aggregate_cell_types,
             **self.mofa_params,
         }
+        if store_weights:
+            self.adata.uns["mofa_parameters"]["weights"] = mofa_weights
 
         return distances
