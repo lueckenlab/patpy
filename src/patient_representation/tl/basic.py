@@ -1,4 +1,5 @@
 import warnings
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -1531,48 +1532,91 @@ class DiffusionEarthMoverDistance(PatientsRepresentationMethod):
 
 
 class MOFA(PatientsRepresentationMethod):
-    """Patient representation using MOFA2 model, treating patients as samples with optional cell type views."""
+    """
+    Patient representation using MOFA2 model, treating patients as samples with optional cell type views.
+
+    Parameters
+    ----------
+    sample_key : str
+        Column in `.obs` containing sample (patient) IDs.
+    cells_type_key : str
+        Column in `.obs` containing cell type information.
+    layer : Optional[str], default: None
+        Layer in AnnData to use for gene expression data. If None, uses `.X`.
+    seed : int, default: 67
+        Random seed for reproducibility.
+    n_factors : int, default: 10
+        Number of latent factors to learn.
+    aggregate_cell_types : bool, default: True
+        If True, treat each cell type as a separate view.
+        If False, aggregate gene expression across all cell types into a single view.
+    """
 
     DISTANCES_UNS_KEY = "X_mofa_distances"
 
     def __init__(
         self,
-        sample_key,
-        cells_type_key,
-        layer=None,
-        seed=67,
-        n_factors=10,
+        sample_key: str,
+        cells_type_key: str,
+        layer: Optional[str] = None,
+        seed: int = 67,
+        n_factors: int = 10,
         aggregate_cell_types: bool = True,
-        **mofa_params,
+        scale_views: bool = False,
+        scale_groups: bool = False,
+        center_groups: bool = True,
+        use_float32: bool = False,
+        ard_factors: bool = False,
+        ard_weights: bool = True,
+        spikeslab_weights: bool = True,
+        spikeslab_factors: bool = False,
+        iterations: int = 1000,
+        convergence_mode: str = "fast",
+        startELBO: int = 1,
+        freqELBO: int = 1,
+        gpu_mode: bool = False,
+        gpu_device: Optional[int] = None,
+        verbose: bool = False,
+        quiet: bool = False,
+        outfile: Optional[str] = None,
+        save_interrupted: bool = False,
     ):
-        """
-        Initialize the MOFA2Method class.
-
-        Parameters
-        ----------
-        sample_key : str
-            Column in .obs containing sample (patient) IDs.
-        cells_type_key : str
-            Column in .obs containing cell type information.
-        layer : Optional[str] = None
-            Layer in AnnData to use for gene expression data. If None, uses .X.
-        seed : int = 67
-            Random seed for reproducibility.
-        n_factors : int = 10
-            Number of latent factors to learn.
-        aggregate_cell_types : bool = False
-            If True, treat each cell type as a separate view. If False, aggregate gene expression across all cell types into a single view.
-        mofa_params : dict
-            Additional parameters for MOFA2.
-        """
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
         self.n_factors = n_factors
         self.aggregate_cell_types = aggregate_cell_types
-        self.mofa_params = mofa_params
         self.model = None
         self.patient_representation = None
         self.views = None  # List of views (cell types) or single view
-        self.cell_types = None
+        self.views_names = None
+
+        self.data_options = {
+            "scale_views": scale_views,
+            "scale_groups": scale_groups,
+            "center_groups": center_groups,
+            "use_float32": use_float32,
+        }
+
+        self.model_options = {
+            "factors": self.n_factors,
+            "ard_factors": ard_factors,
+            "ard_weights": ard_weights,
+            "spikeslab_weights": spikeslab_weights,
+            "spikeslab_factors": spikeslab_factors,
+        }
+
+        self.train_options = {
+            "iter": iterations,
+            "convergence_mode": convergence_mode,
+            "startELBO": startELBO,
+            "freqELBO": freqELBO,
+            "gpu_mode": gpu_mode,
+            "gpu_device": gpu_device,
+            "seed": self.seed,
+            "verbose": verbose,
+            "quiet": quiet,
+            "outfile": outfile,
+            "save_interrupted": save_interrupted,
+        }
 
     def prepare_anndata(self, adata, sample_size_threshold=1, cluster_size_threshold=0):
         """
@@ -1588,19 +1632,23 @@ class MOFA(PatientsRepresentationMethod):
             Minimum number of cells per cell type within a sample to retain.
         """
         super().prepare_anndata(
-            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
+            adata=adata,
+            sample_size_threshold=sample_size_threshold,
+            cluster_size_threshold=cluster_size_threshold,
         )
 
         if self.aggregate_cell_types:
             # Aggregate by BOTH sample and cell type
             pseudobulk_data = self._get_pseudobulk(aggregation="mean", fill_value=np.nan, aggregate_cell_types=True)
             self.views = [[view_matrix] for view_matrix in pseudobulk_data]  # -> multiple  celltype view appraoch
+            self.views_names = self.cell_types
         else:
             # Aggregate ONLY by patient
             pseudobulk_data = self._get_pseudobulk(aggregation="mean", fill_value=np.nan, aggregate_cell_types=False)
             self.views = [[pseudobulk_data]]  # -> single view appraoch
+            self.views_names = ["aggregated_gene_expression"]
 
-    def calculate_distance_matrix(self, force=False):
+    def calculate_distance_matrix(self, force=False, store_weights=False):
         """
         Calculate distances between patients using MOFA2 latent factors.
 
@@ -1622,29 +1670,20 @@ class MOFA(PatientsRepresentationMethod):
 
         ent = entry_point()
 
-        ent.set_data_options(
-            scale_groups=False,
-            scale_views=True,
-            center_groups=False,
-        )
-
-        if self.aggregate_cell_types:
-            views_names = self.cell_types
-        else:
-            views_names = ["gene_expression"]
+        ent.set_data_options(**self.data_options)
 
         ent.set_data_matrix(
-            data=self.views, samples_names=[self.samples], views_names=views_names, groups_names=["group1"]
+            data=self.views,
+            samples_names=[self.samples],
+            views_names=self.views_names,
+            groups_names=[
+                "group1"
+            ],  # All patients are considered as a single group; no group-specific modeling is needed
         )
 
-        ent.set_model_options(
-            factors=self.n_factors,
-            ard_factors=True,
-            ard_weights=True,
-            spikeslab_weights=True,
-        )
+        ent.set_model_options(**self.model_options)
 
-        ent.set_train_options(seed=self.seed, verbose=True, **self.mofa_params)
+        ent.set_train_options(**self.train_options)
 
         ent.build()
         ent.run()
