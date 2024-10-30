@@ -1,4 +1,5 @@
 import warnings
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -627,11 +628,11 @@ class PatientsRepresentationMethod:
             AnnData object with samples data
         """
         if (
-            self.patient_representations is not None
-            and self.patient_representations.ndim == 2
-            and self.patient_representations.shape[0] == len(self.samples)
+            self.patient_representation is not None
+            and self.patient_representation.ndim == 2
+            and self.patient_representation.shape[0] == len(self.samples)
         ):
-            representation = self.patient_representations
+            representation = self.patient_representation
         else:
             representation = np.array(self.embed())
 
@@ -857,6 +858,78 @@ class PatientsRepresentationMethod:
 
         return results
 
+    def _get_pseudobulk(
+        self,
+        aggregation: str,
+        fill_value,
+        aggregate_cell_types=True,
+        sample_key=None,
+        cells_type_key=None,
+        samples=None,
+        cell_types=None,
+    ):
+        """
+        Generate pseudobulk data by aggregating gene expression data per patient and optionally per cell type.
+
+        Parameters
+        ----------
+        aggregation : str
+            Name of the aggregation function to use (e.g., 'mean', 'median', 'sum').
+        fill_value : float
+            Value to use for missing data (e.g., np.nan for CellTypePseudobulk and MOFA).
+        aggregate_cell_types : bool
+            If True, aggregate by both sample and cell type. If False, aggregate only by sample.
+        sample_key : str, optional
+            Key in `adata.obs` for sample (patient) IDs. Defaults to `self.sample_key`.
+        cells_type_key : str, optional
+            Key in `adata.obs` for cell types. Defaults to `self.cells_type_key`.
+        samples : list, optional
+            List of sample IDs. Defaults to `self.samples`.
+        cell_types : list, optional
+            List of cell types. Defaults to `self.cell_types`.
+
+        Returns
+        -------
+        numpy.ndarray or list of numpy.ndarray
+            Pseudobulk data, either as a 3D array (for each cell type) or 2D array (for each patient).
+        """
+        aggregation_func = valid_aggregate(aggregation)
+
+        sample_key = sample_key or self.sample_key
+        cells_type_key = cells_type_key or self.cells_type_key
+        samples = samples or self.samples
+        cell_types = cell_types or self.cell_types
+
+        data = self._get_data()
+
+        if aggregate_cell_types:
+            pseudobulk_data = np.zeros(shape=(len(cell_types), len(samples), data.shape[1]))
+
+            for i, cell_type in enumerate(cell_types):
+                for j, sample in enumerate(samples):
+                    cells_data = data[
+                        (self.adata.obs[sample_key] == sample) & (self.adata.obs[cells_type_key] == cell_type)
+                    ]
+
+                    if cells_data.size == 0:
+                        pseudobulk_data[i, j] = fill_value
+                    else:
+                        pseudobulk_data[i, j] = aggregation_func(cells_data, axis=0)
+
+            return pseudobulk_data
+        else:
+            pseudobulk_data = np.zeros(shape=(len(samples), data.shape[1]))
+
+            for j, sample in enumerate(samples):
+                cells_data = data[self.adata.obs[sample_key] == sample]
+
+                if cells_data.size == 0:
+                    pseudobulk_data[j] = fill_value
+                else:
+                    pseudobulk_data[j] = aggregation_func(cells_data, axis=0)
+
+            return pseudobulk_data
+
 
 class MrVI(PatientsRepresentationMethod):
     """Deep generative modeling for quantifying sample-level heterogeneity in single-cell omics.
@@ -880,7 +953,7 @@ class MrVI(PatientsRepresentationMethod):
 
         self.model = None
         self.model_params = model_params
-        self.patient_representations = None
+        self.patient_representation = None
         self.max_epochs = max_epochs
         self.batch_key = batch_key
 
@@ -963,13 +1036,13 @@ class MrVI(PatientsRepresentationMethod):
             # This is a tensor of shape (n_cells, n_samples, n_latent_variables)
             cell_sample_representations = self.model.get_local_sample_representation(batch_size=batch_size)
 
-            self.patient_representations = np.zeros(shape=(len(self.samples), cell_sample_representations.shape[2]))
+            self.patient_representation = np.zeros(shape=(len(self.samples), cell_sample_representations.shape[2]))
 
             print("Calculating samples representations")
             # For a patient representation we will take centroid of cells of this sample
             for i, sample in enumerate(self.samples):
                 sample_mask = self.adata.obs[self.sample_key] == sample
-                self.patient_representations[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
+                self.patient_representation[i] = cell_sample_representations[sample_mask, i].mean(axis=0)
 
             # Here, we obtain distances between samples in a different way
             # MrVI calculates sample-sample distances per cell and then aggregates them (see below)
@@ -977,7 +1050,7 @@ class MrVI(PatientsRepresentationMethod):
             print(
                 f"Using aggregated cell representation approach, distances are stored in self.adata.uns[{self.DISTANCES_UNS_KEY}_cell_based"
             )
-            distances = scipy.spatial.distance.pdist(self.patient_representations)
+            distances = scipy.spatial.distance.pdist(self.patient_representation)
             distances = scipy.spatial.distance.squareform(distances)
             self.adata.uns[self.DISTANCES_UNS_KEY + "_cell_based"] = distances
 
@@ -1110,7 +1183,7 @@ class PILOT(PatientsRepresentationMethod):
         self.results_dir = None
         self.pc = None
         self.annotation = None
-        self.patient_representations = None
+        self.patient_representation = None
 
     def calculate_distance_matrix(self, force: bool = False, **pilot_parameters):
         """Calculate matrix of distances between samples
@@ -1153,7 +1226,7 @@ class PILOT(PatientsRepresentationMethod):
         )
 
         # Matrix of cell type proportions for each sample
-        self.patient_representations = (
+        self.patient_representation = (
             pd.DataFrame(self.adata.uns["proportions"], index=self.cell_types).T.loc[self.samples].to_numpy()
         )
 
@@ -1177,7 +1250,7 @@ class TotalPseudobulk(PatientsRepresentationMethod):
     def __init__(self, sample_key, cells_type_key, layer="X_pca", seed=67):
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
-        self.patient_representations = None
+        self.patient_representation = None
 
     def calculate_distance_matrix(self, force: bool = False, aggregate="mean", dist="euclidean"):
         """Calculate distances between pseudobulk representations of samples"""
@@ -1191,13 +1264,13 @@ class TotalPseudobulk(PatientsRepresentationMethod):
 
         data = self._get_data()
 
-        self.patient_representations = np.zeros(shape=(len(self.samples), data.shape[1]))
+        self.patient_representation = np.zeros(shape=(len(self.samples), data.shape[1]))
 
         for i, sample in enumerate(self.samples):
             sample_cells = data[self.adata.obs[self.sample_key] == sample, :]
-            self.patient_representations[i] = aggregation_func(sample_cells, axis=0)
+            self.patient_representation[i] = aggregation_func(sample_cells, axis=0)
 
-        distances = scipy.spatial.distance.pdist(self.patient_representations, metric=distance_metric)
+        distances = scipy.spatial.distance.pdist(self.patient_representation, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
@@ -1218,7 +1291,7 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
     def __init__(self, sample_key, cells_type_key, layer="X_pca", seed=67):
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
-        self.patient_representations = None
+        self.patient_representation = None
 
     def calculate_distance_matrix(self, force: bool = False, aggregate="mean", dist="euclidean"):
         """Calculate distances between patients as average distance between per cell-type pseudobulks"""
@@ -1227,27 +1300,16 @@ class CellTypePseudobulk(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        aggregation_func = valid_aggregate(aggregate)
         distance_metric = valid_distance_metric(dist)
 
-        data = self._get_data()
-
-        # List of matrices with embedding centroids for samples for each cell type
-        self.patient_representations = np.zeros(shape=(len(self.cell_types), len(self.samples), data.shape[1]))
-        for i, cell_type in enumerate(self.cell_types):
-            for j, sample in enumerate(self.samples):
-                cells_data = data[
-                    (self.adata.obs[self.sample_key] == sample) & (self.adata.obs[self.cells_type_key] == cell_type)
-                ]
-                if cells_data.size == 0:
-                    self.patient_representations[i, j] = np.nan
-                else:
-                    self.patient_representations[i, j] = aggregation_func(cells_data, axis=0)
+        self.patient_representation = self._get_pseudobulk(
+            aggregation=aggregate, fill_value=np.nan, aggregate_cell_types=True
+        )
 
         # Matrix of distances between samples for each cell type
         distances = np.zeros(shape=(len(self.cell_types), len(self.samples), len(self.samples)))
 
-        for i, cell_type_embeddings in enumerate(self.patient_representations):
+        for i, cell_type_embeddings in enumerate(self.patient_representation):
             samples_distances = scipy.spatial.distance.pdist(cell_type_embeddings, metric=distance_metric)
             distances[i] = scipy.spatial.distance.squareform(samples_distances)
 
@@ -1274,7 +1336,7 @@ class RandomVector(PatientsRepresentationMethod):
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, seed=seed)
 
         self.latent_dim = latent_dim
-        self.patient_representations = None
+        self.patient_representation = None
 
     def calculate_distance_matrix(self, force: bool = False):
         """Calculate distances between patients represented as random vectors"""
@@ -1283,9 +1345,9 @@ class RandomVector(PatientsRepresentationMethod):
         if distances is not None:
             return distances
 
-        self.patient_representations = np.random.normal(size=(len(self.samples), self.latent_dim))
+        self.patient_representation = np.random.normal(size=(len(self.samples), self.latent_dim))
 
-        distances = scipy.spatial.distance.pdist(self.patient_representations)
+        distances = scipy.spatial.distance.pdist(self.patient_representation)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
@@ -1304,7 +1366,7 @@ class CellTypesComposition(PatientsRepresentationMethod):
     def __init__(self, sample_key, cells_type_key, layer=None, seed=67):
         super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
 
-        self.patient_representations = None
+        self.patient_representation = None
 
     def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between patients represented as cell type composition vectors"""
@@ -1316,12 +1378,12 @@ class CellTypesComposition(PatientsRepresentationMethod):
         distance_metric = valid_distance_metric(dist)
 
         # Calculate proportions of the cell types for each sample
-        self.patient_representations = pd.crosstab(
+        self.patient_representation = pd.crosstab(
             self.adata.obs[self.sample_key], self.adata.obs[self.cells_type_key], normalize="index"
         )
-        self.patient_representations = self.patient_representations.loc[self.samples]
+        self.patient_representation = self.patient_representation.loc[self.samples]
 
-        distances = scipy.spatial.distance.pdist(self.patient_representations.values, metric=distance_metric)
+        distances = scipy.spatial.distance.pdist(self.patient_representation.values, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
@@ -1352,7 +1414,7 @@ class SCellBOW(PatientsRepresentationMethod):
         self.n_worker = n_worker
         self.latent_dim = latent_dim
         self.n_iter = n_iter
-        self.patient_representations = None
+        self.patient_representation = None
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Pretrain SCellBOW model"""
@@ -1386,14 +1448,14 @@ class SCellBOW(PatientsRepresentationMethod):
 
         # X_embbed contains 50 components PCA of SCellBOW cell embeddings
         cell_representations = self.adata.obsm["X_embed"]
-        self.patient_representations = np.zeros(shape=(len(self.samples), cell_representations.shape[1]))
+        self.patient_representation = np.zeros(shape=(len(self.samples), cell_representations.shape[1]))
 
         for i, sample in enumerate(self.samples):
             sample_cells = cell_representations[self.adata.obs[self.sample_key] == sample, :]
             # Aggregate representations of cells for each sample
-            self.patient_representations[i] = func(sample_cells, axis=0)
+            self.patient_representation[i] = func(sample_cells, axis=0)
 
-        distances = scipy.spatial.distance.pdist(self.patient_representations)
+        distances = scipy.spatial.distance.pdist(self.patient_representation)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
@@ -1596,7 +1658,7 @@ class DiffusionEarthMoverDistance(PatientsRepresentationMethod):
         self.n_scales = n_scales
         self.labels = None
         self.model = None
-        self.patient_representations = None
+        self.patient_representation = None
 
     def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
         """Prepare anndata, calculate neighbors and convert labels to distributions as required by DiffusionEMD"""
@@ -1628,8 +1690,8 @@ class DiffusionEarthMoverDistance(PatientsRepresentationMethod):
             return distances
 
         # Embeddings where the L1 distance approximates the Earth Mover's Distance
-        self.patient_representations = self.model.fit_transform(self.adata.obsp["connectivities"], self.labels)
-        distances = scipy.spatial.distance.pdist(self.patient_representations, metric="cityblock")
+        self.patient_representation = self.model.fit_transform(self.adata.obsp["connectivities"], self.labels)
+        distances = scipy.spatial.distance.pdist(self.patient_representation, metric="cityblock")
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
@@ -1641,3 +1703,241 @@ class DiffusionEarthMoverDistance(PatientsRepresentationMethod):
         }
 
         return self.adata.uns[self.DISTANCES_UNS_KEY]
+
+
+class MOFA(PatientsRepresentationMethod):
+    """
+    Patient representation using MOFA2 model, treating patients as samples with optional cell type views.
+
+    Parameters
+    ----------
+    sample_key : str
+        Column in `.obs` containing sample (patient) IDs.
+    cells_type_key : str
+        Column in `.obs` containing cell type information.
+    layer : Optional[str], default: None
+        Layer in AnnData to use for gene expression data. If None, uses `.X`.
+    seed : int, default: 67
+        Random seed for reproducibility.
+    n_factors : int, default: 10
+        Number of latent factors to learn.
+    aggregate_cell_types : bool, default: True
+        If True, treat each cell type as a separate view.
+        If False, aggregate gene expression across all cell types into a single view.
+    aggregation_mode: str, default: "mean"
+        Name of the aggregation function to use (e.g., 'mean', 'median', 'sum')
+    scale_views : bool, optional
+        Scale each view to unit variance.
+    scale_groups : bool, default: False
+        Scale each group to unit variance.
+    center_groups : bool, default: True
+        Center each group.
+    use_float32 : bool, default: False
+        Use 32-bit floating point precision.
+    ard_factors : bool, default: False
+        Use Automatic Relevance Determination (ARD) prior on factors.
+    ard_weights : bool, default: True
+        Use ARD prior on weights.
+    spikeslab_weights : bool, default: True
+        Use spike-and-slab prior on weights.
+    spikeslab_factors : bool, default: False
+        Use spike-and-slab prior on factors.
+    iterations : int, default: 1000
+        Maximum number of training iterations.
+    convergence_mode : {'fast', 'medium', 'slow'}, default: 'fast'
+        Convergence speed mode.
+    startELBO : int, default: 1
+        Iteration number to start computing the Evidence Lower Bound (ELBO).
+    freqELBO : int, default: 1
+        Frequency of ELBO computation after `startELBO`.
+    gpu_mode : bool, default: False
+        Use GPU for training.
+    gpu_device : Optional[int], default: None
+        GPU device ID to use.
+    verbose : bool, default: False
+        Verbose output during training.
+    quiet : bool, default: False
+        Suppress training output.
+    outfile : Optional[str], default: None
+        Path to save the trained model.
+    save_interrupted : bool, default: False
+        Save the model if training is interrupted.
+
+    """
+
+    DISTANCES_UNS_KEY = "X_mofa_distances"
+
+    def __init__(
+        self,
+        sample_key: str,
+        cells_type_key: str,
+        layer: Optional[str] = None,
+        seed: int = 67,
+        n_factors: int = 10,
+        aggregate_cell_types: bool = True,
+        aggregation_mode: str = "mean",
+        scale_views: bool = False,
+        scale_groups: bool = False,
+        center_groups: bool = True,
+        use_float32: bool = False,
+        ard_factors: bool = False,
+        ard_weights: bool = True,
+        spikeslab_weights: bool = True,
+        spikeslab_factors: bool = False,
+        iterations: int = 1000,
+        convergence_mode: str = "fast",
+        startELBO: int = 1,
+        freqELBO: int = 1,
+        gpu_mode: bool = False,
+        gpu_device: Optional[int] = None,
+        verbose: bool = False,
+        quiet: bool = False,
+        outfile: Optional[str] = None,
+        save_interrupted: bool = False,
+    ):
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
+        self.n_factors = n_factors
+        self.aggregate_cell_types = aggregate_cell_types
+        self.model = None
+        self.patient_representation = None
+        self.views = None  # List of views (cell types) or single view
+        self.views_names = None
+        self.aggregation_mode = aggregation_mode
+
+        self.data_options = {
+            "scale_views": scale_views,
+            "scale_groups": scale_groups,
+            "center_groups": center_groups,
+            "use_float32": use_float32,
+        }
+
+        self.model_options = {
+            "factors": self.n_factors,
+            "ard_factors": ard_factors,
+            "ard_weights": ard_weights,
+            "spikeslab_weights": spikeslab_weights,
+            "spikeslab_factors": spikeslab_factors,
+        }
+
+        self.train_options = {
+            "iter": iterations,
+            "convergence_mode": convergence_mode,
+            "startELBO": startELBO,
+            "freqELBO": freqELBO,
+            "gpu_mode": gpu_mode,
+            "gpu_device": gpu_device,
+            "seed": self.seed,
+            "verbose": verbose,
+            "quiet": quiet,
+            "outfile": outfile,
+            "save_interrupted": save_interrupted,
+        }
+
+    def prepare_anndata(self, adata, sample_size_threshold=1, cluster_size_threshold=0):
+        """
+        Prepare AnnData for MOFA2, optionally treating cell types as separate views.
+
+        Parameters
+        ----------
+        adata : AnnData
+            Annotated data matrix.
+        sample_size_threshold : int = 1
+            Minimum number of cells per sample to retain.
+        cluster_size_threshold : int = 0
+            Minimum number of cells per cell type within a sample to retain.
+        """
+        from mofapy2.run.entry_point import entry_point
+
+        super().prepare_anndata(
+            adata=adata,
+            sample_size_threshold=sample_size_threshold,
+            cluster_size_threshold=cluster_size_threshold,
+        )
+
+        if self.aggregate_cell_types:
+            # Aggregate by BOTH sample and cell type
+            pseudobulk_data = self._get_pseudobulk(
+                aggregation=self.aggregation_mode, fill_value=np.nan, aggregate_cell_types=True
+            )
+            self.views = [[view_matrix] for view_matrix in pseudobulk_data]  # -> multiple  celltype view appraoch
+            self.views_names = self.cell_types
+        else:
+            # Aggregate ONLY by patient
+            pseudobulk_data = self._get_pseudobulk(
+                aggregation=self.aggregation_mode, fill_value=np.nan, aggregate_cell_types=False
+            )
+            self.views = [[pseudobulk_data]]  # -> single view appraoch
+            self.views_names = ["aggregated_gene_expression"]
+
+        ent = entry_point()
+
+        ent.set_data_options(**self.data_options)
+
+        ent.set_data_matrix(
+            data=self.views,
+            samples_names=[self.samples],
+            views_names=self.views_names,
+            groups_names=[
+                "group1"
+            ],  # All patients are considered as a single group; no group-specific modeling is needed
+        )
+
+        ent.set_model_options(**self.model_options)
+
+        ent.set_train_options(**self.train_options)
+
+        ent.build()
+        ent.run()
+
+        self.model = ent.model
+
+    def calculate_distance_matrix(self, force=False, store_weights=False, dist="euclidean"):
+        """
+        Calculate distances between patients using MOFA2 latent factors.
+
+        Parameters
+        ----------
+        force : bool = False
+            If True, recalculate the distance matrix even if it exists.
+        store_weights : bool, default: False
+            If True, store the weights (relation of factors to genes) in `self.adata.uns`.
+
+        Returns
+        -------
+        distances : np.ndarray
+            Matrix of distances between patients.
+        """
+        distances = super().calculate_distance_matrix(force=force)
+        if distances is not None:
+            return distances
+
+        distance_metric = valid_distance_metric(dist)
+
+        # get factors expectation (latent representations of samples)
+        self.patient_representation = self.model.nodes["Z"].getExpectation()  # Shape: (n_patients, n_factors)
+
+        # store weights (relation of factors to genes)
+        if store_weights:
+            weights = self.model.nodes["W"].getExpectation()
+            # weights is a list with one matrix per view
+            if self.aggregate_cell_types:
+                mofa_weights = {view_name: weights[i] for i, view_name in enumerate(self.views_names)}
+            else:
+                mofa_weights = weights[0]
+
+        distances = scipy.spatial.distance.pdist(self.patient_representation, metric=distance_metric)
+        distances = scipy.spatial.distance.squareform(distances)
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        self.adata.uns["mofa_parameters"] = {
+            "sample_key": self.sample_key,
+            "n_factors": self.n_factors,
+            "aggregate_cell_types": self.aggregate_cell_types,
+            **self.data_options,
+            **self.model_options,
+            **self.train_options,
+        }
+        if store_weights:
+            self.adata.uns["mofa_parameters"]["weights"] = mofa_weights
+
+        return distances
