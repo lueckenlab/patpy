@@ -1,4 +1,5 @@
 from .basic import (
+    MOFA,
     PILOT,
     CellTypePseudobulk,
     CellTypesComposition,

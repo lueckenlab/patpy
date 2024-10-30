@@ -7,7 +7,7 @@ allow-direct-references = true  # Allow installing packages from git repositorie
 
 [project]
 name = "patient_representation"
-version = "0.2.0"
+version = "0.2.1"
 description = "Representing patients or samples from single-cell data"
 readme = "README.md"
 requires-python = "~=3.10"
@@ -39,6 +39,7 @@ dependencies = [
     "session-info",
     "phate",
     "DiffusionEMD @ git+https://github.com/farhadmd7/DiffusionEMD.git@main",
+    "mofapy2",
 ]
 
 [project.optional-dependencies]
