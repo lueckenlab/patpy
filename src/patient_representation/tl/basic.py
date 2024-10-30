@@ -1550,6 +1550,43 @@ class MOFA(PatientsRepresentationMethod):
     aggregate_cell_types : bool, default: True
         If True, treat each cell type as a separate view.
         If False, aggregate gene expression across all cell types into a single view.
+    scale_views : bool, optional
+        Scale each view to unit variance.
+    scale_groups : bool, default: False
+        Scale each group to unit variance.
+    center_groups : bool, default: True
+        Center each group.
+    use_float32 : bool, default: False
+        Use 32-bit floating point precision.
+    ard_factors : bool, default: False
+        Use Automatic Relevance Determination (ARD) prior on factors.
+    ard_weights : bool, default: True
+        Use ARD prior on weights.
+    spikeslab_weights : bool, default: True
+        Use spike-and-slab prior on weights.
+    spikeslab_factors : bool, default: False
+        Use spike-and-slab prior on factors.
+    iterations : int, default: 1000
+        Maximum number of training iterations.
+    convergence_mode : {'fast', 'medium', 'slow'}, default: 'fast'
+        Convergence speed mode.
+    startELBO : int, default: 1
+        Iteration number to start computing the Evidence Lower Bound (ELBO).
+    freqELBO : int, default: 1
+        Frequency of ELBO computation after `startELBO`.
+    gpu_mode : bool, default: False
+        Use GPU for training.
+    gpu_device : Optional[int], default: None
+        GPU device ID to use.
+    verbose : bool, default: False
+        Verbose output during training.
+    quiet : bool, default: False
+        Suppress training output.
+    outfile : Optional[str], default: None
+        Path to save the trained model.
+    save_interrupted : bool, default: False
+        Save the model if training is interrupted.
+
     """
 
     DISTANCES_UNS_KEY = "X_mofa_distances"
