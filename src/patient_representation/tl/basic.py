@@ -1550,6 +1550,8 @@ class MOFA(PatientsRepresentationMethod):
     aggregate_cell_types : bool, default: True
         If True, treat each cell type as a separate view.
         If False, aggregate gene expression across all cell types into a single view.
+    aggregation_mode: str, default: "mean"
+        Name of the aggregation function to use (e.g., 'mean', 'median', 'sum')
     scale_views : bool, optional
         Scale each view to unit variance.
     scale_groups : bool, default: False
@@ -1599,6 +1601,7 @@ class MOFA(PatientsRepresentationMethod):
         seed: int = 67,
         n_factors: int = 10,
         aggregate_cell_types: bool = True,
+        aggregation_mode: str = "mean",
         scale_views: bool = False,
         scale_groups: bool = False,
         center_groups: bool = True,
@@ -1625,6 +1628,7 @@ class MOFA(PatientsRepresentationMethod):
         self.patient_representation = None
         self.views = None  # List of views (cell types) or single view
         self.views_names = None
+        self.aggregation_mode = aggregation_mode
 
         self.data_options = {
             "scale_views": scale_views,
@@ -1668,6 +1672,8 @@ class MOFA(PatientsRepresentationMethod):
         cluster_size_threshold : int = 0
             Minimum number of cells per cell type within a sample to retain.
         """
+        from mofapy2.run.entry_point import entry_point
+
         super().prepare_anndata(
             adata=adata,
             sample_size_threshold=sample_size_threshold,
@@ -1676,36 +1682,18 @@ class MOFA(PatientsRepresentationMethod):
 
         if self.aggregate_cell_types:
             # Aggregate by BOTH sample and cell type
-            pseudobulk_data = self._get_pseudobulk(aggregation="mean", fill_value=np.nan, aggregate_cell_types=True)
+            pseudobulk_data = self._get_pseudobulk(
+                aggregation=self.aggregation_mode, fill_value=np.nan, aggregate_cell_types=True
+            )
             self.views = [[view_matrix] for view_matrix in pseudobulk_data]  # -> multiple  celltype view appraoch
             self.views_names = self.cell_types
         else:
             # Aggregate ONLY by patient
-            pseudobulk_data = self._get_pseudobulk(aggregation="mean", fill_value=np.nan, aggregate_cell_types=False)
+            pseudobulk_data = self._get_pseudobulk(
+                aggregation=self.aggregation_mode, fill_value=np.nan, aggregate_cell_types=False
+            )
             self.views = [[pseudobulk_data]]  # -> single view appraoch
             self.views_names = ["aggregated_gene_expression"]
-
-    def calculate_distance_matrix(self, force=False, store_weights=False):
-        """
-        Calculate distances between patients using MOFA2 latent factors.
-
-        Parameters
-        ----------
-        force : bool = False
-            If True, recalculate the distance matrix even if it exists.
-        store_weights : bool, default: False
-            If True, store the weights (relation of factors to genes) in `self.adata.uns`.
-
-        Returns
-        -------
-        distances : np.ndarray
-            Matrix of distances between patients.
-        """
-        from mofapy2.run.entry_point import entry_point
-
-        distances = super().calculate_distance_matrix(force=force)
-        if distances is not None:
-            return distances
 
         ent = entry_point()
 
@@ -1729,6 +1717,28 @@ class MOFA(PatientsRepresentationMethod):
 
         self.model = ent.model
 
+    def calculate_distance_matrix(self, force=False, store_weights=False, dist="euclidean"):
+        """
+        Calculate distances between patients using MOFA2 latent factors.
+
+        Parameters
+        ----------
+        force : bool = False
+            If True, recalculate the distance matrix even if it exists.
+        store_weights : bool, default: False
+            If True, store the weights (relation of factors to genes) in `self.adata.uns`.
+
+        Returns
+        -------
+        distances : np.ndarray
+            Matrix of distances between patients.
+        """
+        distances = super().calculate_distance_matrix(force=force)
+        if distances is not None:
+            return distances
+
+        distance_metric = valid_distance_metric(dist)
+
         # get factors expectation (latent representations of samples)
         self.patient_representation = self.model.nodes["Z"].getExpectation()  # Shape: (n_patients, n_factors)
 
@@ -1741,7 +1751,7 @@ class MOFA(PatientsRepresentationMethod):
             else:
                 mofa_weights = weights[0]
 
-        distances = scipy.spatial.distance.pdist(self.patient_representation, metric="euclidean")
+        distances = scipy.spatial.distance.pdist(self.patient_representation, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
