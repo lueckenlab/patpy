@@ -1749,7 +1749,9 @@ class MOFA(PatientsRepresentationMethod):
             "sample_key": self.sample_key,
             "n_factors": self.n_factors,
             "aggregate_cell_types": self.aggregate_cell_types,
-            **self.mofa_params,
+            **self.data_options,
+            **self.model_options,
+            **self.train_options,
         }
         if store_weights:
             self.adata.uns["mofa_parameters"]["weights"] = mofa_weights
