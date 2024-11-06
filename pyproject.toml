@@ -7,7 +7,7 @@ allow-direct-references = true  # Allow installing packages from git repositorie
 
 [project]
 name = "patient_representation"
-version = "0.1.30"
+version = "1.0.0"
 description = "Representing patients or samples from single-cell data"
 readme = "README.md"
 requires-python = "~=3.10"
@@ -28,17 +28,11 @@ dependencies = [
     "opentsne>=0.6",
     "pandas>=1.5",
     "scipy>=1.10",
-    "scvi-tools>=1.2.0",
     "seaborn>=0.12",
-    "torch>=1.13",
-    "wassersteintsne>=1.1",
-    "scarches",
     "ehrapy",
     "plottable",
     # for debug logging (referenced from the issue template)
     "session-info",
-    "phate",
-    "DiffusionEMD @ git+https://github.com/farhadmd7/DiffusionEMD.git@main",
 ]
 
 [project.optional-dependencies]
@@ -61,6 +55,28 @@ doc = [
 test = [
     "pytest",
     "pytest-cov",
+]
+
+mrvi = [
+    "scvi-tools>=1.2.0",
+    "torch>=1.13",
+]
+
+pilot = [
+    "pilotpy @ git+https://github.com/CostaLab/PILOT#egg=pilotpy"
+]
+
+scpoli = [
+    "scarches>=0.5.1",
+]
+
+wassersteintsne = [
+    "wassersteintsne>=1.1",
+]
+
+diffusionemd = [
+    "DiffusionEMD @ git+https://github.com/farhadmd7/DiffusionEMD.git@main",
+    "phate>=1.0.11",
 ]
 
 [tool.coverage.run]
