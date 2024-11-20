@@ -25,3 +25,15 @@ def toy_distances():
     conditions = pd.Series(["control", "control", "case", "case"])
     # conditions = np.array(["control", "control", "case", "case"])
     return distances, conditions
+
+
+@pytest.fixture
+def toy_dataframe():
+    return pd.DataFrame(
+        {
+            "sample_key": ["sample1", "sample2", "sample3", "sample4"],
+            "cell_group_key": ["cell_type1", "cell_type2", "cell_type3", "cell_type4"],
+            "numeric_col": [1.5, 2.3, 3.1, 4.2],
+            "missing_col": [1.0, np.nan, 3.5, np.nan],
+        }
+    )
