@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import scanpy as sc
+from scipy.spatial.distance import pdist, squareform
 
 
 @pytest.fixture
@@ -15,3 +16,12 @@ def toy_adata():
     adata = sc.AnnData(X=data, obs=obs, var=var)
     adata.var["variances"] = [0.1, 0.5, 0.9]
     return adata
+
+
+@pytest.fixture
+def toy_distances():
+    """Creates a toy distance matrix and conditions array for testing."""
+    distances = squareform(pdist(np.array([[0, 1], [1, 1], [2, 2], [3, 3]])))
+    conditions = pd.Series(["control", "control", "case", "case"])
+    # conditions = np.array(["control", "control", "case", "case"])
+    return distances, conditions
