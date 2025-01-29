@@ -12,7 +12,6 @@ from statsmodels.stats.multitest import multipletests
 from patient_representation.pp import (
     extract_metadata,
     fill_nan_distances,
-    filter_small_cell_groups,
     filter_small_samples,
     is_count_data,
     subsample,
@@ -300,7 +299,7 @@ def correlate_composition(meta_adata, expression_adata, sample_key, cell_type_ke
 
     # Calculate cell type composition using patpy tool
     composition = CellGroupComposition(sample_key, cell_type_key)
-    composition.prepare_anndata(expression_adata, sample_size_threshold=1, cluster_size_threshold=0)
+    composition.prepare_anndata(expression_adata)
     _ = (
         composition.calculate_distance_matrix()
     )  # We don't need distance matrix but this method calculates cell type proportions as well
@@ -384,10 +383,11 @@ def correlate_cell_type_expression(
     else:
         raise ValueError('Method must be either "spearman" or "pearson"')
 
+    if min_sample_size is not None and min_sample_size > 0:
+        expression_adata = filter_small_samples(expression_adata, sample_key, min_sample_size)
+
     cell_type_pseudobulk = GroupedPseudobulk(sample_key, cell_type_key, layer=layer)
-    cell_type_pseudobulk.prepare_anndata(
-        expression_adata, sample_size_threshold=min_sample_size, cluster_size_threshold=0
-    )
+    cell_type_pseudobulk.prepare_anndata(expression_adata)
     _ = cell_type_pseudobulk.calculate_distance_matrix()
 
     expression_correlations = []
@@ -514,36 +514,13 @@ class SampleRepresentationMethod:
         self.embeddings = {}
         self.samples_adata = None
 
+        if self.cell_group_key is not None and self.cell_group_key in self.adata.obs:
+            self.cell_groups = self.adata.obs[self.cell_group_key].unique()
+
     # fit-like method: save data and process it
-    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
-        """Prepare adata for the analysis, filter small cell groups and samples with too few observations
-
-        Parameters
-        ----------
-        sample_size_threshold : int = 300
-            Minimum sample size to be considered. Samples with fewer number of cells
-            are filtered out
-        cluster_size_threshold : int = 5
-            Minimum cell group size per sample to be considered. Cell groups with fewer
-            number of cells at least in 1 sample are filtered out
-
-        """
+    def prepare_anndata(self, adata):
+        """fit-like method: prepare adata for the analysis"""
         self.adata = adata
-
-        # Filter samples with too few cells
-        self.adata = filter_small_samples(
-            adata=self.adata, sample_key=self.sample_key, sample_size_threshold=sample_size_threshold
-        )
-        self.samples = self.adata.obs[self.sample_key].unique()
-
-        # Filter cell groups with too few cells
-        self.adata = filter_small_cell_groups(
-            adata=self.adata,
-            sample_key=self.sample_key,
-            cell_group_key=self.cell_group_key,
-            cluster_size_threshold=cluster_size_threshold,
-        )
-        self.cell_groups = self.adata.obs[self.cell_group_key].unique()
 
     def calculate_distance_matrix(self, force: bool = False):
         """Transform-like method: returns samples distances matrix"""
@@ -982,7 +959,7 @@ class MrVI(SampleRepresentationMethod):
         self.max_epochs = max_epochs
         self.batch_key = batch_key
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
+    def prepare_anndata(self, adata):
         """Train MrVI model
 
         Parameters
@@ -995,9 +972,7 @@ class MrVI(SampleRepresentationMethod):
         """
         from scvi.external import MRVI
 
-        super().prepare_anndata(
-            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
-        )
+        super().prepare_anndata(adata=adata)
 
         assert is_count_data(self._get_data()), "`layer` must contain count data with integer numbers"
 
@@ -1130,13 +1105,11 @@ class WassersteinTSNE(SampleRepresentationMethod):
         self.model = None
         self.distances_model = None
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
+    def prepare_anndata(self, adata):
         """Set up Gaussian Wasserstein Distance model"""
         import WassersteinTSNE as WT
 
-        super().prepare_anndata(
-            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
-        )
+        super().prepare_anndata(adata=adata)
 
         data = pd.DataFrame(self._get_data())
         data.set_index([self.adata.obs[self.sample_key], self.adata.obs[self.replicate_key]], inplace=True)
@@ -1452,15 +1425,11 @@ class SCPoli(SampleRepresentationMethod):
         self.pretraining_epochs = pretraining_epochs
         self.eta = eta
 
-    def prepare_anndata(
-        self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0, optimize_adata=True
-    ):
+    def prepare_anndata(self, adata, optimize_adata=True):
         """Set up scPoli model"""
         from scarches.models.scpoli import scPoli
 
-        super().prepare_anndata(
-            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
-        )
+        super().prepare_anndata(adata=adata)
 
         self.adata = self._move_layer_to_X()
 
@@ -1532,8 +1501,6 @@ class PhEMD(SampleRepresentationMethod):
     def prepare_anndata(
         self,
         adata,
-        sample_size_threshold: int = 1,
-        cluster_size_threshold: int = 0,
         subset_fraction: float = None,
         subset_n_obs: int = None,
         subset_min_obs_per_sample: int = 500,
@@ -1545,9 +1512,6 @@ class PhEMD(SampleRepresentationMethod):
         adata : AnnData
             Annotated data matrix
         sample_size_threshold : int = 1
-            Minimum number of cells in a sample
-        cluster_size_threshold : int = 0
-            Minimum number of cells in a cluster
         subset_fraction : float = None
             Fraction of cells from each sample to use for PhEMD calculation
         subset_n_obs : int = None
@@ -1555,7 +1519,7 @@ class PhEMD(SampleRepresentationMethod):
         subset_min_obs_per_sample : int = 500
             Minimum number of cells per sample to use for PhEMD calculation
         """
-        super().prepare_anndata(adata, sample_size_threshold, cluster_size_threshold)
+        super().prepare_anndata(adata=adata)
 
         if subset_fraction is not None or subset_n_obs is not None:
             self.adata = subsample(
@@ -1608,13 +1572,11 @@ class DiffusionEarthMoverDistance(SampleRepresentationMethod):
         self.model = None
         self.sample_representation = None
 
-    def prepare_anndata(self, adata, sample_size_threshold: int = 1, cluster_size_threshold: int = 0):
+    def prepare_anndata(self, adata):
         """Prepare anndata, calculate neighbors and convert labels to distributions as required by DiffusionEMD"""
         from DiffusionEMD import DiffusionCheb
 
-        super().prepare_anndata(
-            adata=adata, sample_size_threshold=sample_size_threshold, cluster_size_threshold=cluster_size_threshold
-        )
+        super().prepare_anndata(adata=adata)
 
         # Encode labels as one-hot and normalize them per sample
         samples_encoding = pd.get_dummies(self.adata.obs[self.sample_key])
@@ -1781,26 +1743,18 @@ class MOFA(SampleRepresentationMethod):
             "save_interrupted": save_interrupted,
         }
 
-    def prepare_anndata(self, adata, sample_size_threshold=1, cluster_size_threshold=0):
+    def prepare_anndata(self, adata):
         """
         Prepare AnnData for MOFA2, optionally treating cell types as separate views.
 
         Parameters
         ----------
         adata : AnnData
-            Annotated data matrix.
-        sample_size_threshold : int = 1
-            Minimum number of cells per sample to retain.
-        cluster_size_threshold : int = 0
-            Minimum number of cells per cell type within a sample to retain.
+            Annotated data matrix
         """
         from mofapy2.run.entry_point import entry_point
 
-        super().prepare_anndata(
-            adata=adata,
-            sample_size_threshold=sample_size_threshold,
-            cluster_size_threshold=cluster_size_threshold,
-        )
+        super().prepare_anndata(adata=adata)
 
         if self.aggregate_cell_types:
             # Aggregate by BOTH sample and cell type
