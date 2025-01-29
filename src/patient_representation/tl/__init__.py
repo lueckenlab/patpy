@@ -1,10 +1,10 @@
 from .basic import (
+    MOFA,
+    PILOT,
     CellGroupComposition,
     DiffusionEarthMoverDistance,
     GroupedPseudobulk,
-    MOFA,
     MrVI,
-    PILOT,
     Pseudobulk,
     RandomVector,
     SCPoli,
