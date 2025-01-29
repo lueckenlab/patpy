@@ -283,7 +283,7 @@ def correlate_composition(meta_adata, expression_adata, sample_key, cell_type_ke
         raise ValueError('Method must be either "spearman" or "pearson"')
 
     # Calculate cell type composition using patpy tool
-    composition = CellTypesComposition(sample_key, cell_type_key)
+    composition = CellGroupComposition(sample_key, cell_type_key)
     composition.prepare_anndata(expression_adata, sample_size_threshold=1, cluster_size_threshold=0)
     _ = (
         composition.calculate_distance_matrix()
@@ -368,7 +368,7 @@ def correlate_cell_type_expression(
     else:
         raise ValueError('Method must be either "spearman" or "pearson"')
 
-    cell_type_pseudobulk = CellTypePseudobulk(sample_key, cell_type_key, layer=layer)
+    cell_type_pseudobulk = GroupedPseudobulk(sample_key, cell_type_key, layer=layer)
     cell_type_pseudobulk.prepare_anndata(
         expression_adata, sample_size_threshold=min_sample_size, cluster_size_threshold=0
     )
@@ -1628,7 +1628,7 @@ class DiffusionEarthMoverDistance(SampleRepresentationMethod):
         return self.adata.uns[self.DISTANCES_UNS_KEY]
 
 
-class MOFA(PatientsRepresentationMethod):
+class MOFA(SampleRepresentationMethod):
     """
     Patient representation using MOFA2 model, treating patients as samples with optional cell type views.
 
