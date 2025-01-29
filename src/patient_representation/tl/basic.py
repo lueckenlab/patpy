@@ -519,6 +519,8 @@ class SampleRepresentationMethod:
         """fit-like method: prepare adata for the analysis"""
         self.adata = adata
 
+        self.samples = self.adata.obs[self.sample_key].unique()
+
         if self.cell_group_key is not None and self.cell_group_key in self.adata.obs:
             self.cell_groups = self.adata.obs[self.cell_group_key].unique()
 
