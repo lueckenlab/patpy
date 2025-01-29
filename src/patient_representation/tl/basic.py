@@ -671,6 +671,7 @@ class SampleRepresentationMethod:
         continuous_palette="viridis",
         categorical_palette="tab10",
         na_color="lightgray",
+        axes=None,
     ):
         """Plot embedding of samples colored by `metadata_cols`"""
         import matplotlib.pyplot as plt
@@ -682,13 +683,21 @@ class SampleRepresentationMethod:
 
         if metadata_cols is None:
             # Simply plot the embedding
-            axes = sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1")
+            if axes is None:
+                axes = sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1")
+            else:
+                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", ax=axes)
         else:
             # Colorize samples by metadata
             metadata_df = self._extract_metadata(columns=metadata_cols)
             embedding_df = pd.concat([embedding_df, metadata_df], axis=1)
 
-            _, axes = plt.subplots(nrows=1, ncols=len(metadata_cols), sharey=True, figsize=(len(metadata_cols) * 5, 5))
+            if axes is None:
+                _, axes = plt.subplots(
+                    nrows=1, ncols=len(metadata_cols), sharey=True, figsize=(len(metadata_cols) * 5, 5)
+                )
+            else:
+                axes = axes.flatten() if isinstance(axes, np.ndarray) else axes
 
             for i, col in enumerate(metadata_cols):
                 n_unique_values = len(np.unique(metadata_df[col]))
