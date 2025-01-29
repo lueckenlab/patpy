@@ -27,17 +27,17 @@ def bootstrap_genes(cell, proportions=None, noise_scale: float = 0.05):
         # float64 cast is required because otherwise, the sum of proportions is > 1 later due to numeric precision
         cell = cell.toarray().astype(np.float64)
 
-    n_genes = cell.sum()
+    total_counts = cell.sum()
 
     if proportions is None:
-        proportions = (cell / n_genes).flatten().astype(np.float64)
+        proportions = (cell / total_counts).flatten().astype(np.float64)
 
     if noise_scale > 0:
         noise = np.random.uniform(1 - noise_scale, 1 + noise_scale, size=proportions.shape)
         proportions *= noise
         proportions /= proportions.sum()  # Renormalise
 
-    return np.random.multinomial(n_genes, proportions)
+    return np.random.multinomial(total_counts, proportions)
 
 
 def sample_cells(adata, layer, cell_type_key, cell_type_counts: pd.Series):
