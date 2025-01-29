@@ -4,9 +4,9 @@ from .basic import (
     DiffusionEarthMoverDistance,
     GroupedPseudobulk,
     MrVI,
+    Pseudobulk,
     RandomVector,
     SCPoli,
-    TotalPseudobulk,
     WassersteinTSNE,
     describe_metadata,
 )
