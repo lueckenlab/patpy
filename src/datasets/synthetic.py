@@ -98,7 +98,7 @@ def perturb_genes(
     cell_type_key : str
         Key in `adata.obs` that stores cell type labels
     gene_perturbation : dict[dict[str, str]]
-        Perturbation of gene expression. Keys are cell types, values are dictionaries with genes and their perturbation scales.
+        Perturbation of gene expression. Keys are cell types, values are dictionaries with genes and fold changes for perturbation scale.
         E.g. value 2 means that gene expression will be doubled (if `perturbation_strength` is 1)
     layer : str, default None
         Layer to use for perturbation. If None, use `adata.X`
@@ -136,7 +136,7 @@ def perturb_cell_type_abundance(
     cell_type_counts : pd.Series
         Counts of cells for each cell type. Can be obtained from `adata.obs[cell_type_key].value_counts()`
     abundance_perturbation : dict[str, float]
-        Perturbation of cell type abundance. Keys are cell types, values are perturbation scales.
+        Perturbation of cell type abundance. Keys are cell types, values are fold changes.
         E.g. value 2 means that cell type abundance will be doubled (if `perturbation_strength` is 1)
     perturbation_strength : float from 0 to 1, default 1.0
         Strength of the perturbation where 0 means not perturbed, and 1 means perturbed at maximim scale (defined in the corresponding dictionaries)
@@ -185,10 +185,10 @@ def simulate_data(
     layer : str, default "X"
         Layer to use for perturbation. If None, use `adata.X`
     abundance_perturbation : dict[str, float], default None
-        Perturbation of cell type abundance. Keys are cell types, values are perturbation scales.
+        Perturbation of cell type abundance. Keys are cell types, values are fold changes .
         E.g. value 2 means that cell type abundance will be doubled (if `perturbation_strength` is 1)
     gene_perturbation : dict[dict[str, float]], default None
-        Perturbation of gene expression. Keys are cell types, values are dictionaries with genes and their perturbation scales.
+        Perturbation of gene expression. Keys are cell types, values are dictionaries with genes and their perturbation scales defined as fold changes.
         E.g. value 2 means that gene expression will be doubled (if `perturbation_strength` is 1)
     perturbation_strength : float from 0 to 1
         Strength of the perturbation where 0 means not perturbed, and 1 means perturbed at maximim scale (defined in the corresponding dictionaries)
