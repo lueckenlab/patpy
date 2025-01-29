@@ -125,7 +125,7 @@ def perturb_genes(
     return adata
 
 
-def perturn_cell_type_abundance(
+def perturb_cell_type_abundance(
     cell_type_counts, abundance_perturbation: dict[str, float] = None, perturbation_strength: float = 1.0
 ):
     """
@@ -208,7 +208,7 @@ def simulate_data(
     cell_type_counts = adata.obs[cell_type_key].value_counts()
 
     if abundance_perturbation is not None:
-        cell_type_counts = perturn_cell_type_abundance(
+        cell_type_counts = perturb_cell_type_abundance(
             cell_type_counts=cell_type_counts,
             abundance_perturbation=abundance_perturbation,
             perturbation_strength=perturbation_strength,
