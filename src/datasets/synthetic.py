@@ -160,6 +160,7 @@ def _get_random_neighbor(adata, idx):
     """Get a random neighbor of a cell at index `idx` in `adata`"""
     distances = adata.obsp["distances"][idx].toarray()[0]
     neighbor_indices = np.nonzero(distances)[0]
+    neighbor_indices = neighbor_indices[neighbor_indices > 0]  # Not sample the same cell
     random_neighbor_idx = np.random.choice(neighbor_indices)
     return random_neighbor_idx
 
