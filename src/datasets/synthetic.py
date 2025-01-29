@@ -255,7 +255,7 @@ def simulate_data(
     return bootstrapped_adata
 
 
-def process_adata(adata):
+def process_adata(adata, verbose: bool = False):
     """
     Process `adata` by calculating QC metrics, normalizing, scaling, PCA, building neighbors graph and UMAP
 
@@ -263,17 +263,36 @@ def process_adata(adata):
     ----------
     adata : AnnData
         Annotated object with single-cell RNA-seq data
+    verbose : bool, default False
+        Whether to print progress
 
     Returns
     -------
     adata : AnnData
         Annotated object with processed single-cell RNA-seq data
     """
+    if verbose:
+        print("Calculating QC metrics...")
     sc.pp.calculate_qc_metrics(adata, inplace=True)
+
+    if verbose:
+        print("Normalizing...")
     sc.pp.normalize_total(adata)
+
+    if verbose:
+        print("Log transforming...")
     sc.pp.log1p(adata)
+
+    if verbose:
+        print("Scaling...")
     sc.pp.scale(adata)
+
+    if verbose:
+        print("PCA...")
     sc.tl.pca(adata, n_comps=30)
+
+    if verbose:
+        print("Building neighbors graph...")
     sc.pp.neighbors(adata, n_neighbors=50, n_pcs=30)
     sc.tl.umap(adata)
 
