@@ -108,7 +108,7 @@ def perturb_genes(
     for cell_type, genes_perturbed in gene_perturbation.items():
         cell_type_indices = adata.obs[cell_type_key] == cell_type
 
-        for gene, perturbation_scale in genes_perturbed.items():
+        for gene, fold_change in genes_perturbed.items():
             if gene not in adata.var_names:
                 warnings.warn(f"Gene {gene} not found in adata.var_names", stacklevel=1)
                 continue
@@ -116,11 +116,11 @@ def perturb_genes(
             if layer is None or layer == "X":
                 adata.X[cell_type_indices, adata.var_names == gene] *= (
                     1 - perturbation_strength
-                ) + perturbation_strength * perturbation_scale
+                ) + perturbation_strength * fold_change
             else:
                 adata.layers[layer][cell_type_indices, adata.var_names == gene] *= (
                     1 - perturbation_strength
-                ) + perturbation_strength * perturbation_scale
+                ) + perturbation_strength * fold_change
 
     return adata
 
@@ -143,8 +143,8 @@ def perturb_cell_type_abundance(
     """
     cell_type_counts = cell_type_counts.astype(float)  # Prevent warning due to float32 cast
 
-    for cell_type, perturbation_scale in abundance_perturbation.items():
-        cell_type_counts[cell_type] *= (1 - perturbation_strength) + perturbation_strength * perturbation_scale
+    for cell_type, fold_change in abundance_perturbation.items():
+        cell_type_counts[cell_type] *= (1 - perturbation_strength) + perturbation_strength * fold_change
 
     return cell_type_counts.astype(int)
 
