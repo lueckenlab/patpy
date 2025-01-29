@@ -514,13 +514,13 @@ class SampleRepresentationMethod:
         self.embeddings = {}
         self.samples_adata = None
 
-        if self.cell_group_key is not None and self.cell_group_key in self.adata.obs:
-            self.cell_groups = self.adata.obs[self.cell_group_key].unique()
-
     # fit-like method: save data and process it
     def prepare_anndata(self, adata):
         """fit-like method: prepare adata for the analysis"""
         self.adata = adata
+
+        if self.cell_group_key is not None and self.cell_group_key in self.adata.obs:
+            self.cell_groups = self.adata.obs[self.cell_group_key].unique()
 
     def calculate_distance_matrix(self, force: bool = False):
         """Transform-like method: returns samples distances matrix"""
