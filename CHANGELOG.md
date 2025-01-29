@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.4.0 – Synthetic data generation
+
+### Added
+
+-   Functions to generate synthetic data simulating disease severity in `src/datasets/synthetic.py`
+-   Synthetic data generation example notebook: `docs/notebooks/synthetic_data_generation.ipynb`
+-   `plot_embedding` method for sample representations now accepts custom axes
+
 ## 0.3.0
 
 ### Sample representation refactoring:
