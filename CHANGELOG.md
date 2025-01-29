@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
-## 1.0.0
+## 0.3.0
 
 ### Sample representation refactoring:
 
@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning][].
 -   -   `CellTypePseudobulk` -> `GroupedPseudobulk`
 -   `patient_representation` argument is renamed to `sample_representation`
 -   "Patient representation" is now renamed to "Sample representation" eveywhere
--   The base class is now called `SampleRepresentation` instead of `PatientRepresentation`. This is important only for developers, users shouldn't use it anyway
+-   The base class is now called `SampleRepresentationMethod` instead of `PatientRepresentationMethod`. This is important only for developers, users shouldn't use it anyway
 
 ### Deleted
 
