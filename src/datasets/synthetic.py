@@ -294,6 +294,9 @@ def process_adata(adata, verbose: bool = False):
     if verbose:
         print("Building neighbors graph...")
     sc.pp.neighbors(adata, n_neighbors=50, n_pcs=30)
+
+    if verbose:
+        print("UMAP...")
     sc.tl.umap(adata)
 
     return adata
