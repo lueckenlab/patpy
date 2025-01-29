@@ -1783,7 +1783,7 @@ class MOFA(SampleRepresentationMethod):
                 aggregation=self.aggregation_mode, fill_value=np.nan, aggregate_cell_types=True
             )
             self.views = [[view_matrix] for view_matrix in pseudobulk_data]  # -> multiple  celltype view appraoch
-            self.views_names = self.cell_types
+            self.views_names = self.cell_groups
         else:
             # Aggregate ONLY by patient
             pseudobulk_data = self._get_pseudobulk(
