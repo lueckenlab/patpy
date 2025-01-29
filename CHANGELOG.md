@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.5.0
+
+### Deleted
+
+-   Remove mandatory filtering of cell types in and small samples in `prepare_anndata` method of `SampleRepresentationMethod` descendants
+
+### Changed
+
+-   Rerun example notebook with updated API
+-   Add minor comments to the example notebook
+
 ## 0.4.0 – Synthetic data generation
 
 ### Added
