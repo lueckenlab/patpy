@@ -285,7 +285,7 @@ def covid_19_hallmarks():
     Returns
     -------
     abundance_hallmarks : dict[str, float]
-        Cell type abundance hallmarks of COVID-19
+        Cell type abundance hallmarks of COVID-19. Keys are cell types and values are fold changes of cell type proportions
     expression_hallmarks : dict[str, dict[str, float]]
         Expression hallmarks of severe COVID-19. Keys are cell types, values are genes and their DEG effect size corrected for dropout
     """
