@@ -995,7 +995,7 @@ class PILOT(SampleRepresentationMethod):
         return distances
 
 
-class TotalPseudobulk(SampleRepresentationMethod):
+class Pseudobulk(SampleRepresentationMethod):
     """A simple baseline, which represents samples as pseudobulk of their gene expression"""
 
     DISTANCES_UNS_KEY = "X_pseudobulk_distances"

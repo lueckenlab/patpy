@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning][].
 -   Some representation methods are renamed accordingly:
 -   -   `CellTypesComposition` -> `CellGroupComposition`
 -   -   `CellTypePseudobulk` -> `GroupedPseudobulk`
+-   -   `TotalPseudobulk` -> `Pseudobulk`
 -   `patient_representation` argument is renamed to `sample_representation`
 -   "Patient representation" is now renamed to "Sample representation" eveywhere
 -   The base class is now called `SampleRepresentationMethod` instead of `PatientRepresentationMethod`. This is important only for developers, users shouldn't use it anyway
