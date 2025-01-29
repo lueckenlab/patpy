@@ -40,9 +40,16 @@ def bootstrap_genes(cell, proportions=None, noise_scale: float = 0.05):
     return np.random.multinomial(total_counts, proportions)
 
 
-def sample_cells(adata, layer, cell_type_key, cell_type_counts: pd.Series):
+def simulate_cells(adata, layer, cell_type_key, cell_type_counts: pd.Series):
     """
-    Sample random cells from `adata` with number in each cell type given by `cell_type_counts`
+    Generate a new annotated data object by simulating cells similar to the ones in `adata`
+
+    The simulation works as following:
+    1. Sample random cells from `adata` with number in each cell type given by `cell_type_counts`
+    2. For each cell, select a random neighbor and interpolate between the cell and its neighbor
+
+    An interpolation is required to make new cells less similar to the original ones.
+    Otherwise, the nearest neighbor of a new cell is always the original cell, even with noise and dropout.
 
     Parameters
     ----------
@@ -58,7 +65,7 @@ def sample_cells(adata, layer, cell_type_key, cell_type_counts: pd.Series):
     Returns
     -------
     AnnData
-        Annotated object with sampled cells
+        Annotated object with simulated cells
     """
     cells = []
 
@@ -214,7 +221,7 @@ def simulate_data(
             perturbation_strength=perturbation_strength,
         )
 
-    bootstrapped_adata = sample_cells(
+    bootstrapped_adata = simulate_cells(
         adata, layer=layer, cell_type_key=cell_type_key, cell_type_counts=cell_type_counts
     )
 
