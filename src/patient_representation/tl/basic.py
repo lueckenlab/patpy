@@ -1,5 +1,5 @@
 import warnings
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
@@ -19,19 +19,37 @@ from patient_representation.pp import (
 )
 from patient_representation.tl._types import _EVALUATION_METHODS
 
+VALID_AGGREGATES = {"mean": np.mean, "median": np.median, "sum": np.sum}
 
-def valid_aggregate(aggregate: str):
-    """Returns a valid aggregation function or raises an error if invalid"""
-    valid_aggregates = {"mean": np.mean, "median": np.median, "sum": np.sum}
-    if aggregate not in valid_aggregates:
+VALID_DISTANCES = {"euclidean", "cosine", "cityblock"}
+
+
+def valid_aggregate(aggregate: str) -> Callable[[np.ndarray, ...], np.ndarray]:
+    """Returns a valid aggregation function or raises an error if invalid
+
+    Parameters
+    ----------
+    aggregate : str
+        Name of aggregation function to use. One of: "mean", "median", "sum"
+
+    Returns
+    -------
+    Callable
+        Numpy aggregation function
+
+    Raises
+    ------
+    ValueError
+        If aggregation function is not supported
+    """
+    if aggregate not in VALID_AGGREGATES:
         raise ValueError(f"Aggregation function '{aggregate}' is not supported")
-    return valid_aggregates[aggregate]
+    return VALID_AGGREGATES[aggregate]
 
 
 def valid_distance_metric(dist: str):
     """Returns if the distance metric is valid or raises an error"""
-    valid_dists = {"euclidean", "cosine", "cityblock"}
-    if dist not in valid_dists:
+    if dist not in VALID_DISTANCES:
         raise ValueError(f"Distance metric '{dist}' is not supported")
     return dist
 
@@ -43,8 +61,6 @@ def make_matrix_symmetric(matrix):
     ----------
     matrix : np.ndarray or scipy.sparse.spmatrix
         The input matrix to be made symmetric.
-    matrix_name : str, optional
-        Name of the matrix for the warning message, by default "Matrix".
 
     Returns
     -------
