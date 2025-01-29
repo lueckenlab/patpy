@@ -1,10 +1,13 @@
 import warnings
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 import scanpy as sc
 import scipy
 import seaborn as sns
+from scipy.stats import pearsonr, spearmanr
+from statsmodels.stats.multitest import multipletests
 
 from patient_representation.pp import (
     extract_metadata,
@@ -241,6 +244,178 @@ def calculate_average_without_nans(array, axis=0, return_sample_sizes=True, defa
         return averages, sample_sizes
 
     return averages
+
+
+def correlate_composition(meta_adata, expression_adata, sample_key, cell_type_key, target, method="spearman"):
+    """
+    Correlate cell type composition with a target variable.
+
+    Parameters
+    ----------
+    meta_adata : AnnData
+        AnnData object containing metadata for each sample.
+    expression_adata : AnnData
+        AnnData object containing gene expression data.
+    sample_key : str
+        Key in expression_adata.obs for sample identifiers.
+    cell_type_key : str
+        Key in expression_adata.obs for cell type annotations.
+    target : str
+        Key in meta_adata.obs for the target variable to correlate with.
+    method : str, optional
+        Correlation method to use. Either "spearman" (default) or "pearson".
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing correlation results for each cell type. It contains the following columns:
+        - "correlation": Correlation coefficient between cell type proportion and target variable
+        - "p_value": Raw p-value for the correlation
+        - "p_value_adj": Adjusted p-value after Benjamini-Hochberg correction
+        - "-log_p_value_adj": negative logarithm of adjusted p-value
+    """
+    # Select the correlation function
+    if method == "spearman":
+        correlation_fun = spearmanr
+    elif method == "pearson":
+        correlation_fun = pearsonr
+    else:
+        raise ValueError('Method must be either "spearman" or "pearson"')
+
+    # Calculate cell type composition using patpy tool
+    composition = CellTypesComposition(sample_key, cell_type_key)
+    composition.prepare_anndata(expression_adata, sample_size_threshold=1, cluster_size_threshold=0)
+    _ = (
+        composition.calculate_distance_matrix()
+    )  # We don't need distance matrix but this method calculates cell type proportions as well
+
+    cell_type_fractions = composition.patient_representations
+    cell_type_fractions = cell_type_fractions.loc[
+        meta_adata.obs_names
+    ]  # make sure that the order is the same as in input data
+
+    cell_type_corrs = {}
+
+    for cell_type in cell_type_fractions.columns:
+        correlation, p_value = correlation_fun(meta_adata.obs[target], cell_type_fractions[cell_type])
+        cell_type_corrs[cell_type] = {"correlation": correlation, "p_value": p_value}
+
+    cell_type_corrs = pd.DataFrame(cell_type_corrs).T
+
+    # Perform Benjamini-Hochberg correction
+    cell_type_corrs["p_value_adj"] = multipletests(cell_type_corrs["p_value"], method="fdr_bh")[1]
+
+    cell_type_corrs["-log_p_value_adj"] = -np.log(cell_type_corrs["p_value_adj"])
+
+    # Sort the DataFrame by adjusted p-value
+    cell_type_corrs = cell_type_corrs.sort_values(["p_value_adj", "correlation"], ascending=[True, False])
+
+    return cell_type_corrs
+
+
+def correlate_cell_type_expression(
+    meta_adata,
+    expression_adata,
+    sample_key,
+    cell_type_key,
+    target,
+    layer="X",
+    min_sample_size=50,
+    method="spearman",
+    keep_pseudobulks_in_data=True,
+):
+    """
+    Calculate correlation between gene expression and a target variable for each cell type.
+
+    Parameters
+    ----------
+    meta_adata : AnnData
+        AnnData object containing metadata and target variable.
+    expression_adata : AnnData
+        AnnData object containing gene expression data.
+    sample_key : str
+        Key in adata.obs for sample information.
+    cell_type_key : str
+        Key in adata.obs for cell type information.
+    target : str
+        Column name in meta_adata.obs containing the target variable.
+    layer : str
+        slot in .obsm or .layers of `expression_adata` to use for getting pseudobulks. Default is "X" to use .X
+    min_sample_size : int, optional
+        Minimum number of cells required for a sample to be included. Default is 50.
+    method : str, optional
+        Correlation method to use. Either "spearman" or "pearson". Default is "spearman".
+    keep_pseudobulks_in_data : bool, optional
+        If True (default), keep cell type pseudobulks in the meta_adata. They will be stored in .obsm slot
+        with the name <cell_type>_pseudobulk
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing correlation results for each cell type and gene. It contains the following columns:
+        - cell_type: The cell type
+        - gene_name: The gene name
+        - correlation: Correlation coefficient between gene expression and target variable
+        - p_value: Raw p-value for the correlation
+        - n_observations: Number of observations used for the correlation
+        - "-log_p_value_adj": negative logarithm of adjusted p-value
+    """
+    # Select the correlation function
+    if method == "spearman":
+        correlation_fun = spearmanr
+    elif method == "pearson":
+        correlation_fun = pearsonr
+    else:
+        raise ValueError('Method must be either "spearman" or "pearson"')
+
+    cell_type_pseudobulk = CellTypePseudobulk(sample_key, cell_type_key, layer=layer)
+    cell_type_pseudobulk.prepare_anndata(
+        expression_adata, sample_size_threshold=min_sample_size, cluster_size_threshold=0
+    )
+    _ = cell_type_pseudobulk.calculate_distance_matrix()
+
+    expression_correlations = []
+
+    for i, cell_type in enumerate(cell_type_pseudobulk.cell_types):
+        pseudobulks = cell_type_pseudobulk.patient_representations[i]
+
+        if keep_pseudobulks_in_data:
+            meta_adata.obsm[f"{cell_type}_pseudobulk"] = pd.DataFrame(
+                pseudobulks, index=cell_type_pseudobulk.samples, columns=expression_adata.var_names
+            ).loc[meta_adata.obs_names]
+
+        # Get the target values for the samples. Always make sure that the order is the same!
+        target_values = meta_adata.obs.loc[cell_type_pseudobulk.samples, target].values
+
+        # Calculate correlation for each gene
+        for gene_idx, gene_name in enumerate(
+            expression_adata.var_names
+        ):  # TODO: potential bug when a layer with different n features is used
+            gene_expression = pseudobulks[:, gene_idx]
+            correlation, p_value = correlation_fun(gene_expression, target_values, nan_policy="omit")
+
+            # Save the sample size. Nans appear when a cell type in a sample doesn't have any cells
+            n_observations = (~np.isnan(gene_expression)).sum()
+            expression_correlations.append((cell_type, gene_name, correlation, p_value, n_observations))
+
+    # Convert the results to a DataFrame
+    expression_correlation_df = pd.DataFrame(
+        expression_correlations, columns=["cell_type", "gene_name", "correlation", "p_value", "n_observations"]
+    )
+
+    expression_correlation_df = expression_correlation_df[expression_correlation_df["correlation"].notna()]
+
+    # Calculate adjusted p-values
+    expression_correlation_df["p_value_adj"] = multipletests(expression_correlation_df["p_value"], method="fdr_bh")[1]
+
+    expression_correlation_df["-log_p_value_adj"] = -np.log(expression_correlation_df["p_value_adj"])
+
+    # Sort the DataFrame by p-value (ascending) and correlation (descending)
+    expression_correlation_df = expression_correlation_df.sort_values(
+        ["p_value_adj", "correlation"], ascending=[True, False]
+    )
+
+    return expression_correlation_df
 
 
 class SampleRepresentationMethod:
@@ -683,6 +858,78 @@ class SampleRepresentationMethod:
 
         return results
 
+    def _get_pseudobulk(
+        self,
+        aggregation: str,
+        fill_value,
+        aggregate_cell_types=True,
+        sample_key=None,
+        cells_type_key=None,
+        samples=None,
+        cell_types=None,
+    ):
+        """
+        Generate pseudobulk data by aggregating gene expression data per patient and optionally per cell type.
+
+        Parameters
+        ----------
+        aggregation : str
+            Name of the aggregation function to use (e.g., 'mean', 'median', 'sum').
+        fill_value : float
+            Value to use for missing data (e.g., np.nan for CellTypePseudobulk and MOFA).
+        aggregate_cell_types : bool
+            If True, aggregate by both sample and cell type. If False, aggregate only by sample.
+        sample_key : str, optional
+            Key in `adata.obs` for sample (patient) IDs. Defaults to `self.sample_key`.
+        cells_type_key : str, optional
+            Key in `adata.obs` for cell types. Defaults to `self.cells_type_key`.
+        samples : list, optional
+            List of sample IDs. Defaults to `self.samples`.
+        cell_types : list, optional
+            List of cell types. Defaults to `self.cell_types`.
+
+        Returns
+        -------
+        numpy.ndarray or list of numpy.ndarray
+            Pseudobulk data, either as a 3D array (for each cell type) or 2D array (for each patient).
+        """
+        aggregation_func = valid_aggregate(aggregation)
+
+        sample_key = sample_key or self.sample_key
+        cells_type_key = cells_type_key or self.cells_type_key
+        samples = samples or self.samples
+        cell_types = cell_types or self.cell_types
+
+        data = self._get_data()
+
+        if aggregate_cell_types:
+            pseudobulk_data = np.zeros(shape=(len(cell_types), len(samples), data.shape[1]))
+
+            for i, cell_type in enumerate(cell_types):
+                for j, sample in enumerate(samples):
+                    cells_data = data[
+                        (self.adata.obs[sample_key] == sample) & (self.adata.obs[cells_type_key] == cell_type)
+                    ]
+
+                    if cells_data.size == 0:
+                        pseudobulk_data[i, j] = fill_value
+                    else:
+                        pseudobulk_data[i, j] = aggregation_func(cells_data, axis=0)
+
+            return pseudobulk_data
+        else:
+            pseudobulk_data = np.zeros(shape=(len(samples), data.shape[1]))
+
+            for j, sample in enumerate(samples):
+                cells_data = data[self.adata.obs[sample_key] == sample]
+
+                if cells_data.size == 0:
+                    pseudobulk_data[j] = fill_value
+                else:
+                    pseudobulk_data[j] = aggregation_func(cells_data, axis=0)
+
+            return pseudobulk_data
+
 
 class MrVI(SampleRepresentationMethod):
     """Deep generative modeling for quantifying sample-level heterogeneity in single-cell omics.
@@ -1053,22 +1300,11 @@ class GroupedPseudobulk(SampleRepresentationMethod):
         if distances is not None:
             return distances
 
-        aggregation_func = valid_aggregate(aggregate)
         distance_metric = valid_distance_metric(dist)
 
-        data = self._get_data()
-
-        # List of matrices with embedding centroids for samples for each cell group
-        self.sample_representation = np.zeros(shape=(len(self.cell_groups), len(self.samples), data.shape[1]))
-        for i, cell_group in enumerate(self.cell_groups):
-            for j, sample in enumerate(self.samples):
-                cells_data = data[
-                    (self.adata.obs[self.sample_key] == sample) & (self.adata.obs[self.cell_group_key] == cell_group)
-                ]
-                if cells_data.size == 0:
-                    self.sample_representation[i, j] = np.nan
-                else:
-                    self.sample_representation[i, j] = aggregation_func(cells_data, axis=0)
+        self.sample_representation = self._get_pseudobulk(
+            aggregation=aggregate, fill_value=np.nan, aggregate_cell_types=True
+        )
 
         # Matrix of distances between samples for each cell group
         distances = np.zeros(shape=(len(self.cell_groups), len(self.samples), len(self.samples)))
@@ -1390,3 +1626,241 @@ class DiffusionEarthMoverDistance(SampleRepresentationMethod):
         }
 
         return self.adata.uns[self.DISTANCES_UNS_KEY]
+
+
+class MOFA(PatientsRepresentationMethod):
+    """
+    Patient representation using MOFA2 model, treating patients as samples with optional cell type views.
+
+    Parameters
+    ----------
+    sample_key : str
+        Column in `.obs` containing sample (patient) IDs.
+    cells_type_key : str
+        Column in `.obs` containing cell type information.
+    layer : Optional[str], default: None
+        Layer in AnnData to use for gene expression data. If None, uses `.X`.
+    seed : int, default: 67
+        Random seed for reproducibility.
+    n_factors : int, default: 10
+        Number of latent factors to learn.
+    aggregate_cell_types : bool, default: True
+        If True, treat each cell type as a separate view.
+        If False, aggregate gene expression across all cell types into a single view.
+    aggregation_mode: str, default: "mean"
+        Name of the aggregation function to use (e.g., 'mean', 'median', 'sum')
+    scale_views : bool, optional
+        Scale each view to unit variance.
+    scale_groups : bool, default: False
+        Scale each group to unit variance.
+    center_groups : bool, default: True
+        Center each group.
+    use_float32 : bool, default: False
+        Use 32-bit floating point precision.
+    ard_factors : bool, default: False
+        Use Automatic Relevance Determination (ARD) prior on factors.
+    ard_weights : bool, default: True
+        Use ARD prior on weights.
+    spikeslab_weights : bool, default: True
+        Use spike-and-slab prior on weights.
+    spikeslab_factors : bool, default: False
+        Use spike-and-slab prior on factors.
+    iterations : int, default: 1000
+        Maximum number of training iterations.
+    convergence_mode : {'fast', 'medium', 'slow'}, default: 'fast'
+        Convergence speed mode.
+    startELBO : int, default: 1
+        Iteration number to start computing the Evidence Lower Bound (ELBO).
+    freqELBO : int, default: 1
+        Frequency of ELBO computation after `startELBO`.
+    gpu_mode : bool, default: False
+        Use GPU for training.
+    gpu_device : Optional[int], default: None
+        GPU device ID to use.
+    verbose : bool, default: False
+        Verbose output during training.
+    quiet : bool, default: False
+        Suppress training output.
+    outfile : Optional[str], default: None
+        Path to save the trained model.
+    save_interrupted : bool, default: False
+        Save the model if training is interrupted.
+
+    """
+
+    DISTANCES_UNS_KEY = "X_mofa_distances"
+
+    def __init__(
+        self,
+        sample_key: str,
+        cells_type_key: str,
+        layer: Optional[str] = None,
+        seed: int = 67,
+        n_factors: int = 10,
+        aggregate_cell_types: bool = True,
+        aggregation_mode: str = "mean",
+        scale_views: bool = False,
+        scale_groups: bool = False,
+        center_groups: bool = True,
+        use_float32: bool = False,
+        ard_factors: bool = False,
+        ard_weights: bool = True,
+        spikeslab_weights: bool = True,
+        spikeslab_factors: bool = False,
+        iterations: int = 1000,
+        convergence_mode: str = "fast",
+        startELBO: int = 1,
+        freqELBO: int = 1,
+        gpu_mode: bool = False,
+        gpu_device: Optional[int] = None,
+        verbose: bool = False,
+        quiet: bool = False,
+        outfile: Optional[str] = None,
+        save_interrupted: bool = False,
+    ):
+        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
+        self.n_factors = n_factors
+        self.aggregate_cell_types = aggregate_cell_types
+        self.model = None
+        self.patient_representation = None
+        self.views = None  # List of views (cell types) or single view
+        self.views_names = None
+        self.aggregation_mode = aggregation_mode
+
+        self.data_options = {
+            "scale_views": scale_views,
+            "scale_groups": scale_groups,
+            "center_groups": center_groups,
+            "use_float32": use_float32,
+        }
+
+        self.model_options = {
+            "factors": self.n_factors,
+            "ard_factors": ard_factors,
+            "ard_weights": ard_weights,
+            "spikeslab_weights": spikeslab_weights,
+            "spikeslab_factors": spikeslab_factors,
+        }
+
+        self.train_options = {
+            "iter": iterations,
+            "convergence_mode": convergence_mode,
+            "startELBO": startELBO,
+            "freqELBO": freqELBO,
+            "gpu_mode": gpu_mode,
+            "gpu_device": gpu_device,
+            "seed": self.seed,
+            "verbose": verbose,
+            "quiet": quiet,
+            "outfile": outfile,
+            "save_interrupted": save_interrupted,
+        }
+
+    def prepare_anndata(self, adata, sample_size_threshold=1, cluster_size_threshold=0):
+        """
+        Prepare AnnData for MOFA2, optionally treating cell types as separate views.
+
+        Parameters
+        ----------
+        adata : AnnData
+            Annotated data matrix.
+        sample_size_threshold : int = 1
+            Minimum number of cells per sample to retain.
+        cluster_size_threshold : int = 0
+            Minimum number of cells per cell type within a sample to retain.
+        """
+        from mofapy2.run.entry_point import entry_point
+
+        super().prepare_anndata(
+            adata=adata,
+            sample_size_threshold=sample_size_threshold,
+            cluster_size_threshold=cluster_size_threshold,
+        )
+
+        if self.aggregate_cell_types:
+            # Aggregate by BOTH sample and cell type
+            pseudobulk_data = self._get_pseudobulk(
+                aggregation=self.aggregation_mode, fill_value=np.nan, aggregate_cell_types=True
+            )
+            self.views = [[view_matrix] for view_matrix in pseudobulk_data]  # -> multiple  celltype view appraoch
+            self.views_names = self.cell_types
+        else:
+            # Aggregate ONLY by patient
+            pseudobulk_data = self._get_pseudobulk(
+                aggregation=self.aggregation_mode, fill_value=np.nan, aggregate_cell_types=False
+            )
+            self.views = [[pseudobulk_data]]  # -> single view appraoch
+            self.views_names = ["aggregated_gene_expression"]
+
+        ent = entry_point()
+
+        ent.set_data_options(**self.data_options)
+
+        ent.set_data_matrix(
+            data=self.views,
+            samples_names=[self.samples],
+            views_names=self.views_names,
+            groups_names=[
+                "group1"
+            ],  # All patients are considered as a single group; no group-specific modeling is needed
+        )
+
+        ent.set_model_options(**self.model_options)
+
+        ent.set_train_options(**self.train_options)
+
+        ent.build()
+        ent.run()
+
+        self.model = ent.model
+
+    def calculate_distance_matrix(self, force=False, store_weights=False, dist="euclidean"):
+        """
+        Calculate distances between patients using MOFA2 latent factors.
+
+        Parameters
+        ----------
+        force : bool = False
+            If True, recalculate the distance matrix even if it exists.
+        store_weights : bool, default: False
+            If True, store the weights (relation of factors to genes) in `self.adata.uns`.
+
+        Returns
+        -------
+        distances : np.ndarray
+            Matrix of distances between patients.
+        """
+        distances = super().calculate_distance_matrix(force=force)
+        if distances is not None:
+            return distances
+
+        distance_metric = valid_distance_metric(dist)
+
+        # get factors expectation (latent representations of samples)
+        self.patient_representation = self.model.nodes["Z"].getExpectation()  # Shape: (n_patients, n_factors)
+
+        # store weights (relation of factors to genes)
+        if store_weights:
+            weights = self.model.nodes["W"].getExpectation()
+            # weights is a list with one matrix per view
+            if self.aggregate_cell_types:
+                mofa_weights = {view_name: weights[i] for i, view_name in enumerate(self.views_names)}
+            else:
+                mofa_weights = weights[0]
+
+        distances = scipy.spatial.distance.pdist(self.patient_representation, metric=distance_metric)
+        distances = scipy.spatial.distance.squareform(distances)
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        self.adata.uns["mofa_parameters"] = {
+            "sample_key": self.sample_key,
+            "n_factors": self.n_factors,
+            "aggregate_cell_types": self.aggregate_cell_types,
+            **self.data_options,
+            **self.model_options,
+            **self.train_options,
+        }
+        if store_weights:
+            self.adata.uns["mofa_parameters"]["weights"] = mofa_weights
+
+        return distances

@@ -25,3 +25,17 @@ and this project adheres to [Semantic Versioning][].
 
 -   Not used `SCellBow` class
 -   Example notebook in the documentation
+
+## 0.2.0
+
+### Added
+
+-   Warning about ongoing development in README
+-   Function `correlate_composition` to the tools
+-   Function `correlate_cell_type_expression` to the tools
+-   Function `correlation_volcano` to the plotting
+-   Patients trajectory example notebook
+
+### Changed
+
+-   Rename `patient_representation` to `patpy`
