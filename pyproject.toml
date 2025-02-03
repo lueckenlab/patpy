@@ -33,6 +33,7 @@ dependencies = [
     "plottable",
     # for debug logging (referenced from the issue template)
     "session-info",
+    "gudhi",
 ]
 
 [project.optional-dependencies]
