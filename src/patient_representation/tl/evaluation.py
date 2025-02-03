@@ -165,7 +165,7 @@ def test_distances_significance(
 
 
 def persistence_evaluation(distances, vertex_feature, max_feature_difference, n_neighbors=10):
-    """ Calculate the number, total lifetime and persistence pairs of the connected components 
+    """Calculate the number, total lifetime and persistence pairs of the connected components
     in the kNN graph while stepwise filtering through the graph starting from the lowest value.
     In practice, if the feature values correspond to e.g. disease severity, this function can be used to
     evaluate how connected components in the kNN graph change as the disease severity increases.
@@ -190,11 +190,8 @@ def persistence_evaluation(distances, vertex_feature, max_feature_difference, n_
         - total_lifetime: total lifetime of the connected components
         - persistence_pairs: persistence pairs corresponding to connected components
     """
-    
     import anndata
-    from persistence import (adata_obs_to_vertex_feature,
-                             calculate_persistent_homology,
-                             connectivities_to_edge_list)
+    from persistence import adata_obs_to_vertex_feature, calculate_persistent_homology, connectivities_to_edge_list
 
     adata = anndata.AnnData(X=np.zeros((distances.shape[0], 1)))
     adata.obsm["distances"] = distances
@@ -207,27 +204,28 @@ def persistence_evaluation(distances, vertex_feature, max_feature_difference, n_
     ### Let's remove all edges between nodes that have a feature difference greater than the max_feature_difference
     for j in range(adata.obs.shape[0]):
         boll = np.abs(adata.obs["vertex_feature"] - adata.obs["vertex_feature"].values[j]) > max_feature_difference
-        adata.obsp["connectivities"][j,:][:,boll.values] = 0
-    
+        adata.obsp["connectivities"][j, :][:, boll.values] = 0
+
     ### Converte the connectivities to an edge list
     connectivities = adata.obsp["connectivities"]
     edge_list = connectivities_to_edge_list(connectivities, mutal_nbhs=False)
 
     ### Calculate persistent homology and return the persistence pairs corresponding to connected components
-    persistence_pairs = calculate_persistent_homology(vertex_feature, edge_list, k=2, order="sublevel", 
-                                infinity_values="max", min_persistence=0.0)
+    persistence_pairs = calculate_persistent_homology(
+        vertex_feature, edge_list, k=2, order="sublevel", infinity_values="max", min_persistence=0.0
+    )
     persistence_pairs = persistence_pairs[0][1:]
 
     ### Calculate the total lifetime of the connected components
     total_lifetime = 0
-    for [b,d] in persistence_pairs:
-        lt = d-b
+    for [b, d] in persistence_pairs:
+        lt = d - b
         total_lifetime += lt
 
     ### Calculate the number of connected components
     clusters = len(persistence_pairs)
 
-    return {"n_components": clusters, "total_lifetime": total_lifetime,  "persistence_pairs": persistence_pairs}
+    return {"n_components": clusters, "total_lifetime": total_lifetime, "persistence_pairs": persistence_pairs}
 
 
 def predict_knn(distances, y_true, n_neighbors: int = 3, task: _PREDICTION_TASKS = "classification"):
