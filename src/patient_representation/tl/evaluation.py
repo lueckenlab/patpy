@@ -499,7 +499,7 @@ def evaluate_representation(
         result_ph = persistence_evaluation(distances, target, **parameters)
 
         ## The lower the total_lifetime, the better the representation
-        result = {"score": -result_ph["total_lifetime"], "metric": "total_lifetime"}
+        result = {"score": result_ph["total_lifetime"], "metric": "total_lifetime"}
 
     result["n_unique"] = len(np.unique(target))
     result["n_observations"] = len(target)  # Without missing values this number can change between features
