@@ -164,55 +164,78 @@ def test_distances_significance(
     return normalized_distances, real_statistic, p_value
 
 
-def persistence_evaluation(distances, vertex_feature, max_feature_difference, n_neighbors=10):
+def persistence_evaluation(distances, conditions, max_feature_difference, n_neighbors=10, order = "sublevel", infinity_value="max"):
     """Calculate the number, total lifetime and persistence pairs of the connected components
-    in the kNN graph while stepwise filtering through the graph starting from the lowest value.
-    In practice, if the feature values correspond to e.g. disease severity, this function can be used to
-    evaluate how connected components in the kNN graph change as the disease severity increases.
-    This evaluates the connectivity of the patient representation with respect to the feature.
+    in the kNN graph while stepwise filtering through the graph starting from the lowest 
+    value. In practice, if the vertex feature values correspond to e.g. disease severity, 
+    this function can be used to evaluate how connected components in the kNN graph change as 
+    the disease severity increases. This evaluates the connectivity of 
+    the patient representation with respect to the feature.
 
     Parameters
     ----------
     distances : square matrix, crs_matrix
         Matrix of distances between samples.
-    vertex_feature : array-like
+    conditions : array-like, numerical
         Numerical vector with the values of a feature for each sample.
     max_feature_difference : float
         Maximum difference in the feature values allowed between connected nodes.
     n_neighbors : int = 7
         Number of neighbors to use for constructing the kNN graph.
+    order : str = "sublevel" or "superlevel"
+        The order of the filtration. Either "subevel" to filter from the lowest to 
+        the highest value or "superlevel" to filter from the highest to the lowest value.
+    infinity_value : str = "max" or float
+        The maximium filtration value. It should be larger or equal to the maximum 
+        value of the condition. By default it is equal to the maximum value of the feature. 
+        If set to a float, it uses the specified value. Higher values increase the death coordinate 
+        and thus the lifetime of any components that remain after all edges have been included. 
 
     Returns
     -------
     result : dict
         Result of the evaluation with the following keys:
-        - n_components: number of connected components
-        - total_lifetime: total lifetime of the connected components
-        - persistence_pairs: persistence pairs corresponding to connected components
+        - n_components: int
+            The number of connected components detected during the filtration. The lower the number,
+            the better i.e. more connected the representation w.r.t. the condition.
+        - total_lifetime: float
+            The total lifetime of the connected components computed as \sum_{i=2}^{n_components} (d_i - b_i).
+            We disregard the lifetime of the first connected component as it is always equal to the 
+            difference between the maximum and minimum filtration value. The lower the total_lifetime, 
+            the better i.e. more connected the representation w.r.t to the condition.
+        - persistence_pairs: list 
+            Persistence pairs of the form [[b_1, d_1], [b_2, d_2], ..., [b_N, d_N]] where 
+            b_i denotes the birth value at and d_i is the death value of a connected component
+            and N is the number of connected components detected during the filtration.
+
+    References
+    ----------
+    [1] Boissonnat and Maria (2024): https://gudhi.inria.fr/python/latest/simplex_tree_ref.html
+    [2] Limbeck and Rieck (2024): https://arxiv.org/abs/2409.03575v1
+    [3] Rieck et al. (2017): https://ieeexplore.ieee.org/document/8017588
     """
     import anndata
-    from persistence import adata_obs_to_vertex_feature, calculate_persistent_homology, connectivities_to_edge_list
+    from persistence import calculate_persistent_homology, connectivities_to_edge_list
 
     adata = anndata.AnnData(X=np.zeros((distances.shape[0], 1)))
     adata.obsm["distances"] = distances
-    adata.obs["vertex_feature"] = vertex_feature
-    vertex_feature = adata_obs_to_vertex_feature(adata, "vertex_feature")
+    adata.obs["conditions"] = conditions
+    conditions = adata.obs["conditions"].values
 
     ### Calculate a kNN graph from the distances
     sc.pp.neighbors(adata, use_rep="distances", n_neighbors=n_neighbors, metric="precomputed")
 
     ### Let's remove all edges between nodes that have a feature difference greater than the max_feature_difference
-    for j in range(adata.obs.shape[0]):
-        boll = np.abs(adata.obs["vertex_feature"] - adata.obs["vertex_feature"].values[j]) > max_feature_difference
-        adata.obsp["connectivities"][j, :][:, boll.values] = 0
+    edges_to_remove = np.abs(adata.obs["conditions"] - adata.obs["conditions"].values.T) > max_feature_difference
+    adata.obsp["connectivities"][:, edges_to_remove.values] = 0
 
-    ### Converte the connectivities to an edge list
+    ### Convert the connectivities to an edge list
     connectivities = adata.obsp["connectivities"]
     edge_list = connectivities_to_edge_list(connectivities, mutal_nbhs=False)
 
     ### Calculate persistent homology and return the persistence pairs corresponding to connected components
     persistence_pairs = calculate_persistent_homology(
-        vertex_feature, edge_list, k=2, order="sublevel", infinity_values="max", min_persistence=0.0
+        conditions, edge_list, k=2, order=order, infinity_value=infinity_value, min_persistence=0.0
     )
     persistence_pairs = persistence_pairs[0][1:]
 

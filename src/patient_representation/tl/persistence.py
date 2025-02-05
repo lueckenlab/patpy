@@ -27,34 +27,12 @@ def connectivities_to_edge_list(connectivities, mutal_nbhs=False):
     return edge_list
 
 
-def adata_obs_to_vertex_feature(adata, gene):
-    """Helper function to extract the gene expression values of one gene from an adata object.
-
-    Parameters
-    ----------
-    adata:
-        An anndata.AnnData object.
-    gene:
-        The name of the gene whose expression values saved in anndata.AnnData.X should be returned.
-
-    Returns
-    -------
-    The gene expression values of this gene.
-    """
-    assert gene in adata.obs.columns
-    # if layer is None:
-    gene_data = adata.obs[gene].values  # .to().squeeze()
-    # else:
-    #    gene_data = adata.obs[gene].values#.toarray().squeeze()
-    return gene_data
-
-
 ### Use gudhi to calculate PH ###
 def calculate_persistent_homology(
-    vertex_feature, edge_list, k=2, order="sublevel", infinity_values="max", min_persistence=0.0
+    vertex_feature, edge_list, k=2, order="sublevel", infinity_value="max", min_persistence=0.0
 ):
     """Calculates the persistent homology of a graph clique complex.
-    In particular, this function to calculates sublevel-set persistent homology
+    In particular, this function calculates sublevel-set persistent homology
     taking the values of one specific vertex feature as a filtration function
     over a pre-constructed spatial graph.
 
@@ -69,7 +47,7 @@ def calculate_persistent_homology(
         Expands the simplex tree containing only its one skeleton until dimension k.
         The expanded simplicial complex until dimension k attached to a graph is
         the maximal simplicial complex of dimension at most k admitting the graph as 1-skeleton.
-        By default k is set to 3, that is the simplex will be expanded up to 3-cliques.
+        If k is set to 3, the simplex will be expanded up to 3-cliques (i.e. faces).
         The filtration value assigned to a simplex is the maximal filtration value of one of its vertices.
     order:
         The order of the filtration. Either "subevel" or "superlevel".
@@ -92,6 +70,12 @@ def calculate_persistent_homology(
     PD1 is the persitence diagram of dimension 1 recording the appearance and disappearance
     of 1-dimensional simplicial complexes (i.e. loops or circles).
     Each persistence diagram is a list of persistence coordinates.
+
+    References
+    ----------
+    [1] Boissonnat and Maria (2024): https://gudhi.inria.fr/python/latest/simplex_tree_ref.html
+    [2] Limbeck and Rieck (2024): https://arxiv.org/abs/2409.03575v1
+    [3] Rieck et al. (2017): https://ieeexplore.ieee.org/document/8017588
     """
     eval_fn = max
 
@@ -101,11 +85,11 @@ def calculate_persistent_homology(
     elif order == "superlevel":
         vertex_weights = -(vertex_feature)
 
-    if infinity_values == "max":
-        infinity_values = max(vertex_weights)
+    if infinity_value == "max":
+        infinity_value = max(vertex_weights)
     else:
         # assert type(infinity_values) == int or float
-        assert infinity_values >= max(vertex_weights)
+        assert infinity_value >= max(vertex_weights)
 
     st = gd.SimplexTree()
 
@@ -127,7 +111,7 @@ def calculate_persistent_homology(
     diagrams = []
 
     for dimension in range(k - 1):
-        diagram = [[c, min(d, infinity_values)] for dim, (c, d) in persistence_pairs if dim == dimension]
+        diagram = [[c, min(d, infinity_value)] for dim, (c, d) in persistence_pairs if dim == dimension]
 
         diagrams.append(diagram)
 
