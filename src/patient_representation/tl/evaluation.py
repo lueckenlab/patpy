@@ -226,8 +226,9 @@ def persistence_evaluation(distances, conditions, max_feature_difference, n_neig
     sc.pp.neighbors(adata, use_rep="distances", n_neighbors=n_neighbors, metric="precomputed")
 
     ### Let's remove all edges between nodes that have a feature difference greater than the max_feature_difference
-    edges_to_remove = np.abs(adata.obs["conditions"] - adata.obs["conditions"].values.T) > max_feature_difference
-    adata.obsp["connectivities"][:, edges_to_remove.values] = 0
+    features = np.tile(adata.obs["conditions"].values, (adata.n_obs, 1))
+    edges_to_remove = np.abs(features - features.T) > max_feature_difference
+    adata.obsp["connectivities"][edges_to_remove] = 0
 
     ### Convert the connectivities to an edge list
     connectivities = adata.obsp["connectivities"]
