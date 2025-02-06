@@ -55,7 +55,7 @@ def calculate_persistent_homology(
         The value that the maximium death coordinates in the persistence diagram should be set to.
         For example, it could be +inf or any appropriate real number higher than
         the maximum value of the filtration function.
-        By default it is equal to "max" and automatically ets the value of infinite coordinates
+        By default it is equal to "max" and automatically sets the value of infinite coordinates
         to the maximum value of the filtration function.
     min_persistence:
         The minimum persistence value to take into account (strictly greater than min_persistence).
