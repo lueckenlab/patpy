@@ -868,9 +868,9 @@ class SampleRepresentationMethod:
         fill_value,
         aggregate_cell_types=True,
         sample_key=None,
-        cells_type_key=None,
+        cell_group_key=None,
         samples=None,
-        cell_types=None,
+        cell_groups=None,
     ):
         """
         Generate pseudobulk data by aggregating gene expression data per patient and optionally per cell type.
@@ -885,12 +885,12 @@ class SampleRepresentationMethod:
             If True, aggregate by both sample and cell type. If False, aggregate only by sample.
         sample_key : str, optional
             Key in `adata.obs` for sample (patient) IDs. Defaults to `self.sample_key`.
-        cells_type_key : str, optional
-            Key in `adata.obs` for cell types. Defaults to `self.cells_type_key`.
+        cell_group_key : str, optional
+            Key in `adata.obs` for cell groups. Defaults to `self.cell_group_key`.
         samples : list, optional
             List of sample IDs. Defaults to `self.samples`.
-        cell_types : list, optional
-            List of cell types. Defaults to `self.cell_types`.
+        cell_groups : list, optional
+            List of cell groups. Defaults to `self.cell_groups`.
 
         Returns
         -------
@@ -900,19 +900,19 @@ class SampleRepresentationMethod:
         aggregation_func = valid_aggregate(aggregation)
 
         sample_key = sample_key or self.sample_key
-        cells_type_key = cells_type_key or self.cells_type_key
+        cell_group_key = cell_group_key or self.cell_group_key
         samples = samples or self.samples
-        cell_types = cell_types or self.cell_types
+        cell_groups = cell_groups or self.cell_groups
 
         data = self._get_data()
 
         if aggregate_cell_types:
-            pseudobulk_data = np.zeros(shape=(len(cell_types), len(samples), data.shape[1]))
+            pseudobulk_data = np.zeros(shape=(len(cell_groups), len(samples), data.shape[1]))
 
-            for i, cell_type in enumerate(cell_types):
+            for i, cell_group in enumerate(cell_groups):
                 for j, sample in enumerate(samples):
                     cells_data = data[
-                        (self.adata.obs[sample_key] == sample) & (self.adata.obs[cells_type_key] == cell_type)
+                        (self.adata.obs[sample_key] == sample) & (self.adata.obs[cell_group_key] == cell_group)
                     ]
 
                     if cells_data.size == 0:
