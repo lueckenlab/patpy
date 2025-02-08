@@ -1625,7 +1625,7 @@ class MOFA(SampleRepresentationMethod):
     ----------
     sample_key : str
         Column in `.obs` containing sample (patient) IDs.
-    cells_type_key : str
+    cell_group_key : str
         Column in `.obs` containing cell type information.
     layer : Optional[str], default: None
         Layer in AnnData to use for gene expression data. If None, uses `.X`.
@@ -1682,7 +1682,7 @@ class MOFA(SampleRepresentationMethod):
     def __init__(
         self,
         sample_key: str,
-        cells_type_key: str,
+        cell_group_key: str,
         layer: Optional[str] = None,
         seed: int = 67,
         n_factors: int = 10,
@@ -1707,11 +1707,11 @@ class MOFA(SampleRepresentationMethod):
         outfile: Optional[str] = None,
         save_interrupted: bool = False,
     ):
-        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
+        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
         self.n_factors = n_factors
         self.aggregate_cell_types = aggregate_cell_types
         self.model = None
-        self.patient_representation = None
+        self.sample_representation = None
         self.views = None  # List of views (cell types) or single view
         self.views_names = None
         self.aggregation_mode = aggregation_mode
@@ -1818,7 +1818,7 @@ class MOFA(SampleRepresentationMethod):
         distance_metric = valid_distance_metric(dist)
 
         # get factors expectation (latent representations of samples)
-        self.patient_representation = self.model.nodes["Z"].getExpectation()  # Shape: (n_patients, n_factors)
+        self.sample_representation = self.model.nodes["Z"].getExpectation()  # Shape: (n_patients, n_factors)
 
         # store weights (relation of factors to genes)
         if store_weights:
@@ -1829,7 +1829,7 @@ class MOFA(SampleRepresentationMethod):
             else:
                 mofa_weights = weights[0]
 
-        distances = scipy.spatial.distance.pdist(self.patient_representation, metric=distance_metric)
+        distances = scipy.spatial.distance.pdist(self.sample_representation, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
