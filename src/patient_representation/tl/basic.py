@@ -1845,3 +1845,78 @@ class MOFA(SampleRepresentationMethod):
             self.adata.uns["mofa_parameters"]["weights"] = mofa_weights
 
         return distances
+
+
+class GloScope(SampleRepresentationMethod):
+    """A class that loads a file to R using rpy2 and follows the same interface as other SampleRepresentation methods"""
+
+    DISTANCES_UNS_KEY = "X_gloscope_distances"
+
+    def __init__(self, sample_key, cell_group_key=None, layer=None, seed=67, dist_mat="KL", dens="KNN", k=25, n_workers=1):
+        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
+        self.dist_mat = dist_mat
+        self.dens = dens
+        self.k = k
+        self.sample_representation = None
+        self.n_workers = n_workers
+
+    def prepare_anndata(self, adata):
+        """Prepare anndata for GloScope calculation"""
+        import rpy2.robjects as robjects
+        from rpy2.robjects import pandas2ri, numpy2ri
+        from rpy2.robjects.packages import importr
+        import rpy2
+        import anndata2ri
+
+        numpy2ri.activate()
+        # Activate automatic conversion between pandas and R objects
+        pandas2ri.activate()
+        anndata2ri.activate()
+        
+        super().prepare_anndata(adata=adata)
+
+        # Load the R packages
+        robjects.r('library(GloScope)')
+        BiocParallel = importr('BiocParallel')
+
+    def calculate_distance_matrix(self, force: bool = False):
+        """Calculate distances between samples represented as GloScope embeddings"""
+        import rpy2.robjects as robjects
+        from rpy2.robjects import pandas2ri
+        from rpy2.robjects.vectors import StrVector
+
+
+        distances = super().calculate_distance_matrix(force=force)
+
+        if distances is not None:
+            return distances
+
+        embedding_df = pd.DataFrame(self._get_data(), index=self.adata.obs_names)
+
+        # Assign embedding and sample IDs to R environment
+        robjects.globalenv['embedding_df'] = pandas2ri.py2rpy(embedding_df)
+        robjects.globalenv['sample_ids'] = StrVector(self.adata.obs[self.sample_key].values)
+
+        print("Calculating GloScope distance matrix")
+
+        # Call GloScope function in R
+        robjects.r(f"""
+        dist_matrix <- gloscope(
+            embedding_df,
+            sample_ids,
+            dens = '{self.dens}',
+            dist_mat = '{self.dist_mat}',
+            k = {self.k},
+            BPPARAM = BiocParallel::MulticoreParam(workers = {self.n_workers}, RNGseed = {self.seed})
+        )
+        """)
+
+        # Retrieve the distance matrix from R environment
+        dist_matrix = robjects.r("as.data.frame(dist_matrix)")
+
+        self.sample_representation = dist_matrix
+        self.samples = list(self.sample_representation.index)
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = dist_matrix
+
+        return distances
