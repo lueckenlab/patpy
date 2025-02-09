@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.6.0
+
+### Changed
+
+-   Use `cell_group_key` instead of `cell_type_key` in `MOFA` and `_get_pseudobulk`
+-   Use `sample_representation` instead of `patient_representation` in `MOFA`
+
 ## 0.5.0
 
 ### Deleted
