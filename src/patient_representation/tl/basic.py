@@ -466,11 +466,11 @@ class SampleRepresentationMethod:
             # The data is already in correct slot
             return self.adata
 
-        # getting only those layers with the same shape of the new X mat from adata.obsm[self.layer] to be copied in the new anndata below
+        # getting only those layers with the same shape of the new X matrix from adata.layers[self.layer] to be copied in the new anndata below
         filtered_layers = {
             key: np.copy(layer)
             for key, layer in self.adata.layers.items()
-            if key != self.layer and layer.shape == self.adata.obsm[self.layer].shape
+            if key != self.layer and layer.shape == self.adata.layers[self.layer].shape
         }
         # Copy everything except from .var* to new adata, with correct layer in X
         new_adata = sc.AnnData(
