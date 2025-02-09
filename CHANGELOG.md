@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.6.1
+
+### Changed
+
+-   Use `layers` instead of `obsm` to store layer data in `_move_layer_to_X` method
+
 ## 0.6.0
 
 ### Changed
