@@ -3,6 +3,7 @@ from .basic import (
     PILOT,
     CellGroupComposition,
     DiffusionEarthMoverDistance,
+    GloScope,
     GroupedPseudobulk,
     MrVI,
     Pseudobulk,
