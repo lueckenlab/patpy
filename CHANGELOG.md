@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning][].
 -   `GloScope` sample representation method (interface to R package via `rpy2`)
 -   conda environment for `gloscope`
 
+### Changed
+
+-   `GloScope` R script now accepts `n_workers` argument
+
 ## 0.6.1
 
 ### Changed
