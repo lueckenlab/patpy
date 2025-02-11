@@ -1914,11 +1914,11 @@ class GloScope(SampleRepresentationMethod):
         )
 
         # Retrieve the distance matrix from R environment
-        dist_matrix = robjects.r("as.data.frame(dist_matrix)")
+        distances = robjects.r("as.data.frame(dist_matrix)")
 
-        self.sample_representation = dist_matrix
+        self.sample_representation = distances
         self.samples = list(self.sample_representation.index)
 
-        self.adata.uns[self.DISTANCES_UNS_KEY] = dist_matrix
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
 
         return distances
