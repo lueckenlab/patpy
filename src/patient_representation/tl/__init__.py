@@ -1,6 +1,7 @@
 from .basic import (
     MOFA,
     PILOT,
+    SCITD,
     CellGroupComposition,
     DiffusionEarthMoverDistance,
     GloScope,
