@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.7.2
+
+### Changed
+
+-   Fix typo: `patient_representations` -> `sample_representation` in correlation functions
+
 ## 0.7.1
 
 ### Changed
