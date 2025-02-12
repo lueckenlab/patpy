@@ -304,7 +304,7 @@ def correlate_composition(meta_adata, expression_adata, sample_key, cell_type_ke
         composition.calculate_distance_matrix()
     )  # We don't need distance matrix but this method calculates cell type proportions as well
 
-    cell_type_fractions = composition.patient_representations
+    cell_type_fractions = composition.sample_representation
     cell_type_fractions = cell_type_fractions.loc[
         meta_adata.obs_names
     ]  # make sure that the order is the same as in input data
@@ -393,7 +393,7 @@ def correlate_cell_type_expression(
     expression_correlations = []
 
     for i, cell_type in enumerate(cell_type_pseudobulk.cell_types):
-        pseudobulks = cell_type_pseudobulk.patient_representations[i]
+        pseudobulks = cell_type_pseudobulk.sample_representation[i]
 
         if keep_pseudobulks_in_data:
             meta_adata.obsm[f"{cell_type}_pseudobulk"] = pd.DataFrame(
