@@ -1922,3 +1922,163 @@ class GloScope(SampleRepresentationMethod):
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
 
         return distances
+
+
+class SCITD(SampleRepresentationMethod):
+    """A class to compute sample-level distances using the scITD method implemented in R."""
+
+    DISTANCES_UNS_KEY = "X_scitd_distances"
+
+    def __init__(
+        self,
+        sample_key,
+        cell_group_key,
+        layer="X",
+        seed=67,
+        n_factors=5,
+        n_gene_sets=10,
+        tucker_type="regular",
+        rotation_type="hybrid",
+        var_mask=None,
+        norm_method="trim",
+        scale_factor=1e4,
+        var_scale_power=2,
+        scale_var=True,
+        threads=1,
+    ):
+        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
+        self.n_factors = n_factors
+        self.n_gene_sets = n_gene_sets
+        self.tucker_type = tucker_type
+        self.rotation_type = rotation_type
+        self.var_mask = var_mask
+        self.norm_method = norm_method
+        self.scale_factor = scale_factor
+        self.var_scale_power = var_scale_power
+        self.scale_var = scale_var
+        self.threads = threads
+        self.sample_representation = None
+
+    def prepare_anndata(self, adata):
+        """Prepare anndata for scITD calculation"""
+        import anndata2ri
+        import rpy2.robjects as robjects
+        from rpy2.robjects import numpy2ri, pandas2ri
+
+        numpy2ri.activate()
+        pandas2ri.activate()
+        anndata2ri.activate()
+
+        robjects.r(
+            """
+        tryCatch({
+            suppressPackageStartupMessages(library(scITD))
+        }, error = function(e) {
+            install.packages('scITD', repos='https://cloud.r-project.org')
+            suppressPackageStartupMessages(library(scITD))
+        })
+        """
+        )
+        robjects.r("suppressPackageStartupMessages(library(data.table))")
+        robjects.r("suppressPackageStartupMessages(library(reticulate))")
+        robjects.r("suppressPackageStartupMessages(library(anndata))")
+
+        # robjects.r("compiler::enableJIT(0)")
+
+        super().prepare_anndata(adata)
+
+    def calculate_distance_matrix(self, force: bool = False):
+        """
+        Calculate the distance matrix between samples using the scITD method.
+
+        Returns
+        -------
+        np.ndarray
+            A square distance matrix between samples.
+
+        Raises
+        ------
+        RuntimeError
+            If the R code did not produce a valid 'scores' object.
+        """
+        import pandas as pd
+        import rpy2.robjects as robjects
+        import scipy.sparse
+        from rpy2.robjects import pandas2ri
+        from scipy.spatial.distance import pdist, squareform
+
+        distances = super().calculate_distance_matrix(force=force)
+        if distances is not None:
+            return distances
+
+        data = self._get_data()
+        if scipy.sparse.issparse(data):
+            data = data.toarray()
+
+        count_df = pd.DataFrame(data, index=self.adata.obs_names, columns=self.adata.var_names)
+
+        # Transpose so that rows are genes and columns are cells (scITD expects genes x cells)
+        count_df = count_df.T
+
+        if self.var_mask is not None:
+            count_df = count_df.loc[self.var_mask]
+
+        meta_df = self.adata.obs.copy()
+        meta_df["donors"] = meta_df[self.sample_key]
+        if self.cell_group_key is not None:
+            meta_df["ctypes"] = meta_df[self.cell_group_key]
+        else:
+            meta_df["ctypes"] = None
+
+        robjects.globalenv["count_data"] = pandas2ri.py2rpy(count_df)
+        robjects.globalenv["meta_data"] = pandas2ri.py2rpy(meta_df)
+
+        r_code = f"""
+        suppressPackageStartupMessages({{
+            library(scITD)
+            library(data.table)
+        }})
+        param_list <- initialize_params(ctypes_use = as.character(unique(meta_data[['ctypes']])),
+                                        ncores = {self.threads}, rand_seed = {self.seed})
+        data_container <- make_new_container(count_data = as.matrix(count_data),
+                                            meta_data = meta_data,
+                                            params = param_list,
+                                            label_donor_sex = FALSE)
+        data_container <- form_tensor(
+            data_container,
+            donor_min_cells = 1,
+            norm_method = '{self.norm_method}',
+            scale_factor = {self.scale_factor},
+            vargenes_method = 'norm_var_pvals',
+            vargenes_thresh = 0.1,
+            scale_var = {str(self.scale_var).upper()},
+            var_scale_power = {self.var_scale_power}
+        )
+        results <- run_scITD(
+            data_container,
+            n_factors = {self.n_factors},
+            n_gene_sets = {self.n_gene_sets},
+            tucker_type = '{self.tucker_type}',
+            rotation_type = '{self.rotation_type}'
+        )
+        scores <- results$scores
+        """
+        robjects.r(r_code)
+
+        r_scores = robjects.r("scores")
+
+        if r_scores is None or len(r_scores) == 0:
+            raise RuntimeError("The 'scores' variable from R is empty or not defined. ")
+
+        scores_df = pandas2ri.rpy2py(r_scores)
+        if scores_df is None or scores_df.empty:
+            raise RuntimeError("Converted scores DataFrame is empty. ")
+
+        scores_np = scores_df.to_numpy()
+        dist_array = squareform(pdist(scores_np, metric="euclidean"))
+
+        self.sample_representation = scores_df
+        self.samples = list(scores_df.index)
+        self.adata.uns[self.DISTANCES_UNS_KEY] = dist_array
+
+        return dist_array
