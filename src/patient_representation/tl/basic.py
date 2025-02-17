@@ -1971,19 +1971,18 @@ class SCITD(SampleRepresentationMethod):
 
         robjects.r(
             """
-        tryCatch({
-            suppressPackageStartupMessages(library(scITD))
-        }, error = function(e) {
-            install.packages('scITD', repos='https://cloud.r-project.org')
-            suppressPackageStartupMessages(library(scITD))
-        })
-        """
+            tryCatch({
+                suppressPackageStartupMessages(library(scITD))
+            }, error = function(e) {
+                install.packages('scITD', repos='https://cloud.r-project.org')
+                suppressPackageStartupMessages(library(scITD))
+            })
+            """
         )
         robjects.r("suppressPackageStartupMessages(library(data.table))")
         robjects.r("suppressPackageStartupMessages(library(reticulate))")
         robjects.r("suppressPackageStartupMessages(library(anndata))")
-
-        # robjects.r("compiler::enableJIT(0)")
+        robjects.r("compiler::enableJIT(0)")
 
         super().prepare_anndata(adata)
 
@@ -1995,16 +1994,11 @@ class SCITD(SampleRepresentationMethod):
         -------
         np.ndarray
             A square distance matrix between samples.
-
-        Raises
-        ------
-        RuntimeError
-            If the R code did not produce a valid 'scores' object.
         """
         import pandas as pd
         import rpy2.robjects as robjects
         import scipy.sparse
-        from rpy2.robjects import pandas2ri
+        from rpy2.robjects import numpy2ri, pandas2ri
         from scipy.spatial.distance import pdist, squareform
 
         distances = super().calculate_distance_matrix(force=force)
@@ -2030,14 +2024,20 @@ class SCITD(SampleRepresentationMethod):
         else:
             meta_df["ctypes"] = None
 
+        numpy2ri.activate()
+        pandas2ri.activate()
         robjects.globalenv["count_data"] = pandas2ri.py2rpy(count_df)
         robjects.globalenv["meta_data"] = pandas2ri.py2rpy(meta_df)
 
         r_code = f"""
+        Sys.setenv(R_MAX_PP_SIZE = "50000")
         suppressPackageStartupMessages({{
             library(scITD)
             library(data.table)
+            library(reticulate)
+            library(anndata)
         }})
+        compiler::enableJIT(0)
         param_list <- initialize_params(ctypes_use = as.character(unique(meta_data[['ctypes']])),
                                         ncores = {self.threads}, rand_seed = {self.seed})
         data_container <- make_new_container(count_data = as.matrix(count_data),
