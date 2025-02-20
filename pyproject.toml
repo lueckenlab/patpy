@@ -7,7 +7,7 @@ allow-direct-references = true  # Allow installing packages from git repositorie
 
 [project]
 name = "patient_representation"
-version = "0.7.2"
+version = "0.8.0"
 description = "Representing patients or samples from single-cell data"
 readme = "README.md"
 requires-python = "~=3.10"
@@ -33,6 +33,7 @@ dependencies = [
     "plottable",
     # for debug logging (referenced from the issue template)
     "session-info",
+    "gudhi",
 ]
 
 [project.optional-dependencies]
