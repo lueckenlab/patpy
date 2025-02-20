@@ -164,12 +164,14 @@ def test_distances_significance(
     return normalized_distances, real_statistic, p_value
 
 
-def persistence_evaluation(distances, conditions, max_feature_difference, n_neighbors=10, order = "sublevel", infinity_value="max"):
+def persistence_evaluation(
+    distances, conditions, max_feature_difference, n_neighbors=10, order="sublevel", infinity_value="max"
+):
     """Calculate the number, total lifetime and persistence pairs of the connected components
-    in the kNN graph while stepwise filtering through the graph starting from the lowest 
-    value. In practice, if the vertex feature values correspond to e.g. disease severity, 
-    this function can be used to evaluate how connected components in the kNN graph change as 
-    the disease severity increases. This evaluates the connectivity of 
+    in the kNN graph while stepwise filtering through the graph starting from the lowest
+    value. In practice, if the vertex feature values correspond to e.g. disease severity,
+    this function can be used to evaluate how connected components in the kNN graph change as
+    the disease severity increases. This evaluates the connectivity of
     the patient representation with respect to the feature.
 
     Parameters
@@ -183,13 +185,13 @@ def persistence_evaluation(distances, conditions, max_feature_difference, n_neig
     n_neighbors : int = 7
         Number of neighbors to use for constructing the kNN graph.
     order : str = "sublevel" or "superlevel"
-        The order of the filtration. Either "subevel" to filter from the lowest to 
+        The order of the filtration. Either "subevel" to filter from the lowest to
         the highest value or "superlevel" to filter from the highest to the lowest value.
     infinity_value : str = "max" or float
-        The maximium filtration value. It should be larger or equal to the maximum 
-        value of the condition. By default it is equal to the maximum value of the feature. 
-        If set to a float, it uses the specified value. Higher values increase the death coordinate 
-        and thus the lifetime of any components that remain after all edges have been included. 
+        The maximium filtration value. It should be larger or equal to the maximum
+        value of the condition. By default it is equal to the maximum value of the feature.
+        If set to a float, it uses the specified value. Higher values increase the death coordinate
+        and thus the lifetime of any components that remain after all edges have been included.
 
     Returns
     -------
@@ -199,12 +201,12 @@ def persistence_evaluation(distances, conditions, max_feature_difference, n_neig
             The number of connected components detected during the filtration. The lower the number,
             the better i.e. more connected the representation w.r.t. the condition.
         - total_lifetime: float
-            The total lifetime of the connected components computed as \sum_{i=2}^{n_components} (d_i - b_i).
-            We disregard the lifetime of the first connected component as it is always equal to the 
-            difference between the maximum and minimum filtration value. The lower the total_lifetime, 
+            The total lifetime of the connected components computed as \\sum_{i=2}^{n_components} (d_i - b_i).
+            We disregard the lifetime of the first connected component as it is always equal to the
+            difference between the maximum and minimum filtration value. The lower the total_lifetime,
             the better i.e. more connected the representation w.r.t to the condition.
-        - persistence_pairs: list 
-            Persistence pairs of the form [[b_1, d_1], [b_2, d_2], ..., [b_N, d_N]] where 
+        - persistence_pairs: list
+            Persistence pairs of the form [[b_1, d_1], [b_2, d_2], ..., [b_N, d_N]] where
             b_i denotes the birth value at and d_i is the death value of a connected component
             and N is the number of connected components detected during the filtration.
 
