@@ -16,6 +16,7 @@ option_list <- list(
   make_option(c("-k", "--k"), default=25, type="integer", help="Integer k for k-NN"),
   make_option(c("-r", "--seed"), default=0, type="integer", help="Random seed"),
   make_option(c("-o", "--output_path"), type="character", help="Path to the output file"),
+  make_option(c("-w", "--n_workers"), default=1, type="integer", help="Number of workers"),
   make_option(c("-v", "--verbose"), default=FALSE, action="store_true", help="Print verbose messages")
 )
 
@@ -49,7 +50,7 @@ dist_matrix <- gloscope(
     dens = arguments$dens,
     dist_mat = arguments$dist_mat,
     k = arguments$k,
-    BPPARAM = BiocParallel::SerialParam(RNGseed = arguments$seed)
+    BPPARAM = BiocParallel::MulticoreParam(workers = arguments$n_workers, RNGseed = arguments$seed)
 )
 if(verbose) {
     print(paste("Distance matrix dimensions:", dim(dist_matrix)))
