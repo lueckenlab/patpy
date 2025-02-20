@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.8.0
+
+### Added
+
+-   `persistence_evaluation` method in `patient_representation.tl.evaluation`
+-   Persistent homology file `src/patient_representation/tl/persistence.py`
+
 ## 0.5.0
 
 ### Deleted
