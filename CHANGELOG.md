@@ -15,6 +15,42 @@ and this project adheres to [Semantic Versioning][].
 -   `persistence_evaluation` method in `patient_representation.tl.evaluation`
 -   Persistent homology file `src/patient_representation/tl/persistence.py`
 
+## 0.7.2
+
+### Changed
+
+-   Fix typo: `patient_representations` -> `sample_representation` in correlation functions
+
+## 0.7.1
+
+### Changed
+
+-   Fixed typo in `GloScope` causing empty distance matrix
+
+## 0.7.0
+
+### Added
+
+-   `GloScope` sample representation method (interface to R package via `rpy2`)
+-   conda environment for `gloscope`
+
+### Changed
+
+-   `GloScope` R script now accepts `n_workers` argument
+
+## 0.6.1
+
+### Changed
+
+-   Use `layers` instead of `obsm` to store layer data in `_move_layer_to_X` method
+
+## 0.6.0
+
+### Changed
+
+-   Use `cell_group_key` instead of `cell_type_key` in `MOFA` and `_get_pseudobulk`
+-   Use `sample_representation` instead of `patient_representation` in `MOFA`
+
 ## 0.5.0
 
 ### Deleted

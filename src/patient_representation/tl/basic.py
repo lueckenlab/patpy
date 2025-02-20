@@ -304,7 +304,7 @@ def correlate_composition(meta_adata, expression_adata, sample_key, cell_type_ke
         composition.calculate_distance_matrix()
     )  # We don't need distance matrix but this method calculates cell type proportions as well
 
-    cell_type_fractions = composition.patient_representations
+    cell_type_fractions = composition.sample_representation
     cell_type_fractions = cell_type_fractions.loc[
         meta_adata.obs_names
     ]  # make sure that the order is the same as in input data
@@ -393,7 +393,7 @@ def correlate_cell_type_expression(
     expression_correlations = []
 
     for i, cell_type in enumerate(cell_type_pseudobulk.cell_types):
-        pseudobulks = cell_type_pseudobulk.patient_representations[i]
+        pseudobulks = cell_type_pseudobulk.sample_representation[i]
 
         if keep_pseudobulks_in_data:
             meta_adata.obsm[f"{cell_type}_pseudobulk"] = pd.DataFrame(
@@ -466,11 +466,11 @@ class SampleRepresentationMethod:
             # The data is already in correct slot
             return self.adata
 
-        # getting only those layers with the same shape of the new X mat from adata.obsm[self.layer] to be copied in the new anndata below
+        # getting only those layers with the same shape of the new X matrix from adata.layers[self.layer] to be copied in the new anndata below
         filtered_layers = {
             key: np.copy(layer)
             for key, layer in self.adata.layers.items()
-            if key != self.layer and layer.shape == self.adata.obsm[self.layer].shape
+            if key != self.layer and layer.shape == self.adata.layers[self.layer].shape
         }
         # Copy everything except from .var* to new adata, with correct layer in X
         new_adata = sc.AnnData(
@@ -868,9 +868,9 @@ class SampleRepresentationMethod:
         fill_value,
         aggregate_cell_types=True,
         sample_key=None,
-        cells_type_key=None,
+        cell_group_key=None,
         samples=None,
-        cell_types=None,
+        cell_groups=None,
     ):
         """
         Generate pseudobulk data by aggregating gene expression data per patient and optionally per cell type.
@@ -885,12 +885,12 @@ class SampleRepresentationMethod:
             If True, aggregate by both sample and cell type. If False, aggregate only by sample.
         sample_key : str, optional
             Key in `adata.obs` for sample (patient) IDs. Defaults to `self.sample_key`.
-        cells_type_key : str, optional
-            Key in `adata.obs` for cell types. Defaults to `self.cells_type_key`.
+        cell_group_key : str, optional
+            Key in `adata.obs` for cell groups. Defaults to `self.cell_group_key`.
         samples : list, optional
             List of sample IDs. Defaults to `self.samples`.
-        cell_types : list, optional
-            List of cell types. Defaults to `self.cell_types`.
+        cell_groups : list, optional
+            List of cell groups. Defaults to `self.cell_groups`.
 
         Returns
         -------
@@ -900,19 +900,19 @@ class SampleRepresentationMethod:
         aggregation_func = valid_aggregate(aggregation)
 
         sample_key = sample_key or self.sample_key
-        cells_type_key = cells_type_key or self.cells_type_key
+        cell_group_key = cell_group_key or self.cell_group_key
         samples = samples or self.samples
-        cell_types = cell_types or self.cell_types
+        cell_groups = cell_groups or self.cell_groups
 
         data = self._get_data()
 
         if aggregate_cell_types:
-            pseudobulk_data = np.zeros(shape=(len(cell_types), len(samples), data.shape[1]))
+            pseudobulk_data = np.zeros(shape=(len(cell_groups), len(samples), data.shape[1]))
 
-            for i, cell_type in enumerate(cell_types):
+            for i, cell_group in enumerate(cell_groups):
                 for j, sample in enumerate(samples):
                     cells_data = data[
-                        (self.adata.obs[sample_key] == sample) & (self.adata.obs[cells_type_key] == cell_type)
+                        (self.adata.obs[sample_key] == sample) & (self.adata.obs[cell_group_key] == cell_group)
                     ]
 
                     if cells_data.size == 0:
@@ -1625,7 +1625,7 @@ class MOFA(SampleRepresentationMethod):
     ----------
     sample_key : str
         Column in `.obs` containing sample (patient) IDs.
-    cells_type_key : str
+    cell_group_key : str
         Column in `.obs` containing cell type information.
     layer : Optional[str], default: None
         Layer in AnnData to use for gene expression data. If None, uses `.X`.
@@ -1682,7 +1682,7 @@ class MOFA(SampleRepresentationMethod):
     def __init__(
         self,
         sample_key: str,
-        cells_type_key: str,
+        cell_group_key: str,
         layer: Optional[str] = None,
         seed: int = 67,
         n_factors: int = 10,
@@ -1707,11 +1707,11 @@ class MOFA(SampleRepresentationMethod):
         outfile: Optional[str] = None,
         save_interrupted: bool = False,
     ):
-        super().__init__(sample_key=sample_key, cells_type_key=cells_type_key, layer=layer, seed=seed)
+        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
         self.n_factors = n_factors
         self.aggregate_cell_types = aggregate_cell_types
         self.model = None
-        self.patient_representation = None
+        self.sample_representation = None
         self.views = None  # List of views (cell types) or single view
         self.views_names = None
         self.aggregation_mode = aggregation_mode
@@ -1818,7 +1818,7 @@ class MOFA(SampleRepresentationMethod):
         distance_metric = valid_distance_metric(dist)
 
         # get factors expectation (latent representations of samples)
-        self.patient_representation = self.model.nodes["Z"].getExpectation()  # Shape: (n_patients, n_factors)
+        self.sample_representation = self.model.nodes["Z"].getExpectation()  # Shape: (n_patients, n_factors)
 
         # store weights (relation of factors to genes)
         if store_weights:
@@ -1829,7 +1829,7 @@ class MOFA(SampleRepresentationMethod):
             else:
                 mofa_weights = weights[0]
 
-        distances = scipy.spatial.distance.pdist(self.patient_representation, metric=distance_metric)
+        distances = scipy.spatial.distance.pdist(self.sample_representation, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
@@ -1843,5 +1843,82 @@ class MOFA(SampleRepresentationMethod):
         }
         if store_weights:
             self.adata.uns["mofa_parameters"]["weights"] = mofa_weights
+
+        return distances
+
+
+class GloScope(SampleRepresentationMethod):
+    """A class that loads a file to R using rpy2 and follows the same interface as other SampleRepresentation methods"""
+
+    DISTANCES_UNS_KEY = "X_gloscope_distances"
+
+    def __init__(
+        self, sample_key, cell_group_key=None, layer=None, seed=67, dist_mat="KL", dens="KNN", k=25, n_workers=1
+    ):
+        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
+        self.dist_mat = dist_mat
+        self.dens = dens
+        self.k = k
+        self.sample_representation = None
+        self.n_workers = n_workers
+
+    def prepare_anndata(self, adata):
+        """Prepare anndata for GloScope calculation"""
+        import anndata2ri
+        import rpy2.robjects as robjects
+        from rpy2.robjects import numpy2ri, pandas2ri
+        from rpy2.robjects.packages import importr
+
+        numpy2ri.activate()
+        # Activate automatic conversion between pandas and R objects
+        pandas2ri.activate()
+        anndata2ri.activate()
+
+        super().prepare_anndata(adata=adata)
+
+        # Load the R packages
+        robjects.r("library(GloScope)")
+        importr("BiocParallel")
+
+    def calculate_distance_matrix(self, force: bool = False):
+        """Calculate distances between samples represented as GloScope embeddings"""
+        import rpy2.robjects as robjects
+        from rpy2.robjects import pandas2ri
+        from rpy2.robjects.vectors import StrVector
+
+        distances = super().calculate_distance_matrix(force=force)
+
+        if distances is not None:
+            return distances
+
+        embedding_df = pd.DataFrame(self._get_data(), index=self.adata.obs_names)
+
+        # Assign embedding and sample IDs to R environment
+        robjects.globalenv["embedding_df"] = pandas2ri.py2rpy(embedding_df)
+        robjects.globalenv["sample_ids"] = StrVector(self.adata.obs[self.sample_key].values)
+
+        print("Calculating GloScope distance matrix")
+
+        # Call GloScope function in R
+        robjects.r(
+            f"""
+        dist_matrix <- gloscope(
+            embedding_df,
+            sample_ids,
+            dens = '{self.dens}',
+            dist_mat = '{self.dist_mat}',
+            k = {self.k},
+            BPPARAM = BiocParallel::MulticoreParam(workers = {self.n_workers}, RNGseed = {self.seed})
+        )
+        """
+        )
+
+        # Retrieve the distance matrix from R environment
+        distances = robjects.r("as.data.frame(dist_matrix)")
+
+        self.sample_representation = distances
+        self.samples = list(self.sample_representation.index)
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
 
         return distances
