@@ -164,6 +164,96 @@ def test_distances_significance(
     return normalized_distances, real_statistic, p_value
 
 
+def persistence_evaluation(
+    distances, conditions, max_feature_difference, n_neighbors=10, order="sublevel", infinity_value="max"
+):
+    """Calculate the number, total lifetime and persistence pairs of the connected components
+    in the kNN graph while stepwise filtering through the graph starting from the lowest
+    value. In practice, if the vertex feature values correspond to e.g. disease severity,
+    this function can be used to evaluate how connected components in the kNN graph change as
+    the disease severity increases. This evaluates the connectivity of
+    the patient representation with respect to the feature.
+
+    Parameters
+    ----------
+    distances : square matrix, crs_matrix
+        Matrix of distances between samples.
+    conditions : array-like, numerical
+        Numerical vector with the values of a feature for each sample.
+    max_feature_difference : float
+        Maximum difference in the feature values allowed between connected nodes.
+    n_neighbors : int = 7
+        Number of neighbors to use for constructing the kNN graph.
+    order : str = "sublevel" or "superlevel"
+        The order of the filtration. Either "subevel" to filter from the lowest to
+        the highest value or "superlevel" to filter from the highest to the lowest value.
+    infinity_value : str = "max" or float
+        The maximium filtration value. It should be larger or equal to the maximum
+        value of the condition. By default it is equal to the maximum value of the feature.
+        If set to a float, it uses the specified value. Higher values increase the death coordinate
+        and thus the lifetime of any components that remain after all edges have been included.
+
+    Returns
+    -------
+    result : dict
+        Result of the evaluation with the following keys:
+        - n_components: int
+            The number of connected components detected during the filtration. The lower the number,
+            the better i.e. more connected the representation w.r.t. the condition.
+        - total_lifetime: float
+            The total lifetime of the connected components computed as \\sum_{i=2}^{n_components} (d_i - b_i).
+            We disregard the lifetime of the first connected component as it is always equal to the
+            difference between the maximum and minimum filtration value. The lower the total_lifetime,
+            the better i.e. more connected the representation w.r.t to the condition.
+        - persistence_pairs: list
+            Persistence pairs of the form [[b_1, d_1], [b_2, d_2], ..., [b_N, d_N]] where
+            b_i denotes the birth value at and d_i is the death value of a connected component
+            and N is the number of connected components detected during the filtration.
+
+    References
+    ----------
+    [1] Boissonnat and Maria (2024): https://gudhi.inria.fr/python/latest/simplex_tree_ref.html
+    [2] Limbeck and Rieck (2024): https://arxiv.org/abs/2409.03575v1
+    [3] Rieck et al. (2017): https://ieeexplore.ieee.org/document/8017588
+    """
+    import anndata
+    from persistence import calculate_persistent_homology, connectivities_to_edge_list
+
+    adata = anndata.AnnData(X=np.zeros((distances.shape[0], 1)))
+    adata.obsm["distances"] = distances
+    adata.obs["conditions"] = conditions
+    conditions = adata.obs["conditions"].values
+
+    ### Calculate a kNN graph from the distances
+    sc.pp.neighbors(adata, use_rep="distances", n_neighbors=n_neighbors, metric="precomputed")
+
+    ### Let's remove all edges between nodes that have a feature difference greater than the max_feature_difference
+    features = np.tile(adata.obs["conditions"].values, (adata.n_obs, 1))
+    edges_to_remove = np.abs(features - features.T) > max_feature_difference
+    adata.obsp["connectivities"][edges_to_remove] = 0
+
+    ### Convert the connectivities to an edge list
+    connectivities = adata.obsp["connectivities"]
+    edge_list = connectivities_to_edge_list(connectivities, mutal_nbhs=False)
+
+    ### Calculate persistent homology and return the persistence pairs corresponding to connected components
+    persistence_pairs = calculate_persistent_homology(
+        conditions, edge_list, k=2, order=order, infinity_value=infinity_value, min_persistence=0.0
+    )
+    persistence_pairs = persistence_pairs[0][1:]
+
+    ### Calculate the total lifetime of the connected components
+    total_lifetime = 0
+    for [b, d] in persistence_pairs:
+        lt = d - b
+        total_lifetime += lt
+
+    ### Calculate the number of connected components
+    clusters = len(persistence_pairs)
+
+    return {"n_components": clusters, "total_lifetime": total_lifetime, "persistence_pairs": persistence_pairs}
+
+
 def predict_knn(distances, y_true, n_neighbors: int = 3, task: _PREDICTION_TASKS = "classification"):
     """Predict values of `y_true` using K-nearest neighbors
 
@@ -367,6 +457,7 @@ def evaluate_representation(
         - distances: test if distances between samples are significantly different from the null distribution
         - proportions: test if distribution of `target` differs between groups (e.g. clusters)
         - silhouette: calculate silhouette score for the given distances
+        - persistence: calculate the persistence of connected components in filtration of a kNN graph based on the values of `target`
     num_donors_subset : int, optional
         Absolute number of donors to include in the evaluation.
     proportion_donors_subset : float, optional
@@ -384,6 +475,9 @@ def evaluate_representation(
             - compare_by_difference: if True, normalization is defined as difference (as in the original paper). Otherwise, it is defined as a ratio
         - proportions:
             - groups: groups (e.g. cluster numbers) of the observations
+        - persistence:
+            - max_feature_difference: maximum difference in the feature values allowed between connected nodes
+            - n_neighbors: number of neighbors to use for constructing the kNN graph
 
     Returns
     -------
@@ -421,6 +515,15 @@ def evaluate_representation(
         score = silhouette_score(distances, labels=target, metric="precomputed")
 
         result = {"score": score, "metric": "silhouette"}
+
+    elif method == "persistence":
+        if "max_feature_difference" not in parameters:
+            raise ValueError('Please, add "max_feature_difference" key in the parameters')
+
+        result_ph = persistence_evaluation(distances, target, **parameters)
+
+        ## The lower the total_lifetime, the better the representation
+        result = {"score": result_ph["total_lifetime"], "metric": "total_lifetime"}
 
     result["n_unique"] = len(np.unique(target))
     result["n_observations"] = len(target)  # Without missing values this number can change between features
