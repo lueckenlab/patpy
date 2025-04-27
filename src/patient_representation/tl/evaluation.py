@@ -115,7 +115,7 @@ def _get_null_distances_distribution(
     return statistics
 
 
-def test_distances_significance(
+def distances_significance_test(
     distances,
     conditions,
     control_level,
@@ -355,7 +355,7 @@ def evaluate_prediction(y_true, y_pred, task, **parameters):
     return {"score": score, "metric": metric}
 
 
-def test_proportions(target, groups):
+def statistical_test_proportions(target, groups):
     """Run statistical test to check if distribution of `target` differs between `groups`
 
     Parameters
@@ -469,7 +469,7 @@ def evaluate_representation(
             - task: type of prediction task. One of "classification", "regression", "ranking". See documentation of `predict_knn` for more information
         - distances:
             - control_level: value of `target` that should be used as a control group
-            - normalization_type: type of normalization to use. One of "total", "shift", "var". See documentation of `test_distances_significance` for more information
+            - normalization_type: type of normalization to use. One of "total", "shift", "var". See documentation of `distances_significance_test` for more information
             - n_bootstraps: number of bootstrap iterations to use
             - trimmed_fraction: fraction of the most extreme values to remove from the distribution
             - compare_by_difference: if True, normalization is defined as difference (as in the original paper). Otherwise, it is defined as a ratio
@@ -500,14 +500,14 @@ def evaluate_representation(
         result = evaluate_prediction(target, y_pred, **parameters)
 
     elif method == "distances":
-        _, score, p_value = test_distances_significance(distances, conditions=target, **parameters)
+        _, score, p_value = distances_significance_test(distances, conditions=target, **parameters)
         result = {"score": score, "p_value": p_value, "metric": "distances", **parameters}
 
     elif method == "proportions":
         if "groups" not in parameters:
             raise ValueError('Please, add "groups" key (for example, with clusters) in the parameters')
 
-        result = test_proportions(target, parameters["groups"])
+        result = statistical_test_proportions(target, parameters["groups"])
 
     elif method == "silhouette":
         from sklearn.metrics import silhouette_score
