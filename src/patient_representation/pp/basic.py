@@ -91,7 +91,9 @@ def calculate_compositional_metrics(adata, sample_key, composition_keys, normali
     for col in composition_keys:
         # Create table of counts of cells in each sample per category
         col_proportions = pd.crosstab(
-            index=adata.obs[sample_key], columns=adata.obs[col], normalize="index"  # Sum by sample equals to 1
+            index=adata.obs[sample_key],
+            columns=adata.obs[col],
+            normalize="index",  # Sum by sample equals to 1
         )
 
         # Add name of the original column to new columns

@@ -23,7 +23,7 @@ def connectivities_to_edge_list(connectivities, mutal_nbhs=False):
         g = triu(connectivities).maximum(triu(connectivities.transpose()))  ## max ==> not mutal nbhs
 
     cx = coo_matrix(g)
-    edge_list = [(a, b) for a, b in zip(cx.row, cx.col)]
+    edge_list = [(a, b) for a, b in zip(cx.row, cx.col, strict=False)]
     return edge_list
 
 
