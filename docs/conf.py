@@ -79,7 +79,7 @@ myst_enable_extensions = [
 ]
 myst_url_schemes = ("http", "https", "mailto")
 nb_output_stderr = "remove"
-nb_execution_mode = "off"
+nb_execution_mode = "cache"
 nb_merge_streams = True
 typehints_defaults = "braces"
 
@@ -125,7 +125,7 @@ nitpick_ignore = [
 ]
 
 # Executing notebooks
-jupyter_execute_notebooks = "off"
+jupyter_execute_notebooks = "cache"
 
 
 def setup(app):
