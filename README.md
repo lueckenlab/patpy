@@ -26,7 +26,7 @@ Thank you for your patience and interest. Stay tuned for updates!
 [![Tests][badge-tests]][link-tests]
 [![Documentation][badge-docs]][link-docs]
 
-[badge-tests]: https://img.shields.io/github/actions/workflow/status/VladimirShitov/patpy/test.yaml?branch=main
+[badge-tests]: https://img.shields.io/github/actions/workflow/status/lueckenlab/patpy/test.yaml?branch=main
 [link-tests]: https://github.com/lueckenlab/patpy/actions/workflows/test.yml
 [badge-docs]: https://img.shields.io/readthedocs/patpy
 
