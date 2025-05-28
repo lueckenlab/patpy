@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.8.1
+
+### Changed
+
+-   GitHub actions files to match an updated scverse cookiecutter template
+-   Package name in the pyproject.toml: `patient_representation` -> `patpy`
+
 ## 0.8.0
 
 ### Added
