@@ -124,6 +124,9 @@ nitpick_ignore = [
     #     ("py:class", "igraph.Graph"),
 ]
 
+# Executing notebooks
+jupyter_execute_notebooks = "off"
+
 
 def setup(app):
     """App setup hook."""
