@@ -9,14 +9,14 @@ import seaborn as sns
 from scipy.stats import pearsonr, spearmanr
 from statsmodels.stats.multitest import multipletests
 
-from patient_representation.pp import (
+from patpy.pp import (
     extract_metadata,
     fill_nan_distances,
     filter_small_samples,
     is_count_data,
     subsample,
 )
-from patient_representation.tl._types import _EVALUATION_METHODS
+from patpy.tl._types import _EVALUATION_METHODS
 
 VALID_AGGREGATES = {"mean": np.mean, "median": np.median, "sum": np.sum}
 
@@ -392,7 +392,7 @@ def correlate_cell_type_expression(
 
     expression_correlations = []
 
-    for i, cell_type in enumerate(cell_type_pseudobulk.cell_types):
+    for i, cell_type in enumerate(cell_type_pseudobulk.cell_groups):
         pseudobulks = cell_type_pseudobulk.sample_representation[i]
 
         if keep_pseudobulks_in_data:

@@ -5,7 +5,7 @@ import pandas as pd
 import scanpy as sc
 from scipy.stats import trim_mean
 
-from patient_representation.tl._types import _EVALUATION_METHODS, _NORMALIZATION_TYPES, _PREDICTION_TASKS
+from patpy.tl._types import _EVALUATION_METHODS, _NORMALIZATION_TYPES, _PREDICTION_TASKS
 
 
 def _upper_diagonal(matrix):

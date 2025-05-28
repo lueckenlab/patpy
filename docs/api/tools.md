@@ -1,11 +1,11 @@
 ## Tools: `tl`
 
 ```{eval-rst}
-.. module:: patient_representation.tl
+.. module:: patpy.tl
 ```
 
 ```{eval-rst}
-.. currentmodule:: patient_representation
+.. currentmodule:: patpy
 ```
 
 ```{eval-rst}
