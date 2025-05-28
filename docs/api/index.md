@@ -1,9 +1,9 @@
 # API
 
-Import patient_representation:
+Import patpy:
 
 ```
-import patient_representation as pr
+import patpy
 ```
 
 ```{toctree}
