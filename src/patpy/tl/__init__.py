@@ -1,4 +1,11 @@
-from .evaluation import evaluate_representation
+from .evaluation import (
+    evaluate_prediction,
+    evaluate_representation,
+    persistence_evaluation,
+    predict_knn,
+    test_distances_significance,
+    test_proportions,
+)
 from .sample_representation import (
     MOFA,
     PILOT,
