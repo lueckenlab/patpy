@@ -127,6 +127,9 @@ target-version = [ "py38" ]
 line-length = 120
 src = [ "src" ]
 extend-include = [ "*.ipynb" ]
+exclude = [
+  "docs/notebooks/**",
+]
 
 format.docstring-code-format = true
 
