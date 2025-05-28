@@ -751,7 +751,7 @@ class SampleRepresentationMethod:
             - method: name of the method used for evaluation
             There are other optional keys depending on the method used for evaluation.
         """
-        from patient_representation.tl import evaluate_representation
+        from patpy.tl import evaluate_representation
 
         if metadata is None:
             metadata = self._extract_metadata([target])
