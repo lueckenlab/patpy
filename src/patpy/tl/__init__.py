@@ -1,4 +1,5 @@
-from .basic import (
+from .evaluation import evaluate_representation
+from .sample_representation import (
     MOFA,
     PILOT,
     CellGroupComposition,
@@ -14,4 +15,3 @@ from .basic import (
     correlate_composition,
     describe_metadata,
 )
-from .evaluation import evaluate_representation
