@@ -1,4 +1,4 @@
-## Tools: `tl`
+# Tools: `tl`
 
 ```{eval-rst}
 .. module:: patpy.tl
@@ -20,8 +20,8 @@
     tl.SCPoli
     tl.Pseudobulk
     tl.WassersteinTSNE
-    tl.describe_metadata
     tl.SampleRepresentationMethod
+    tl.describe_metadata
     tl.test_distances_significance
     tl.predict_knn
     tl.evaluate_prediction

@@ -1,4 +1,4 @@
-## Preprocessing: `pp`
+# Preprocessing: `pp`
 
 ```{eval-rst}
 .. module:: patpy.pp
@@ -18,7 +18,7 @@
     pp.calculate_cell_qc_metrics
     pp.calculate_n_cells_per_sample
     pp.filter_small_samples
-    pp.filter_small_cell_types
+    pp.filter_small_cell_groups
     pp.subsample
     pp.is_count_data
     pp.fill_nan_distances

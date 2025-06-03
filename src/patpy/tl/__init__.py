@@ -16,6 +16,7 @@ from .sample_representation import (
     MrVI,
     Pseudobulk,
     RandomVector,
+    SampleRepresentationMethod,
     SCPoli,
     WassersteinTSNE,
     correlate_cell_type_expression,

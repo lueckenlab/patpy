@@ -1,4 +1,4 @@
-## Plotting: `pl`
+# Plotting: `pl`
 
 ```{eval-rst}
 .. module:: patpy.pl
