@@ -23,7 +23,7 @@ def connectivities_to_edge_list(connectivities, mutal_nbhs=False):
         g = triu(connectivities).maximum(triu(connectivities.transpose()))  ## max ==> not mutal nbhs
 
     cx = coo_matrix(g)
-    edge_list = [(a, b) for a, b in zip(cx.row, cx.col)]
+    edge_list = [(a, b) for a, b in zip(cx.row, cx.col, strict=False)]
     return edge_list
 
 
@@ -32,6 +32,7 @@ def calculate_persistent_homology(
     vertex_feature, edge_list, k=2, order="sublevel", infinity_value="max", min_persistence=0.0
 ):
     """Calculates the persistent homology of a graph clique complex.
+
     In particular, this function calculates sublevel-set persistent homology
     taking the values of one specific vertex feature as a filtration function
     over a pre-constructed spatial graph.

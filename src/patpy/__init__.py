@@ -4,4 +4,4 @@ from . import pl, pp, tl
 
 __all__ = ["pl", "pp", "tl"]
 
-__version__ = version("patient_representation")
+__version__ = version("patpy")

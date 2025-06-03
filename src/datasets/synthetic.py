@@ -72,7 +72,7 @@ def simulate_cells(adata, layer, cell_type_key, cell_type_counts: pd.Series):
     data = adata.layers[layer] if layer != "X" else adata.X
     barcodes = []
 
-    for cell_type, count in zip(cell_type_counts.index, cell_type_counts):
+    for cell_type, count in zip(cell_type_counts.index, cell_type_counts, strict=False):
         cell_type_barcodes = adata[adata.obs[cell_type_key] == cell_type].obs_names
         random_cells = np.random.choice(cell_type_barcodes, size=count)
 

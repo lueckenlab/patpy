@@ -18,7 +18,7 @@ sys.path.insert(0, str(HERE / "extensions"))
 
 # NOTE: If you installed your project in editable mode, this might be stale.
 #       If this is the case, reinstall it to refresh the metadata
-info = metadata("patient_representation")
+info = metadata("patpy")
 project_name = info["Name"]
 author = info["Author"]
 copyright = f"{datetime.now():%Y}, {author}."
@@ -79,7 +79,7 @@ myst_enable_extensions = [
 ]
 myst_url_schemes = ("http", "https", "mailto")
 nb_output_stderr = "remove"
-nb_execution_mode = "off"
+nb_execution_mode = "cache"
 nb_merge_streams = True
 typehints_defaults = "braces"
 
@@ -123,6 +123,9 @@ nitpick_ignore = [
     # you can add an exception to this list.
     #     ("py:class", "igraph.Graph"),
 ]
+
+# Executing notebooks
+jupyter_execute_notebooks = "cache"
 
 
 def setup(app):

@@ -26,7 +26,7 @@ Thank you for your patience and interest. Stay tuned for updates!
 [![Tests][badge-tests]][link-tests]
 [![Documentation][badge-docs]][link-docs]
 
-[badge-tests]: https://img.shields.io/github/actions/workflow/status/VladimirShitov/patpy/test.yaml?branch=main
+[badge-tests]: https://img.shields.io/github/actions/workflow/status/lueckenlab/patpy/test.yaml?branch=main
 [link-tests]: https://github.com/lueckenlab/patpy/actions/workflows/test.yml
 [badge-docs]: https://img.shields.io/readthedocs/patpy
 
@@ -60,7 +60,7 @@ pip install git+https://github.com/lueckenlab/patpy.git@main
 To install specific dependencies for some sample representation tools, use the following command:
 
 ```bash
-pip install git+https://github.com/lueckenlab/patient_representation.git@main[pilot]
+pip install git+https://github.com/lueckenlab/patpy.git@main[pilot]
 ```
 
 All the available dependency groups: `diffusionemd`, `mrvi`, `pilot`, `scpoli`, `wassersteintsne`.

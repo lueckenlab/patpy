@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose a new feature for patient_representation
+description: Propose a new feature for patpy
 labels: enhancement
 body:
   - type: textarea

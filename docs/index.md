@@ -12,5 +12,8 @@ template_usage.md
 contributing.md
 references.md
 
-notebooks/example
+notebooks/representation_methods_example
+notebooks/Patient_trajectories_example
+notebooks/distances_test_example
+notebooks/synthetic_data_generation
 ```

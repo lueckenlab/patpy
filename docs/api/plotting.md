@@ -1,9 +1,9 @@
 ## Plotting: `pl`
 
 ```{eval-rst}
-.. module:: patient_representation.pl
+.. module:: patpy.pl
 ```
 
 ```{eval-rst}
-.. currentmodule:: patient_representation
+.. currentmodule:: patpy
 ```
