@@ -20,6 +20,7 @@
     tl.SCPoli
     tl.Pseudobulk
     tl.WassersteinTSNE
+    tl.SampleRepresentationMethod
     tl.describe_metadata
     tl.test_distances_significance
     tl.predict_knn
