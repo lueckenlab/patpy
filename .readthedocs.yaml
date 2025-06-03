@@ -13,3 +13,5 @@ build:
       html:
         - uvx hatch run docs:build
         - mv docs/_build $READTHEDOCS_OUTPUT
+sphinx:
+  fail_on_warning: false
