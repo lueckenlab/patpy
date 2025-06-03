@@ -14,4 +14,5 @@ build:
         - uvx hatch run docs:build
         - mv docs/_build $READTHEDOCS_OUTPUT
 sphinx:
+  configuration: docs/conf.py
   fail_on_warning: false
