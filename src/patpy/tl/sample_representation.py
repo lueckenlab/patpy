@@ -718,16 +718,19 @@ class SampleRepresentationMethod:
             A sample-level covariate to evaluate representation for
         method : Literal["knn", "distances", "proportions", "silhouette"]
             Method to use for evaluation:
+
             - knn: predict values of `target` using K-nearest neighbors and evaluate the prediction
             - distances: test if distances between samples are significantly different from the null distribution
             - proportions: test if distribution of `target` differs between groups (e.g. clusters)
             - silhouette: calculate silhouette score for the given distances
+
         num_donors_subset : int, optional
             Absolute number of donors to include in the evaluation.
         proportion_donors_subset : float, optional
             Proportion of donors to include in the evaluation.
         parameters : dict
             Parameters for the evaluation method. The following parameters are used:
+
             - knn:
                 - n_neighbors: number of neighbors to use for prediction
                 - task: type of prediction task. One of "classification", "regression", "ranking". See documentation of `predict_knn` for more information
@@ -744,14 +747,16 @@ class SampleRepresentationMethod:
         -------
         result : dict
             Result of evaluation with the following keys:
+
             - score: a number evaluating the representation. The higher the better
             - metric: name of the metric used for evaluation
             - n_unique: number of unique values in `target`
             - n_observations: number of observations used for evaluation. Can be different for different targets, even within one dataset (because of NAs)
             - method: name of the method used for evaluation
+
             There are other optional keys depending on the method used for evaluation.
         """
-        from patpy.tl import evaluate_representation
+        from patpy.tl.evaluation import evaluate_representation
 
         if metadata is None:
             metadata = self._extract_metadata([target])
