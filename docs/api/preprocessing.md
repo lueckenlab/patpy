@@ -1,11 +1,11 @@
 ## Preprocessing: `pp`
 
 ```{eval-rst}
-.. module:: patient_representation.pp
+.. module:: patpy.pp
 ```
 
 ```{eval-rst}
-.. currentmodule:: patient_representation
+.. currentmodule:: patpy
 ```
 
 ```{eval-rst}

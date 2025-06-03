@@ -1,4 +1,12 @@
-from .basic import (
+from .evaluation import (
+    evaluate_prediction,
+    evaluate_representation,
+    persistence_evaluation,
+    predict_knn,
+    test_distances_significance,
+    test_proportions,
+)
+from .sample_representation import (
     MOFA,
     PILOT,
     CellGroupComposition,
@@ -14,4 +22,3 @@ from .basic import (
     correlate_composition,
     describe_metadata,
 )
-from .evaluation import evaluate_representation

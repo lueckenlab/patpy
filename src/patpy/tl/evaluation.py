@@ -2,9 +2,10 @@ import warnings
 
 import numpy as np
 import pandas as pd
+import scanpy as sc
 from scipy.stats import trim_mean
 
-from patient_representation.tl._types import _EVALUATION_METHODS, _NORMALIZATION_TYPES, _PREDICTION_TASKS
+from patpy.tl._types import _EVALUATION_METHODS, _NORMALIZATION_TYPES, _PREDICTION_TASKS
 
 
 def _upper_diagonal(matrix):
@@ -167,12 +168,13 @@ def test_distances_significance(
 def persistence_evaluation(
     distances, conditions, max_feature_difference, n_neighbors=10, order="sublevel", infinity_value="max"
 ):
-    """Calculate the number, total lifetime and persistence pairs of the connected components
-    in the kNN graph while stepwise filtering through the graph starting from the lowest
+    r"""Calculate the number, total lifetime and persistence pairs of the connected components in the kNN graph
+
+    Computation is performed while stepwise filtering through the graph starting from the lowest
     value. In practice, if the vertex feature values correspond to e.g. disease severity,
     this function can be used to evaluate how connected components in the kNN graph change as
     the disease severity increases. This evaluates the connectivity of
-    the patient representation with respect to the feature.
+    the sample representation with respect to the feature.
 
     Parameters
     ----------

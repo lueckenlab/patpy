@@ -1,10 +1,10 @@
 import pytest
 
-import patient_representation
+import patpy
 
 
 def test_package_has_version():
-    assert patient_representation.__version__ is not None
+    assert patpy.__version__ is not None
 
 
 @pytest.mark.skip(reason="This decorator should be removed when test passes.")

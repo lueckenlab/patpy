@@ -1,5 +1,5 @@
 import warnings
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
@@ -9,14 +9,14 @@ import seaborn as sns
 from scipy.stats import pearsonr, spearmanr
 from statsmodels.stats.multitest import multipletests
 
-from patient_representation.pp import (
+from patpy.pp import (
     extract_metadata,
     fill_nan_distances,
     filter_small_samples,
     is_count_data,
     subsample,
 )
-from patient_representation.tl._types import _EVALUATION_METHODS
+from patpy.tl._types import _EVALUATION_METHODS
 
 VALID_AGGREGATES = {"mean": np.mean, "median": np.median, "sum": np.sum}
 
@@ -101,7 +101,7 @@ def create_colormap(df, col, palette="Spectral"):
     unique_values = df[col].unique()
 
     colors = sns.color_palette(palette, n_colors=len(unique_values))
-    color_map = dict(zip(unique_values, colors))
+    color_map = dict(zip(unique_values, colors, strict=False))
     return df[col].map(color_map)
 
 
@@ -392,7 +392,7 @@ def correlate_cell_type_expression(
 
     expression_correlations = []
 
-    for i, cell_type in enumerate(cell_type_pseudobulk.cell_types):
+    for i, cell_type in enumerate(cell_type_pseudobulk.cell_groups):
         pseudobulks = cell_type_pseudobulk.sample_representation[i]
 
         if keep_pseudobulks_in_data:
@@ -751,7 +751,7 @@ class SampleRepresentationMethod:
             - method: name of the method used for evaluation
             There are other optional keys depending on the method used for evaluation.
         """
-        from patient_representation.tl import evaluate_representation
+        from patpy.tl import evaluate_representation
 
         if metadata is None:
             metadata = self._extract_metadata([target])
@@ -841,7 +841,7 @@ class SampleRepresentationMethod:
         result_cols = ("feature", "score", "metric", "n_unique", "n_observations", "method")
         results = []
 
-        for col, task in zip(metadata_columns, tasks):
+        for col, task in zip(metadata_columns, tasks, strict=False):
             result = self.evaluate_representation(target=col, method=method, metadata=metadata, task=task)
             results.append(
                 (col, result["score"], result["metric"], result["n_unique"], result["n_observations"], result["method"])
@@ -857,7 +857,7 @@ class SampleRepresentationMethod:
 
             col = row["feature"]
             ax = self.plot_embedding(metadata_cols=[col], method=embedding)
-            ax.set_title(f'{col}: {round(row["score"], 4)}')
+            ax.set_title(f"{col}: {round(row['score'], 4)}")
             ax.legend(loc=(1.05, 0))
 
         return results
@@ -1683,7 +1683,7 @@ class MOFA(SampleRepresentationMethod):
         self,
         sample_key: str,
         cell_group_key: str,
-        layer: Optional[str] = None,
+        layer: str | None = None,
         seed: int = 67,
         n_factors: int = 10,
         aggregate_cell_types: bool = True,
@@ -1701,10 +1701,10 @@ class MOFA(SampleRepresentationMethod):
         startELBO: int = 1,
         freqELBO: int = 1,
         gpu_mode: bool = False,
-        gpu_device: Optional[int] = None,
+        gpu_device: int | None = None,
         verbose: bool = False,
         quiet: bool = False,
-        outfile: Optional[str] = None,
+        outfile: str | None = None,
         save_interrupted: bool = False,
     ):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
