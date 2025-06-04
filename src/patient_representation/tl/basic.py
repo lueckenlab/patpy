@@ -1922,3 +1922,102 @@ class GloScope(SampleRepresentationMethod):
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
 
         return distances
+
+
+class scLKME(SampleRepresentationMethod):
+    """
+    Sample representation using scLKME (Single-cell Kernel Mean Embedding).
+
+    scLKME first selects a small set of 'anchor' cells via a sketching algorithm,
+    then represents each sample (patient) as the kernel mean embedding of its
+    cell distribution onto those anchors. Distances between these embeddings
+    give a principled metric for patient stratification.
+
+    References
+    ----------
+    - Wang et al. (2001), “Kernel Mean Embedding of Distributions: A Review”.
+    - GitHub: https://github.com/CompCy-lab/scLKME
+    """
+
+    DISTANCES_UNS_KEY = "X_sclkme_distances"
+
+    def __init__(
+        self,
+        sample_key: str,
+        cell_group_key: Optional[str] = None,
+        layer: Optional[str] = None,
+        seed: int = 0,
+        n_sketch: int = 128,
+    ):
+        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
+        self.n_sketch = n_sketch
+        self.X_anchor: Optional[np.ndarray] = None
+        self.anchor_indices: Optional[np.ndarray] = None
+
+    def prepare_anndata(self, adata: sc.AnnData):
+        """
+        Compute the sketch (anchor set) of cells.
+
+        - `self.X_anchor` is an (n_sketch × n_features) array of the anchor cells
+        """
+        super().prepare_anndata(adata)
+        import sclkme
+
+        sclkme.tl.sketch(self.adata, use_rep=self.layer, n_sketch=self.n_sketch, random_state=self.seed)
+
+        mask = self.adata.obs["sketch"].astype(bool).values
+        self.anchor_indices = np.where(mask)[0]
+        self.X_anchor = self._get_data()[mask]
+
+    def calculate_distance_matrix(
+        self,
+        force: bool = False,
+        dist: str = "euclidean",
+    ):
+        """
+        Run the kernel mean embedding and compute pairwise distances.
+
+        Parameters
+        ----------
+        dist
+            any metric supported by `scipy.spatial.distance.pdist`
+
+        Returns
+        -------
+        distances : np.ndarray, shape (n_samples, n_samples)
+        """
+        distances = super().calculate_distance_matrix(force=force)
+        if distances is not None:
+            return distances
+        import sclkme
+
+        sclkme.tl.kernel_mean_embedding(
+            self.adata,
+            partition_key=self.sample_key,
+            X_anchor=self.X_anchor,
+            use_rep=self.layer,
+        )
+
+        kme_dict = self.adata.uns.get("kme", {})
+        key = f"{self.sample_key}_kme"
+        if key not in kme_dict:
+            raise RuntimeError(f"KME embedding not found: expected adata.uns['kme']['{key}']")
+        self.sample_representation = kme_dict[key]
+
+        distance_metric = valid_distance_metric(dist)
+
+        distances = scipy.spatial.distance.pdist(self.sample_representation, metric=distance_metric)
+        distances = scipy.spatial.distance.squareform(distances)
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+
+        # stash all the parameters used
+        self.adata.uns["sclkme_parameters"] = {
+            "sample_key": self.sample_key,
+            "cell_group_key": self.cell_group_key,
+            "layer": self.layer,
+            "n_sketch": self.n_sketch,
+            "distance_metric": dist,
+        }
+
+        return distances
