@@ -17,6 +17,12 @@ pip install patpy
 This is the preferred method to install patpy, as it will always install the most recent stable release.
 If you don't have [pip] installed, this [Python installation guide] can guide you through the process.
 
+### Development version
+You can install the most recent version from GitHub:
+```console
+pip install git+https://github.com/lueckenlab/patpy.git@main
+```
+
 ### Additional dependency groups
 
 patpy comes with several optional dependency groups that can be installed based on your needs. Besides groups for development or docs, there are sample representation methods with tricky dependencies. To work with them, install dependencies with the examples below.
