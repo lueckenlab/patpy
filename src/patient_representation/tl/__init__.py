@@ -13,5 +13,6 @@ from .basic import (
     correlate_cell_type_expression,
     correlate_composition,
     describe_metadata,
+    scLKME,
 )
 from .evaluation import evaluate_representation
