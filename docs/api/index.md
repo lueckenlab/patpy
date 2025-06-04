@@ -1,6 +1,6 @@
 # API
 
-Import patpy:
+Import the patpy package:
 
 ```
 import patpy
@@ -8,6 +8,7 @@ import patpy
 
 ```{toctree}
 :maxdepth: 2
+:includehidden:
 
 preprocessing
 tools

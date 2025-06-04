@@ -52,6 +52,7 @@ optional-dependencies.doc = [
   "ipykernel",
   "ipython",
   "myst-nb>=1.1",
+  "nbsphinx",
   "pandas",
   # Until pybtex >0.24.0 releases: https://bitbucket.org/pybtex-devs/pybtex/issues/169/
   "setuptools",
@@ -59,6 +60,7 @@ optional-dependencies.doc = [
   "sphinx-autodoc-typehints",
   "sphinx-book-theme>=1",
   "sphinx-copybutton",
+  "sphinx-design",
   "sphinx-tabs",
   "sphinxcontrib-bibtex>=1",
   "sphinxext-opengraph",
@@ -153,9 +155,9 @@ lint.ignore = [
   "D105", # __magic__ methods are often self-explanatory, allow missing docstrings
   "D107", # Missing docstring in __init__
   # Disable one in each pair of mutually incompatible rules
-  "D203", # We don’t want a blank line before a class docstring
+  "D203", # We don't want a blank line before a class docstring
   "D213", # <> We want docstrings to start immediately after the opening triple quote
-  "D400", # first line should end with a period [Bug: doesn’t work with single-line docstrings]
+  "D400", # first line should end with a period [Bug: doesn't work with single-line docstrings]
   "D401", # First line should be in imperative mood; try rephrasing
   "E501", # line too long -> we accept long comment lines; formatter gets rid of long code lines
   "E731", # Do not assign a lambda expression, use a def -> lambda expression assignments are convenient
