@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "patpy"
-version = "0.9.0"
+version = "0.9.1"
 description = "A toolbox for patient or sample representation from single-cell data"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -44,7 +44,7 @@ optional-dependencies.dev = [
   "twine>=4.0.2",
 ]
 optional-dependencies.diffusionemd = [
-  "diffusionemd @ git+https://github.com/farhadmd7/DiffusionEMD.git@main",
+  "diffusionemd",
   "phate>=1.0.11",
 ]
 optional-dependencies.doc = [
@@ -70,7 +70,7 @@ optional-dependencies.mrvi = [
   "torch>=1.13",
 ]
 optional-dependencies.pilot = [
-  "pilotpy @ git+https://github.com/CostaLab/PILOT#egg=pilotpy",
+  "pilotpy",
 ]
 optional-dependencies.scpoli = [
   "scarches>=0.5.1",
