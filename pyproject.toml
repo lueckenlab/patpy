@@ -70,7 +70,7 @@ optional-dependencies.mrvi = [
   "torch>=1.13",
 ]
 optional-dependencies.pilot = [
-  "pilotpy @ git+https://github.com/CostaLab/PILOT#egg=pilotpy",
+  "pilotpy",
 ]
 optional-dependencies.scpoli = [
   "scarches>=0.5.1",
