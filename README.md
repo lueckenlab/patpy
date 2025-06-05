@@ -51,7 +51,7 @@ Python installed, we recommend installing [Mambaforge](https://github.com/conda-
 There are several alternative options to install patpy:
 
 
-1. Install the latest release of `patpy` from `PyPI <https://pypi.org/project/patpy/>`_:
+1. Install the latest release of `patpy` from [`PyPI`](https://pypi.org/project/patpy/):
 
 ```bash
 pip install patpy
