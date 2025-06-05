@@ -1,6 +1,15 @@
 # patpy – sample-level analysis framework for single-cell data
 
-scverse-compatible package for sample (or patient) representation, representation methods evaluation, and sample-level analysis.
+![logo](./docs/_static/patpy_logo.png){width=100px}
+
+patpy is a toolbox for single-cell data analysis on sample level.
+
+![overview](./docs/_static/patpy_pipeline.png)
+
+It provides:
+- 👨‍⚕️ Interface to sample representation methods (otherwise known as patient representation)
+- 📈 Analysis functions to get the most of your data
+- 📊 Metrics for sample representation evaluation
 
 # ⚠️ Warning: Development in Progress ⚠️
 
@@ -16,8 +25,6 @@ scverse-compatible package for sample (or patient) representation, representatio
 -   Some features may be unstable or subject to change.
 
 If you have any questions or face bugs, feel free to open an [issue](https://github.com/lueckenlab/patpy/issues).
-
----
 
 Thank you for your patience and interest. Stay tuned for updates!
 
@@ -43,15 +50,14 @@ Python installed, we recommend installing [Mambaforge](https://github.com/conda-
 
 There are several alternative options to install patpy:
 
-<!--
-1) Install the latest release of `patpy` from `PyPI <https://pypi.org/project/patpy/>`_:
+
+1. Install the latest release of `patpy` from `PyPI <https://pypi.org/project/patpy/>`_:
 
 ```bash
 pip install patpy
 ```
--->
 
-1. Install the latest development version:
+2. Install the latest development version:
 
 ```bash
 pip install git+https://github.com/lueckenlab/patpy.git@main
@@ -60,7 +66,7 @@ pip install git+https://github.com/lueckenlab/patpy.git@main
 To install specific dependencies for some sample representation tools, use the following command:
 
 ```bash
-pip install git+https://github.com/lueckenlab/patpy.git@main[pilot]
+pip install patpy[pilot]
 ```
 
 All the available dependency groups: `diffusionemd`, `mrvi`, `pilot`, `scpoli`, `wassersteintsne`.
@@ -107,7 +113,7 @@ Shitov, V. (2024). patpy – sample-level analysis framework for single-cell dat
   title = {patpy – sample-level analysis framework for single-cell data},
   year = {2024},
   url = {https://github.com/lueckenlab/patpy/},
-  note = {Version 0.1.29}
+  note = {Version 0.9.2}
 }
 ```
 
@@ -115,4 +121,4 @@ Shitov, V. (2024). patpy – sample-level analysis framework for single-cell dat
 [issue-tracker]: https://github.com/lueckenlab/patpy/issues
 [changelog]: https://patpy.readthedocs.io/latest/changelog.html
 [link-docs]: https://patpy.readthedocs.io
-[link-api]: https://patpy.readthedocs.io/latest/api.html
+[link-api]: https://patpy.readthedocs.io/en/latest/api/index.html
