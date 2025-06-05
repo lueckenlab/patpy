@@ -44,7 +44,7 @@ optional-dependencies.dev = [
   "twine>=4.0.2",
 ]
 optional-dependencies.diffusionemd = [
-  "diffusionemd @ git+https://github.com/farhadmd7/DiffusionEMD.git@main",
+  "diffusionemd",
   "phate>=1.0.11",
 ]
 optional-dependencies.doc = [
