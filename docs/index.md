@@ -79,7 +79,7 @@ For now, patpy can be cited as a repository:
   title = {patpy – sample-level analysis framework for single-cell data},
   year = {2024},
   url = {https://github.com/lueckenlab/patpy/},
-  note = {Version 0.1.29}
+  note = {Version 0.9.2}
 }
 ```
 
