@@ -1,15 +1,15 @@
 # patpy – sample-level analysis framework for single-cell data
 
-![logo](./docs/_static/patpy_logo.png){width=100px}
+<img src="./docs/_static/patpy_logo.png" width="100px">
 
 patpy is a toolbox for single-cell data analysis on sample level.
-
-![overview](./docs/_static/patpy_pipeline.png)
 
 It provides:
 - 👨‍⚕️ Interface to sample representation methods (otherwise known as patient representation)
 - 📈 Analysis functions to get the most of your data
 - 📊 Metrics for sample representation evaluation
+
+![overview](./docs/_static/patpy_pipeline.png)
 
 # ⚠️ Warning: Development in Progress ⚠️
 
