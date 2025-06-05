@@ -119,6 +119,6 @@ Shitov, V. (2024). patpy – sample-level analysis framework for single-cell dat
 
 [scverse-discourse]: https://discourse.scverse.org/
 [issue-tracker]: https://github.com/lueckenlab/patpy/issues
-[changelog]: https://patpy.readthedocs.io/latest/changelog.html
+[changelog]: https://patpy.readthedocs.io/en/latest/changelog.html
 [link-docs]: https://patpy.readthedocs.io
 [link-api]: https://patpy.readthedocs.io/en/latest/api/index.html
