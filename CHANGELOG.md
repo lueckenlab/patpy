@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.9.2
+
+### Changed
+
+-   Update readme with an overview and pypi link
+
 ## 0.9.1
 
 ### Changed
