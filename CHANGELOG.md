@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.9.1
+
+### Changed
+
+-   Install PILOT and DiffusionEMD from PyPI, not GitHub
+-   Fix actions and update documentation
+
 ## 0.9.0
 
 ### Changed
