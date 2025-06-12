@@ -481,7 +481,7 @@ def get_helical_embedding(
         )
         tf_model = TranscriptFormer(configurer=config)
 
-        data_for_tf = tf_model.process_data(adata)
+        data_for_tf = tf_model.process_data([adata])
         embeddings = tf_model.get_embeddings(data_for_tf)
 
         adata.obsm["X_transcriptformer"] = embeddings
