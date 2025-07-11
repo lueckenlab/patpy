@@ -19,7 +19,7 @@ cruft create https://github.com/scverse/cookiecutter-scverse
 and you should have
 
 ```
-cd patient_representation
+cd patpy
 ```
 
 into the new project directory. Now that you have created a new repository locally, the first step is to push it to github. To do this, you'd have to create a **new repository** on github.
@@ -28,13 +28,13 @@ Since `cruft` already populated the local repository of your project with all th
 If you are familiar with git and knows how to handle git conflicts, you can go ahead with your preferred choice.
 
 :::{note}
-If you are looking at this document in the [cookiecutter-scverse-instance][] repository documentation, throughout this document the name of the project is `cookiecutter-scverse-instance`. Otherwise it should be replaced by your new project name: `patient_representation`.
+If you are looking at this document in the [cookiecutter-scverse-instance][] repository documentation, throughout this document the name of the project is `cookiecutter-scverse-instance`. Otherwise it should be replaced by your new project name: `patpy`.
 :::
 
-Now that your new project repository has been created on github at `https://github.com/VladimirShitov/patient_representation` you can push your first commit to github.
+Now that your new project repository has been created on github at `https://github.com/lueckenlab/patpy` you can push your first commit to github.
 To do this, simply follow the instructions on your github repository page or a more verbose walkthrough here:
 
-Assuming you are in `/your/path/to/patient_representation`. Add all files and commit.
+Assuming you are in `/your/path/to/patpy`. Add all files and commit.
 
 ```bash
 # stage all files of your new repo
@@ -59,14 +59,14 @@ Now that all the files of the newly created project have been committed, go ahea
 
 ```bash
 # update the `origin` of your local repo with the remote github link
-git remote add origin https://github.com/VladimirShitov/patient_representation.git
+git remote add origin https://github.com/lueckenlab/patpy.git
 # rename the default branch to main
 git branch -M main
 # push all your files to remote
 git push -u origin main
 ```
 
-Your project should be now available at `https://github.com/VladimirShitov/patient_representation`. While the repository at this point can be directly used, there are few remaining steps that needs to be done in order to achieve full functionality.
+Your project should be now available at `https://github.com/lueckenlab/patpy`. While the repository at this point can be directly used, there are few remaining steps that needs to be done in order to achieve full functionality.
 
 ### The pyproject.toml file
 
@@ -123,7 +123,7 @@ While [codecov docs][] has a very extensive documentation on how to get started,
 To set it up, simply go to the [codecov app][] page and follow the instructions to activate it for your repository.
 Once the activation is completed, go back to the `Actions` tab and re-run the failing workflows.
 
-The workflows should now succeed and you will be able to find the code coverage at this link: `https://app.codecov.io/gh/VladimirShitov/patient_representation`. You might have to wait couple of minutes and the coverage of this repository should be ~60%.
+The workflows should now succeed and you will be able to find the code coverage at this link: `https://app.codecov.io/gh/lueckenlab/patpy`. You might have to wait couple of minutes and the coverage of this repository should be ~60%.
 
 If your repository is private, you will have to specify an additional token in the repository secrets. In brief, you need to:
 
@@ -327,7 +327,7 @@ In `pyproject.toml` add the following changes, and you are good to go!
 
 
  [project]
- name = "patient_representation"
+ name = "patpy"
 -version = "0.3.1dev"
 +dynamic = ["version"]
 
@@ -336,7 +336,7 @@ In `pyproject.toml` add the following changes, and you are good to go!
 +source = "vcs"
 +
  [tool.coverage.run]
- source = ["patient_representation"]
+ source = ["patpy"]
  omit = [
 ```
 

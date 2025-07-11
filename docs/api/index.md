@@ -1,13 +1,14 @@
 # API
 
-Import patient_representation:
+Import the patpy package:
 
 ```
-import patient_representation as pr
+import patpy
 ```
 
 ```{toctree}
 :maxdepth: 2
+:includehidden:
 
 preprocessing
 tools

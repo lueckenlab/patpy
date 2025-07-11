@@ -18,7 +18,7 @@ sys.path.insert(0, str(HERE / "extensions"))
 
 # NOTE: If you installed your project in editable mode, this might be stale.
 #       If this is the case, reinstall it to refresh the metadata
-info = metadata("patient_representation")
+info = metadata("patpy")
 project_name = info["Name"]
 author = info["Author"]
 copyright = f"{datetime.now():%Y}, {author}."
@@ -48,7 +48,9 @@ html_context = {
 # They can be extensions coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
 extensions = [
     "myst_nb",
+    "nbsphinx",
     "sphinx_copybutton",
+    "sphinx_design",
     "sphinx.ext.autodoc",
     "sphinx.ext.intersphinx",
     "sphinx.ext.autosummary",
@@ -93,6 +95,7 @@ intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "anndata": ("https://anndata.readthedocs.io/en/stable/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
+    "pandas": ("https://pandas.pydata.org/docs/", None),
 }
 
 # List of patterns, relative to source directory, that match files and
@@ -108,12 +111,19 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "**.ipynb_checkpoints"]
 #
 html_theme = "sphinx_book_theme"
 html_static_path = ["_static"]
+html_css_files = ["custom.css"]
 html_title = project_name
 
 html_theme_options = {
     "repository_url": repository_url,
     "use_repository_button": True,
     "path_to_docs": "docs/",
+    "logo": {
+        "image_light": "_static/patpy_logo.png",
+        "image_dark": "_static/patpy_logo.png",
+        "text": project_name,
+    },
+    "icon_links": [],
 }
 
 pygments_style = "default"
@@ -138,3 +148,31 @@ def setup(app):
         },
         True,
     )
+
+
+nbsphinx_thumbnails = {
+    "notebooks/representation_methods_example": "_static/patpy_logo.png",
+    "notebooks/Patient_trajectories_example": "_static/patpy_logo.png",
+    "notebooks/synthetic_data_generation": "_static/patpy_logo.png",
+    "notebooks/distances_test_example": "_static/patpy_logo.png",
+}
+
+# -- nbsphinx configuration --------------------------------------------------
+nbsphinx_prolog = """
+{% set docname = env.doc2path(env.docname, base=None) %}
+
+.. raw:: html
+
+    <div class="admonition note">
+        <p class="admonition-title">Note</p>
+        <p>
+            This page was generated from
+            <a class="reference external" href="https://github.com/lueckenlab/patpy/blob/{{ env.config.release|e }}/docs/{{ docname|e }}">{{ docname|e }}</a>.
+        </p>
+    </div>
+
+.. toctree::
+   :maxdepth: 2
+   :includehidden:
+
+"""

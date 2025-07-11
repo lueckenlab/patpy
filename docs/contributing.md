@@ -13,7 +13,7 @@ In addition to the packages needed to _use_ this package, you need additional py
 the documentation_. It's easy to install them using `pip`:
 
 ```bash
-cd patient_representation
+cd patpy
 pip install -e ".[dev,test,doc]"
 ```
 
@@ -195,3 +195,8 @@ open _build/html/index.html
 [numpydoc]: https://numpydoc.readthedocs.io/en/latest/format.html
 [sphinx autodoc typehints]: https://github.com/tox-dev/sphinx-autodoc-typehints
 [pypi]: https://pypi.org/
+
+```{toctree}
+:maxdepth: 2
+:includehidden:
+```
