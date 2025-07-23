@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import scipy
+import scipy.spatial
 import seaborn as sns
 from scipy.stats import pearsonr, spearmanr
 from statsmodels.stats.multitest import multipletests
@@ -1869,15 +1870,8 @@ class GloScope(SampleRepresentationMethod):
 
     def prepare_anndata(self, adata):
         """Prepare anndata for GloScope calculation"""
-        import anndata2ri
         import rpy2.robjects as robjects
-        from rpy2.robjects import numpy2ri, pandas2ri
         from rpy2.robjects.packages import importr
-
-        numpy2ri.activate()
-        # Activate automatic conversion between pandas and R objects
-        pandas2ri.activate()
-        anndata2ri.activate()
 
         super().prepare_anndata(adata=adata)
 
@@ -1885,10 +1879,11 @@ class GloScope(SampleRepresentationMethod):
         robjects.r("library(GloScope)")
         importr("BiocParallel")
 
-    def calculate_distance_matrix(self, force: bool = False):
+    def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between samples represented as GloScope embeddings"""
-        import rpy2.robjects as robjects
-        from rpy2.robjects import pandas2ri
+        import rpy2.robjects as ro
+        from rpy2.robjects import default_converter, numpy2ri, pandas2ri
+        from rpy2.robjects.conversion import localconverter
         from rpy2.robjects.vectors import StrVector
 
         distances = super().calculate_distance_matrix(force=force)
@@ -1896,34 +1891,195 @@ class GloScope(SampleRepresentationMethod):
         if distances is not None:
             return distances
 
-        embedding_df = pd.DataFrame(self._get_data(), index=self.adata.obs_names)
+        emb = pd.DataFrame(self._get_data(), index=self.adata.obs_names)
+        sample_ids = self.adata.obs[self.sample_key].astype(str)
 
-        # Assign embedding and sample IDs to R environment
-        robjects.globalenv["embedding_df"] = pandas2ri.py2rpy(embedding_df)
-        robjects.globalenv["sample_ids"] = StrVector(self.adata.obs[self.sample_key].values)
+        # push into R, with automatic pandas<->R conversion in context
+        with localconverter(default_converter + pandas2ri.converter + numpy2ri.converter):
+            ro.globalenv["embedding_df"] = emb
+        ro.globalenv["sample_ids"] = StrVector(sample_ids.values)
 
-        print("Calculating GloScope distance matrix")
+        # coerce the data.frame to a pure numeric matrix in R
+        ro.r("embedding_df <- data.matrix(embedding_df)")
 
-        # Call GloScope function in R
-        robjects.r(
-            f"""
-        dist_matrix <- gloscope(
-            embedding_df,
-            sample_ids,
-            dens = '{self.dens}',
-            dist_mat = '{self.dist_mat}',
-            k = {self.k},
-            BPPARAM = BiocParallel::MulticoreParam(workers = {self.n_workers}, RNGseed = {self.seed})
+        # now call GloScope on an actual numeric matrix
+        ro.r(f"""
+            dist_matrix <- gloscope(
+                embedding_df,
+                sample_ids,
+                dens = '{self.dens}',
+                dist_mat = '{self.dist_mat}',
+                k = {self.k},
+                BPPARAM = BiocParallel::MulticoreParam(workers = {self.n_workers}, RNGseed = {self.seed})
+            )
+        """)
+
+        # pull back the R data.frame into pandas
+        with localconverter(default_converter + pandas2ri.converter):
+            dist_df = ro.r("as.data.frame(dist_matrix)")
+
+        self.samples = list(dist_df.index)
+        dm = dist_df.values if hasattr(dist_df, "values") else dist_df
+        self.sample_representation = dm
+
+        distance_metric = valid_distance_metric(dist)
+        dists = scipy.spatial.distance.pdist(dm, metric=distance_metric)
+        dmat = scipy.spatial.distance.squareform(dists)
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = dmat
+        return dmat
+
+
+class MUSTARD(SampleRepresentationMethod):
+    """
+    Trajectory‐guided decomposition via MUSTARD from https://github.com/haotian-zhuang/MUSTARD
+
+    Performs a low‐rank decomposition of a three‐way tensor (genes × cells × pseudotime)
+    using the R package MUSTARD.  Cells are first binned along the user‐provided pseudotime
+    into fixed‐length intervals, then MUSTARD is called to estimate:
+
+      - A.hat: Sample‐loading matrix (samples × components)
+      - B.hat: Gene‐loading matrix   (genes   × components)
+      - Phi.hat: Temporal loading   (time points × components)
+
+    The resulting sample‐embeddings A.hat are returned as a Euclidean distance matrix
+    stored in `adata.uns["X_mustard_distances"]`.
+
+    Note: normalize & standardize gene expression to have zero mean and unit variance.
+
+    Args:
+        sample_key (str):
+            AnnData.obs column name containing the sample ID for each cell.
+        pseudotime_key (str):
+            AnnData.obs column name containing the pseudotime value for each cell.
+        r (int, default=3):
+            Number of components to decompose into.
+        resolution (int, default=101):
+            Number of pseudotime grid points for Phi.hat (does not affect A.hat or B.hat).
+        bin_size (int, default=50):
+            Number of consecutive cells per pseudotime bin when aggregating.
+        smooth (float, default=1e-3):
+            RKHS smoothing parameter; larger → smoother temporal loadings.
+        maxiter (int, default=20):
+            Maximum number of alternating‐minimization iterations.
+        epsilon (float, default=1e-4):
+            Convergence tolerance on successive updates.
+        layer (str or None, default=None):
+            AnnData layer to use for expression; if None, uses `.X`.
+        seed (int, default=42):
+            Random seed for reproducibility.
+
+    Raises
+    ------
+        KeyError:
+            If `pseudotime_key` or `sample_key` is not found in `adata.obs`.
+
+    Returns
+    -------
+        A symmetric NumPy distance matrix of shape (n_samples, n_samples),
+        stored in `adata.uns["X_mustard_distances"]` and also returned by the method.
+    """
+
+    DISTANCES_UNS_KEY = "X_mustard_distances"
+
+    def __init__(
+        self,
+        sample_key: str,
+        pseudotime_key: str,
+        r: int = 3,
+        resolution: int = 101,
+        bin_size: int = 50,
+        smooth: float = 1e-3,
+        maxiter: int = 20,
+        epsilon: float = 1e-4,
+        layer: str | None = None,
+        seed: int = 42,
+    ):
+        super().__init__(sample_key=sample_key, cell_group_key=None, layer=layer, seed=seed)
+        self.pseudotime_key = pseudotime_key
+        self.rank = r
+        self.resolution = resolution
+        self.bin_size = bin_size
+        self.smooth = smooth
+        self.maxiter = maxiter
+        self.epsilon = epsilon
+
+    def prepare_anndata(self, adata):
+        """Prepare anndata for MUSTARD calculation"""
+        super().prepare_anndata(adata)
+        if self.pseudotime_key not in adata.obs:
+            raise KeyError(f"Pseudotime column {self.pseudotime_key!r} not found in adata.obs")
+
+    def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
+        """Calculate distances between samples represented as MUSTARD embeddings"""
+        if self.DISTANCES_UNS_KEY in self.adata.uns and not force:
+            return self.adata.uns[self.DISTANCES_UNS_KEY]
+
+        import rpy2.robjects as ro
+        from rpy2.robjects import numpy2ri, pandas2ri
+        from rpy2.robjects.conversion import localconverter
+        from rpy2.robjects.packages import importr
+        from rpy2.robjects.vectors import FloatVector, StrVector
+
+        mustard_pkg = importr("MUSTARD")
+
+        ptime = self.adata.obs[self.pseudotime_key]
+        mask = ptime.notna() & np.isfinite(ptime)
+        cells = ptime.index[mask]
+        X = self._get_data()
+        if hasattr(X, "toarray"):
+            X = X.toarray()
+        X = X[mask.values, :]
+        expr_df = pd.DataFrame(X.T, index=self.adata.var_names, columns=cells)
+
+        sample_vec = self.adata.obs[self.sample_key].astype(str).loc[cells]
+        ptime_vec = FloatVector(ptime.loc[cells].values)
+        ptime_vec.names = StrVector(cells.tolist())
+        cellanno_vec = StrVector(sample_vec.values)
+        cellanno_vec.names = StrVector(cells.tolist())
+
+        with localconverter(ro.default_converter + pandas2ri.converter + numpy2ri.converter):
+            ro.globalenv["expr_raw"] = pandas2ri.py2rpy(expr_df)
+        ro.globalenv["pseudotime_raw"] = ptime_vec
+        ro.globalenv["cellanno_raw"] = cellanno_vec
+
+        ro.r(f"""
+            binned <- bin_cells(
+              expr       = expr_raw,
+              pseudotime = pseudotime_raw,
+              cellanno   = cellanno_raw,
+              interval_len = {self.bin_size}
+            )
+        """)
+        expr_binned = ro.r("binned$expr")
+        ptime_binned = ro.r("binned$pseudotime")
+        cellanno_binned = ro.r("binned$cellanno")
+
+        res = mustard_pkg.mustard(
+            expr=expr_binned,
+            pseudotime=ptime_binned,
+            cellanno=cellanno_binned,
+            interval=ro.NULL,
+            r=self.rank,
+            resolution=self.resolution,
+            smooth=self.smooth,
+            maxiter=self.maxiter,
+            epsilon=self.epsilon,
         )
-        """
-        )
 
-        # Retrieve the distance matrix from R environment
-        distances = robjects.r("as.data.frame(dist_matrix)")
+        # 6) pull back A.hat safely
+        A_hat_R = res.rx2("A.hat")
+        row_names = list(A_hat_R.rownames)  # sample IDs
+        col_names = list(A_hat_R.colnames)  # Embeddings ["Component1","Component2",...]
+        A_hat_arr = np.array(A_hat_R)
 
-        self.sample_representation = distances
-        self.samples = list(self.sample_representation.index)
+        A_hat_df = pd.DataFrame(A_hat_arr, index=row_names, columns=col_names)
+        self.samples = A_hat_df.index.tolist()
+        self.sample_representation = A_hat_df.values
 
-        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        distance_metric = valid_distance_metric(dist)
 
-        return distances
+        dists = scipy.spatial.distance.pdist(self.sample_representation, metric=distance_metric)
+        dmat = scipy.spatial.distance.squareform(dists)
+        self.adata.uns[self.DISTANCES_UNS_KEY] = dmat
+        return dmat
