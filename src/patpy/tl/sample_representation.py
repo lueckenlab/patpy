@@ -1870,15 +1870,8 @@ class GloScope(SampleRepresentationMethod):
 
     def prepare_anndata(self, adata):
         """Prepare anndata for GloScope calculation"""
-        import anndata2ri
         import rpy2.robjects as robjects
-        from rpy2.robjects import numpy2ri, pandas2ri
         from rpy2.robjects.packages import importr
-
-        numpy2ri.activate()
-        # Activate automatic conversion between pandas and R objects
-        pandas2ri.activate()
-        anndata2ri.activate()
 
         super().prepare_anndata(adata=adata)
 
@@ -1886,10 +1879,11 @@ class GloScope(SampleRepresentationMethod):
         robjects.r("library(GloScope)")
         importr("BiocParallel")
 
-    def calculate_distance_matrix(self, force: bool = False):
+    def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between samples represented as GloScope embeddings"""
-        import rpy2.robjects as robjects
-        from rpy2.robjects import pandas2ri
+        import rpy2.robjects as ro
+        from rpy2.robjects import default_converter, numpy2ri, pandas2ri
+        from rpy2.robjects.conversion import localconverter
         from rpy2.robjects.vectors import StrVector
 
         distances = super().calculate_distance_matrix(force=force)
@@ -1897,37 +1891,43 @@ class GloScope(SampleRepresentationMethod):
         if distances is not None:
             return distances
 
-        embedding_df = pd.DataFrame(self._get_data(), index=self.adata.obs_names)
+        emb = pd.DataFrame(self._get_data(), index=self.adata.obs_names)
+        sample_ids = self.adata.obs[self.sample_key].astype(str)
 
-        # Assign embedding and sample IDs to R environment
-        robjects.globalenv["embedding_df"] = pandas2ri.py2rpy(embedding_df)
-        robjects.globalenv["sample_ids"] = StrVector(self.adata.obs[self.sample_key].values)
+        # push into R, with automatic pandas<->R conversion in context
+        with localconverter(default_converter + pandas2ri.converter + numpy2ri.converter):
+            ro.globalenv["embedding_df"] = emb
+        ro.globalenv["sample_ids"] = StrVector(sample_ids.values)
 
-        print("Calculating GloScope distance matrix")
+        # coerce the data.frame to a pure numeric matrix in R
+        ro.r("embedding_df <- data.matrix(embedding_df)")
 
-        # Call GloScope function in R
-        robjects.r(
-            f"""
-        dist_matrix <- gloscope(
-            embedding_df,
-            sample_ids,
-            dens = '{self.dens}',
-            dist_mat = '{self.dist_mat}',
-            k = {self.k},
-            BPPARAM = BiocParallel::MulticoreParam(workers = {self.n_workers}, RNGseed = {self.seed})
-        )
-        """
-        )
+        # now call GloScope on an actual numeric matrix
+        ro.r(f"""
+            dist_matrix <- gloscope(
+                embedding_df,
+                sample_ids,
+                dens = '{self.dens}',
+                dist_mat = '{self.dist_mat}',
+                k = {self.k},
+                BPPARAM = BiocParallel::MulticoreParam(workers = {self.n_workers}, RNGseed = {self.seed})
+            )
+        """)
 
-        # Retrieve the distance matrix from R environment
-        distances = robjects.r("as.data.frame(dist_matrix)")
+        # pull back the R data.frame into pandas
+        with localconverter(default_converter + pandas2ri.converter):
+            dist_df = ro.r("as.data.frame(dist_matrix)")
 
-        self.sample_representation = distances
-        self.samples = list(self.sample_representation.index)
+        self.samples = list(dist_df.index)
+        dm = dist_df.values if hasattr(dist_df, "values") else dist_df
+        self.sample_representation = dm
 
-        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        distance_metric = valid_distance_metric(dist)
+        dists = scipy.spatial.distance.pdist(dm, metric=distance_metric)
+        dmat = scipy.spatial.distance.squareform(dists)
 
-        return distances
+        self.adata.uns[self.DISTANCES_UNS_KEY] = dmat
+        return dmat
 
 
 class MUSTARD(SampleRepresentationMethod):
