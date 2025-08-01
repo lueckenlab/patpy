@@ -1923,6 +1923,242 @@ class GloScope(SampleRepresentationMethod):
         self.sample_representation = distances
         self.samples = list(self.sample_representation.index)
 
-        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances.to_numpy()
+
+        return distances.to_numpy()
+
+class GloScope_py(SampleRepresentationMethod):
+
+    def __init__(
+        self, sample_key, cell_group_key=None, layer="X_pca", seed=67, k=25, use_gpu=False
+    ):
+        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
+        self.k = k
+        self.use_gpu = use_gpu
+
+        if self.use_gpu:
+            self.DISTANCES_UNS_KEY = "X_gloscope_cuml_distances"
+        else:
+            self.DISTANCES_UNS_KEY = "X_gloscope_pynndescent_distances"
+    
+    def prepare_anndata(self, adata):
+        super().prepare_anndata(adata)
+
+        # Only keep the first 10 PCA components
+        adata.obsm[self.layer] = adata.obsm[self.layer][:, :10]   
+
+    @staticmethod
+    def kl_divergence(r_i, r_j, m_i, m_j, d) -> float:
+        """
+        Calculates KL(H_i || H_j) (Kullback-Leibler divergence) based on pre-calculated kNN distances.
+
+        Parameters
+        ----------
+        r_i: numpy array
+            kNN distances of the samples from H_i in H_i itself
+        r_j: numpy array
+            kNN distances of the samples from H_i in H_j
+        m_i: int
+            number of samples in H_i
+        m_j: int
+            number of samples in H_j
+        d: int
+            dimensionality of the data
+
+        Returns
+        -------
+        float
+            KL divergence KL(H_i || H_j)
+        """
+        # Logarithm of the ratio of the kNN distances 
+        log_ratios = np.log(r_j / r_i)
+        
+        # Gloscope formula for KL divergence
+        kl = (d / m_i) * np.sum(log_ratios) + np.log(m_j / (m_i - 1))
+        
+        return kl
+
+    def calculate_distance_matrix_pynndescent(self):
+        """
+        Calculates the symmetric Kullback-Leibler distance matrix between groups in the AnnData object
+        using PyNNDescent.
+
+        Parameters
+        ----------
+        adata: AnnData object
+        groupby: str
+            Column name in .obs that defines the groups (e.g., sample ID)
+        k: int, optional
+            Number of k-neighbors for kNN calculation
+        use_rep: str, optional
+            key in .obsm for the embeddings
+
+        Returns
+        -------
+        pd.DataFrame
+            symmetric Kullback-Leibler distance matrix (groups x groups)
+        """
+        import pynndescent
+        from itertools import combinations_with_replacement
+
+        # Subset AnnData object (one subset per group)
+        embedding_dict = {
+            s: np.asarray(self.adata.obsm[self.layer][self.adata.obs[self.sample_key] == s]) for s in self.samples
+        }
+
+        # Precompute kNN index for each group and kNN distances for each group within its own group
+        #   --> Index can be used multiple times, which helps with the runtime
+        index_dict = {}
+        knn_dict = {}
+
+        for group, embedding in embedding_dict.items():
+            index = pynndescent.NNDescent(embedding, n_neighbors=self.k, random_state=42)
+            _, dist = index.query(embedding, k=self.k)
+
+            index_dict[group] = index
+            knn_dict[group] = dist[:, -1]
+
+        # Empty DataFrame for the result
+        distances = pd.DataFrame(index=self.samples, columns=self.samples, dtype=float)
+        d = self.adata.obsm[self.layer].shape[1]   # Dimensionality of the embedding (needed for KL) 
+
+        # Iterate through all group pairs (e.g., 'AB' -> 'AA', 'AB', 'BB')
+        #   --> use combinations_with_replacement(), so only 'AB' and not 'AB', 'BA' is included
+        for g_i, g_j in combinations_with_replacement(self.samples, r=2):
+            # When g_i == g_j then the distance is zero (diagonal of matrix)
+            if g_i == g_j:
+                distances.loc[g_i, g_j] = 0
+                continue
+
+            data_i = embedding_dict[g_i]   # Get embedding for g_i
+            data_j = embedding_dict[g_j]   # Get embedding for g_j
+
+            # Get kNN distances of G_i in G_j (use precomputed index of g_j)
+            _, dist_ij = index_dict[g_j].query(data_i, k=self.k)
+
+            # Get kNN distances of G_j in G_i (use precomputed index of g_i)
+            _, dist_ji = index_dict[g_i].query(data_j, k=self.k)
+
+            # Get numbers of samples
+            m_i = embedding_dict[g_i].shape[0]
+            m_j = embedding_dict[g_j].shape[0]
+
+            # Calculate Kullback-Leibler divergences
+            kl_ij = GloScope_py.kl_divergence(knn_dict[g_i], dist_ij[:, -1], m_i, m_j, d)
+            kl_ji = GloScope_py.kl_divergence(knn_dict[g_j], dist_ji[:, -1], m_j, m_i, d)
+
+            # Sum up the two divergences to get a distance
+            kl_sym = kl_ij + kl_ji
+
+            # Save distance in matrix
+            #   --> to [i,j] and [j,i] as the matrix is symmetric
+            distances.loc[g_i, g_j] = kl_sym
+            distances.loc[g_j, g_i] = kl_sym
 
         return distances
+    
+    def calculate_distance_matrix_cuml(self):
+        """
+        Calculates symmetric Kullback-Leibler distance matrix between groups in the AnnData object
+        using RAPIDS cuML NearestNeighbors (GPU).
+
+        Parameters
+        ----------
+        adata: AnnData
+            AnnData object containing embeddings
+        groupby: str
+            Column name in .obs that defines the groups
+        k: int
+            Number of nearest neighbors
+        use_rep: str
+            Key in .obsm for the embedding matrix
+
+        Returns
+        -------
+        pd.DataFrame
+            Symmetric KL divergence matrix (groups x groups)
+        """
+        from itertools import combinations_with_replacement
+        import cupy as cp
+        from cuml.neighbors import NearestNeighbors
+
+        # Prepare the embedding (one embedding per group)
+        # --> convert into cupy arrays
+        embedding_dict = {
+            g: cp.asarray(self.adata.obsm[self.layer][self.adata.obs[self.sample_key] == g]) for g in self.samples
+        }
+
+        # Self kNN distances for each group (r in KL)
+        knn_self_dists = {}
+
+        for g, X in embedding_dict.items():
+            nn = NearestNeighbors(n_neighbors=self.k, metric='euclidean')
+            nn.fit(X)
+            dists, _ = nn.kneighbors(X)
+            knn_self_dists[g] = cp.asnumpy(dists[:, -1])  # Convert back to numpy array
+
+        # Empty DataFrame for the result
+        distances = pd.DataFrame(index=self.samples, columns=self.samples, dtype=float)
+        d = self.adata.obsm[self.layer].shape[1]   # Dimensionality of the embedding (needed for KL) 
+
+        # Iterate through all group pairs (e.g., 'AB' -> 'AA', 'AB', 'BB')
+        #   --> use combinations_with_replacement(), so only 'AB' and not 'AB', 'BA' is included
+        for g_i, g_j in combinations_with_replacement(self.samples, r=2):
+            # When g_i == g_j then the distance is zero (diagonal of matrix)
+            if g_i == g_j:
+                distances.loc[g_i, g_j] = 0
+                continue
+
+            data_i = embedding_dict[g_i]   # Get embedding for g_i
+            data_j = embedding_dict[g_j]   # Get embedding for g_i
+
+            # Get kNN distances of G_i in G_j
+            nn_j = NearestNeighbors(n_neighbors=self.k, metric='euclidean')
+            nn_j.fit(data_j)
+            dists_ij, _ = nn_j.kneighbors(data_i)
+            dists_ij = cp.asnumpy(dists_ij[:, -1])
+
+            # Get kNN distances of G_j in G_i
+            nn_i = NearestNeighbors(n_neighbors=self.k, metric='euclidean')
+            nn_i.fit(data_i)
+            dists_ji, _ = nn_i.kneighbors(data_j)
+            dists_ji = cp.asnumpy(dists_ji[:, -1])
+
+            # Get numbers of samples
+            m_i = data_i.shape[0]
+            m_j = data_j.shape[0]
+
+            # Calculate Kullback-Leibler divergences
+            kl_ij = GloScope_py.kl_divergence(knn_self_dists[g_i], dists_ij, m_i, m_j, d)
+            kl_ji = GloScope_py.kl_divergence(knn_self_dists[g_j], dists_ji, m_j, m_i, d)
+
+            # Sum up the two divergences to get a distance
+            kl_sym = kl_ij + kl_ji
+
+            # Save distance in matrix
+            #   --> to [i,j] and [j,i] as the matrix is symmetric
+            distances.loc[g_i, g_j] = kl_sym
+            distances.loc[g_j, g_i] = kl_sym
+
+        return distances
+    
+    def calculate_distance_matrix(self, force: bool = False):
+        distances = super().calculate_distance_matrix(force=force)
+
+        if distances is not None:
+            return distances
+                
+        # If use_gpu=True use cuML (else PyNNDescent) for the matrix calculation
+        if self.use_gpu:
+            distances = self.calculate_distance_matrix_cuml()
+        else:
+            distances = self.calculate_distance_matrix_pynndescent()
+
+        self.sample_representation = distances
+        self.samples = list(self.sample_representation.index)
+
+        # The calculation methods return a DataFrame
+        # --> convert to a numpy array for saving/returning      
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances.to_numpy()
+
+        return distances.to_numpy()
