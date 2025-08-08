@@ -1927,3 +1927,186 @@ class GloScope(SampleRepresentationMethod):
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
 
         return distances
+
+
+
+class FACTM(SampleRepresentationMethod):
+    """
+    Patient representation using FACTM model, treating patients as samples and single cell data as structured view with optional cell type simple views.
+
+    Parameters
+    ----------
+    
+    """
+
+    DISTANCES_UNS_KEY = "X_factm_distances"
+
+    def __init__(
+        self,
+        sample_key: str,
+        cell_group_key: str,
+        layer: str | None = None,
+        seed: int = 67,
+        n_factors: int = 10,
+        n_topics: int | None = None,
+        simple_views: bool = True,
+        structured_view: bool = True,
+        aggregate_cell_types: bool = True,
+        aggregation_mode: str = "mean",
+        scale_views: bool = False,
+        prior_weights: list[str] | None = None,
+        iterations: int = 250,
+        tresELBO: float = 1e-3
+    ):
+        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
+        self.n_factors = n_factors
+        self.n_topics = n_topics
+        self.simple_views = simple_views
+        self.structured_view = structured_view
+        self.aggregate_cell_types = aggregate_cell_types
+        self.model = None
+        self.sample_representation = None
+        self.views = None  # List of views (cell types) or single view plus a structured view
+        self.views_names = None
+        self.aggregation_mode = aggregation_mode
+
+        self.data_options = {
+            "scale_views": scale_views
+        }
+
+        self.model_options = {
+            "K": self.n_factors,
+            "L": [self.n_topics],
+            "W_priors": prior_weights,
+            "seed": self.seed
+        }
+
+        self.train_options = {
+            "max_iter": iterations,
+            "elbo_tres": tresELBO
+        }
+
+    def prepare_anndata(self, adata):
+        """
+        Prepare AnnData for FACTM, optionally treating cell types as separate views.
+
+        Parameters
+        ----------
+        adata : AnnData
+            Annotated data matrix
+        """
+        from FACTMpy import FACTModel
+
+        super().prepare_anndata(adata=adata)
+
+        # Setting the number of topics in the structured view to number of cell types
+        if self.n_topics is None:
+            self.n_topics = len(self.cell_groups)
+            self.model_options['L'] = [self.n_topics]
+
+        # Preparing simple views
+        if self.simple_views:
+            if self.aggregate_cell_types:
+                # Aggregate by BOTH sample and cell type
+                pseudobulk_data = self._get_pseudobulk(
+                    aggregation=self.aggregation_mode, fill_value=np.nan, aggregate_cell_types=True
+                )
+                self.views = [view_matrix for view_matrix in pseudobulk_data]  # -> multiple  celltype view appraoch
+                self.views_names_mofa = self.cell_groups
+            else:
+                # Aggregate ONLY by patient
+                pseudobulk_data = self._get_pseudobulk(
+                    aggregation=self.aggregation_mode, fill_value=np.nan, aggregate_cell_types=False
+                )
+                self.views = [pseudobulk_data]  # -> single view appraoch
+                self.views_names_mofa = ["aggregated_gene_expression"]
+
+            self._scale_simple_views()
+        else:
+            self.views = []
+            self.views_names_mofa = []
+
+        # Distribution of observed data
+        # - set after all the views are ready
+        self.likelihoods = ['normal' for i in range(len(self.views))]
+
+        # Preparing a structured view
+        #  - reversing some transformations of 'prepare_anndata'
+        if self.structured_view:
+            structured_view = [
+                # self._normalize_total(np.exp(adata[adata.obs['sample_key'] == sample].X.toarray()))
+                np.expm1(adata[adata.obs['sample_key'] == sample].X.toarray())
+                for sample in self.samples
+            ]
+            self.views.append(structured_view)
+            self.structured_view_index = len(self.views)
+            self.likelihoods.append('CTM')
+        self.views_names = ['M'+str(i) for i in range(len(self.views))]
+
+        factm_data = dict(zip(self.views_names, self.views))
+
+        self.model_options['likelihoods'] = self.likelihoods
+
+        factm = FACTModel(data=factm_data, **self.model_options)
+
+        factm.fit(**self.train_options)
+
+        self.model = factm
+
+    def _normalize_total(self, X, target_sum=1e3):
+        row_sums = X.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1
+        return X * (target_sum / row_sums)
+    
+    def _scale_simple_views(self):
+        if self.data_options['scale_views']:
+            for view_ind in range(len(self.views)):
+             std_view = np.std(self.views[view_ind], axis=0, ddof=1)
+             std_view[std_view == 0] = 1
+             self.views[view_ind] = self.views[view_ind]/std_view
+
+    def calculate_distance_matrix(self, force=False, store_weights=False, dist="euclidean"):
+        """
+        Calculate distances between patients using FACTM latent factors.
+
+        Parameters
+        ----------
+        force : bool = False
+            If True, recalculate the distance matrix even if it exists.
+        store_weights : bool, default: False
+            If True, store the weights (relation of factors to genes) in `self.adata.uns`.
+
+        Returns
+        -------
+        distances : np.ndarray
+            Matrix of distances between patients.
+        """
+        distances = super().calculate_distance_matrix(force=force)
+        if distances is not None:
+            return distances
+
+        distance_metric = valid_distance_metric(dist)
+
+        # get factors expectation (latent representations of samples)
+        self.sample_representation = self.model.get_latent_factors()
+
+        # store weights (relation of factors to genes) TBDGosia
+        if store_weights:
+            factm_weights = {view_name: self.model.get_loadings(i) for i, view_name in enumerate(self.views_names)}
+
+        distances = scipy.spatial.distance.pdist(self.sample_representation, metric=distance_metric)
+        distances = scipy.spatial.distance.squareform(distances)
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        self.adata.uns["factm_parameters"] = {
+            "sample_key": self.sample_key,
+            "n_factors": self.n_factors,
+            "aggregate_cell_types": self.aggregate_cell_types,
+            **self.data_options,
+            **self.model_options,
+            **self.train_options,
+        }
+        if store_weights:
+            self.adata.uns["factm_parameters"]["weights"] = factm_weights
+
+        return distances
