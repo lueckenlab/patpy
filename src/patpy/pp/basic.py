@@ -308,6 +308,17 @@ def fill_nan_distances(distances, n_max_distances=5):
     return distances
 
 
+def _to_numpy(x):
+    try:
+        import torch
+
+        if isinstance(x, torch.Tensor):
+            return x.detach().cpu().numpy()
+        return np.array(x)
+    except (TypeError, RuntimeError) as err:
+        raise TypeError(f"Failed to convert to numpy array: {err}") from err
+
+
 def get_helical_embedding(
     adata: sc.AnnData,
     model: str,
@@ -458,6 +469,8 @@ def get_helical_embedding(
     elif model_lower == "uce":
         from helical.models.uce import UCE, UCEConfig
 
+        adata.var_names = adata.var_names.astype(str)
+
         config = UCEConfig(
             batch_size=batch_size,
             device=device,
@@ -484,7 +497,7 @@ def get_helical_embedding(
         data_for_tf = tf_model.process_data([adata])
         embeddings = tf_model.get_embeddings(data_for_tf)
 
-        adata.obsm["X_transcriptformer"] = embeddings
+        adata.obsm["X_transcriptformer"] = _to_numpy(embeddings).astype("float32", copy=False)
         return adata
 
     else:
