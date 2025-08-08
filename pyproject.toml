@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "patpy"
-version = "0.9.2"
+version = "0.9.3"
 description = "A toolbox for patient or sample representation from single-cell data"
 readme = "README.md"
 license = { file = "LICENSE" }

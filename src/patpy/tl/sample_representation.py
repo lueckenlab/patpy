@@ -1874,12 +1874,11 @@ class GloScope(SampleRepresentationMethod):
         from rpy2.robjects import numpy2ri, pandas2ri
         from rpy2.robjects.packages import importr
 
-        numpy2ri.activate()
-        # Activate automatic conversion between pandas and R objects
-        pandas2ri.activate()
+        # Activate automatic conversion between pandas/numpy/AnnData and R objects
         anndata2ri.activate()
 
-        super().prepare_anndata(adata=adata)
+        with (robjects.default_converter + numpy2ri.converter + pandas2ri.converter).context():
+            super().prepare_anndata(adata=adata)
 
         # Load the R packages
         robjects.r("library(GloScope)")
