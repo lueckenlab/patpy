@@ -12,6 +12,7 @@ Take a look at examples on how to use patpy for your analysis
     ../notebooks/synthetic_data_generation
     ../notebooks/distances_test_example
     ../notebooks/gloscope_example
+    ../notebooks/gloscope_example_gpu
 ```
 
 ```{toctree}
