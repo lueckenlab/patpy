@@ -1927,11 +1927,9 @@ class GloScope(SampleRepresentationMethod):
 
         return distances.to_numpy()
 
-class GloScope_py(SampleRepresentationMethod):
 
-    def __init__(
-        self, sample_key, cell_group_key=None, layer="X_pca", seed=67, k=25, use_gpu=False
-    ):
+class GloScope_py(SampleRepresentationMethod):
+    def __init__(self, sample_key, cell_group_key=None, layer="X_pca", seed=67, k=25, use_gpu=False):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
         self.k = k
         self.use_gpu = use_gpu
@@ -1940,12 +1938,12 @@ class GloScope_py(SampleRepresentationMethod):
             self.DISTANCES_UNS_KEY = "X_gloscope_cuml_distances"
         else:
             self.DISTANCES_UNS_KEY = "X_gloscope_pynndescent_distances"
-    
+
     def prepare_anndata(self, adata):
         super().prepare_anndata(adata)
 
         # Only keep the first 10 PCA components
-        adata.obsm[self.layer] = adata.obsm[self.layer][:, :10]   
+        adata.obsm[self.layer] = adata.obsm[self.layer][:, :10]
 
     @staticmethod
     def kl_divergence(r_i, r_j, m_i, m_j, d) -> float:
@@ -1970,12 +1968,12 @@ class GloScope_py(SampleRepresentationMethod):
         float
             KL divergence KL(H_i || H_j)
         """
-        # Logarithm of the ratio of the kNN distances 
+        # Logarithm of the ratio of the kNN distances
         log_ratios = np.log(r_j / r_i)
-        
+
         # Gloscope formula for KL divergence
         kl = (d / m_i) * np.sum(log_ratios) + np.log(m_j / (m_i - 1))
-        
+
         return kl
 
     def calculate_distance_matrix_pynndescent(self):
@@ -1998,8 +1996,9 @@ class GloScope_py(SampleRepresentationMethod):
         pd.DataFrame
             symmetric Kullback-Leibler distance matrix (groups x groups)
         """
-        import pynndescent
         from itertools import combinations_with_replacement
+
+        import pynndescent
 
         # Subset AnnData object (one subset per group)
         embedding_dict = {
@@ -2020,7 +2019,7 @@ class GloScope_py(SampleRepresentationMethod):
 
         # Empty DataFrame for the result
         distances = pd.DataFrame(index=self.samples, columns=self.samples, dtype=float)
-        d = self.adata.obsm[self.layer].shape[1]   # Dimensionality of the embedding (needed for KL) 
+        d = self.adata.obsm[self.layer].shape[1]  # Dimensionality of the embedding (needed for KL)
 
         # Iterate through all group pairs (e.g., 'AB' -> 'AA', 'AB', 'BB')
         #   --> use combinations_with_replacement(), so only 'AB' and not 'AB', 'BA' is included
@@ -2030,8 +2029,8 @@ class GloScope_py(SampleRepresentationMethod):
                 distances.loc[g_i, g_j] = 0
                 continue
 
-            data_i = embedding_dict[g_i]   # Get embedding for g_i
-            data_j = embedding_dict[g_j]   # Get embedding for g_j
+            data_i = embedding_dict[g_i]  # Get embedding for g_i
+            data_j = embedding_dict[g_j]  # Get embedding for g_j
 
             # Get kNN distances of G_i in G_j (use precomputed index of g_j)
             _, dist_ij = index_dict[g_j].query(data_i, k=self.k)
@@ -2056,7 +2055,7 @@ class GloScope_py(SampleRepresentationMethod):
             distances.loc[g_j, g_i] = kl_sym
 
         return distances
-    
+
     def calculate_distance_matrix_cuml(self):
         """
         Calculates symmetric Kullback-Leibler distance matrix between groups in the AnnData object
@@ -2079,6 +2078,7 @@ class GloScope_py(SampleRepresentationMethod):
             Symmetric KL divergence matrix (groups x groups)
         """
         from itertools import combinations_with_replacement
+
         import cupy as cp
         from cuml.neighbors import NearestNeighbors
 
@@ -2092,14 +2092,14 @@ class GloScope_py(SampleRepresentationMethod):
         knn_self_dists = {}
 
         for g, X in embedding_dict.items():
-            nn = NearestNeighbors(n_neighbors=self.k, metric='euclidean')
+            nn = NearestNeighbors(n_neighbors=self.k, metric="euclidean")
             nn.fit(X)
             dists, _ = nn.kneighbors(X)
             knn_self_dists[g] = cp.asnumpy(dists[:, -1])  # Convert back to numpy array
 
         # Empty DataFrame for the result
         distances = pd.DataFrame(index=self.samples, columns=self.samples, dtype=float)
-        d = self.adata.obsm[self.layer].shape[1]   # Dimensionality of the embedding (needed for KL) 
+        d = self.adata.obsm[self.layer].shape[1]  # Dimensionality of the embedding (needed for KL)
 
         # Iterate through all group pairs (e.g., 'AB' -> 'AA', 'AB', 'BB')
         #   --> use combinations_with_replacement(), so only 'AB' and not 'AB', 'BA' is included
@@ -2109,17 +2109,17 @@ class GloScope_py(SampleRepresentationMethod):
                 distances.loc[g_i, g_j] = 0
                 continue
 
-            data_i = embedding_dict[g_i]   # Get embedding for g_i
-            data_j = embedding_dict[g_j]   # Get embedding for g_i
+            data_i = embedding_dict[g_i]  # Get embedding for g_i
+            data_j = embedding_dict[g_j]  # Get embedding for g_i
 
             # Get kNN distances of G_i in G_j
-            nn_j = NearestNeighbors(n_neighbors=self.k, metric='euclidean')
+            nn_j = NearestNeighbors(n_neighbors=self.k, metric="euclidean")
             nn_j.fit(data_j)
             dists_ij, _ = nn_j.kneighbors(data_i)
             dists_ij = cp.asnumpy(dists_ij[:, -1])
 
             # Get kNN distances of G_j in G_i
-            nn_i = NearestNeighbors(n_neighbors=self.k, metric='euclidean')
+            nn_i = NearestNeighbors(n_neighbors=self.k, metric="euclidean")
             nn_i.fit(data_i)
             dists_ji, _ = nn_i.kneighbors(data_j)
             dists_ji = cp.asnumpy(dists_ji[:, -1])
@@ -2141,13 +2141,13 @@ class GloScope_py(SampleRepresentationMethod):
             distances.loc[g_j, g_i] = kl_sym
 
         return distances
-    
+
     def calculate_distance_matrix(self, force: bool = False):
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
             return distances
-                
+
         # If use_gpu=True use cuML (else PyNNDescent) for the matrix calculation
         if self.use_gpu:
             distances = self.calculate_distance_matrix_cuml()
@@ -2158,7 +2158,7 @@ class GloScope_py(SampleRepresentationMethod):
         self.samples = list(self.sample_representation.index)
 
         # The calculation methods return a DataFrame
-        # --> convert to a numpy array for saving/returning      
+        # --> convert to a numpy array for saving/returning
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances.to_numpy()
 
         return distances.to_numpy()

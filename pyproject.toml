@@ -66,11 +66,11 @@ optional-dependencies.doc = [
   "sphinxext-opengraph",
 ]
 optional-dependencies.gloscope_py_cpu = [
-    "pynndescent",
+  "pynndescent",
 ]
 optional-dependencies.gloscope_py_gpu = [
-    "cupy",
-    "cuml",
+  "cuml",
+  "cupy",
 ]
 optional-dependencies.mrvi = [
   "scvi-tools>=1.2",
