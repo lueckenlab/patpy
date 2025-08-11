@@ -322,7 +322,7 @@ def _to_numpy(x):
 def get_helical_embedding(
     adata: sc.AnnData,
     model: str,
-    batch_size: int = 64,
+    batch_size: int = 24,
     device: str = "cuda",
     **kwargs,
 ) -> sc.AnnData:
@@ -464,6 +464,8 @@ def get_helical_embedding(
         embeddings = gf_model.get_embeddings(data_for_gf)
 
         adata.obsm["X_geneformer"] = embeddings
+        adata.var_names = adata.var_names.astype(str)
+
         return adata
 
     elif model_lower == "uce":
