@@ -306,3 +306,203 @@ def fill_nan_distances(distances, n_max_distances=5):
     distances[nans] = n_max_distances * max_distance
 
     return distances
+
+
+def _to_numpy(x):
+    try:
+        import torch
+
+        if isinstance(x, torch.Tensor):
+            return x.detach().cpu().numpy()
+        return np.array(x)
+    except (TypeError, RuntimeError) as err:
+        raise TypeError(f"Failed to convert to numpy array: {err}") from err
+
+
+def get_helical_embedding(
+    adata: sc.AnnData,
+    model: str,
+    batch_size: int = 24,
+    device: str = "cuda",
+    **kwargs,
+) -> sc.AnnData:
+    """
+    Compute and store cell embeddings from a Helical model in adata.obsm.
+
+    Parameters
+    ----------
+    adata : AnnData
+    model : str
+        Which Helical model to use. Must be one of:
+          - "scgpt"
+              scGPT docs: https://helical.readthedocs.io/en/latest/model_cards/scgpt/
+          - "geneformer"
+              Geneformer docs: https://helical.readthedocs.io/en/latest/model_cards/geneformer/
+          - "uce"
+              UCE docs: https://helical.readthedocs.io/en/latest/model_cards/uce/
+          - "transcriptformer"
+              TranscriptFormer docs: https://helical.readthedocs.io/en/latest/model_cards/transcriptformer/
+    batch_size : int, optional
+        Batch size for inference. Defaults to 64.
+    device : str, optional
+        Device for PyTorch inference: "cpu" or "cuda". Defaults to "cpu".
+    **kwargs :
+        All remaining keyword arguments are passed directly into the chosen model’s Config constructor.
+        Below is a summary of each model’s Config‐class attributes (names and defaults) that can be overridden:
+
+        — scGPTConfig kwargs (from https://helical.readthedocs.io/en/latest/configs/scgpt_config/) :
+            • pad_token (str): padding token. Default `"<pad>"`.
+            • fast_transformer (bool): use fast transformer. Default `True`.
+            • nlayers (int): number of layers. Default `12`.
+            • nheads (int): number of attention heads. Default `8`.
+            • embsize (int): embedding dimension. Default `512`.
+            • d_hid (int): hidden layer dimension. Default `512`.
+            • dropout (float): dropout rate. Default `0.2`.
+            • n_layers_cls (int): classification head layers. Default `3`.
+            • mask_value (int): mask token value. Default `-1`.
+            • pad_value (int): padding token value. Default `-2`.
+            • world_size (int): distributed world size. Default `8`.
+            • accelerator (bool): whether to use accelerator. Default `False`.
+            • use_fast_transformer (bool): alias for fast_transformer. Default `False`.
+
+        — GeneformerConfig kwargs (from https://helical.readthedocs.io/en/latest/configs/geneformer_config/) :
+            • model_name ({'gf-6L-30M-i2048','gf-12L-30M-i2048','gf-12L-95M-i4096',
+                        'gf-20L-95M-i4096','gf-12L-95M-i4096-CLcancer'}):
+            model variant. Default `"gf-12L-30M-i2048"`.
+            • emb_layer (int): which layer to extract. Default `-1`.
+            • emb_mode ({'cls','cell','gene'}): embedding mode. Default `"cell"`.
+            • accelerator (bool): use accelerator. Default `False`.
+            • nproc (int): processes for data prep. Default `1`.
+            • custom_attr_name_dict (dict): map new obs attrs. Default `None`.
+
+        — UCEConfig kwargs (from https://helical.readthedocs.io/en/latest/configs/uce_config/) :
+            • model_name ({'33l_8ep_1024t_1280','4layer_model'}): model variant.
+            Default `"4layer_model"`.
+            • species ({'human','mouse','frog','zebrafish','mouse_lemur','pig',
+                        'macaca_fascicularis','macaca_mulatta'}): data species.
+            Default `"human"`.
+            • gene_embedding_model ({'ESM2'}): gene embedding source. Default `'ESM2'`.
+            • pad_length (int): sequence padding length. Default `1536`.
+            • pad_token_idx (int): pad token index. Default `0`.
+            • chrom_token_left_idx (int): left chromosome token. Default `1`.
+            • chrom_token_right_idx (int): right chromosome token. Default `2`.
+            • cls_token_idx (int): CLS token index. Default `3`.
+            • CHROM_TOKEN_OFFSET (int): offset constant. Default `143574`.
+            • sample_size (int): per-sample patch size. Default `1024`.
+            • CXG (bool): use CXG format. Default `True`.
+            • output_dim (int): final embedding dim. Default `1280`.
+            • d_hid (int): hidden dim. Default `5120`.
+            • token_dim (int): token embedding dim. Default `5120`.
+            • multi_gpu (bool): multi-GPU inference. Default `False`.
+            • accelerator (bool): use accelerator. Default `False`.
+
+        — TranscriptFormerConfig kwargs (from https://helical.readthedocs.io/en/latest/configs/transcriptformer/) :
+            • model_name ({'tf_sapiens','tf_metazoa','tf_exemplar'}):
+            model variant. Default `"tf_metazoa"`.
+            • emb_mode ({'gene','cell'}): The mode to use for the embeddings. Default `"cell"`.
+            • output_keys (List[{'gene_llh','llh'}]): The keys to output. Default `["gene_llh"]`.
+            • obs_keys (List[str]): obs columns to attach. Default `["all"]`.
+            • data_files (List[str]): AnnData file paths. Default `[None]`.
+            • output_path (str): where to save results. Default `"./inference_results"`.
+            • load_checkpoint (str): Path to model weights file (automatically set by inference.py). Default `None`.
+            • pretrained_embedding (str): Path to pretrained embeddings for out-of-distribution species. Default `None`.
+            • precision (str): numerical precision. Default `"16-mixed"`.
+            • gene_col_name (str): Column name in AnnData.var containing gene names which will be mapped to ensembl ids. If index is set, .var_names will be used. Default `"ensembl_id"`.
+            • clip_counts (int): max count clipping. Default `30`.
+            • filter_to_vocabs (bool): Whether to filter genes to only those in the vocabulary Default `True`.
+            • filter_outliers (float): Standard deviation threshold for filtering outlier cells (0.0 = no filtering). Default `0.0`.
+            • normalize_to_scale (float): Scale factor for count normalization (0 = no normalization). Default `0`.
+            • sort_genes (bool): Whether to sort the genes. Default `False`.
+            • randomize_genes (bool): Whether to randomize the genes. Default `False`.
+            • min_expressed_genes (int): min genes per cell. Default `0`.
+
+    Returns
+    -------
+    AnnData
+        The same AnnData, but with a new .obsm key `"X_<model>"`. For example,
+        if `model="scgpt"`, embeddings are stored in `adata.obsm["X_scgpt"]`.
+        Shape is (n_cells, model_hidden_dim).
+
+    Raises
+    ------
+    ImportError
+        If the chosen Helical submodule isn’t installed (e.g. Helical wasn’t installed with `[scgpt]`).
+    ValueError
+        If `model` is not one of the four supported names.
+    """
+    model_lower = model.lower()
+
+    if model_lower == "scgpt":
+        from helical.models.scgpt import scGPT, scGPTConfig
+
+        config = scGPTConfig(
+            batch_size=batch_size,
+            device=device,
+            **kwargs,
+        )
+        scgpt_model = scGPT(configurer=config)
+
+        data_for_scgpt = scgpt_model.process_data(adata)
+
+        embeddings = scgpt_model.get_embeddings(data_for_scgpt)
+
+        adata.obsm["X_scgpt"] = embeddings
+        return adata
+
+    elif model_lower == "geneformer":
+        from helical.models.geneformer import Geneformer, GeneformerConfig
+
+        config = GeneformerConfig(
+            batch_size=batch_size,
+            device=device,
+            **kwargs,
+        )
+        gf_model = Geneformer(configurer=config)
+
+        data_for_gf = gf_model.process_data(adata)
+
+        embeddings = gf_model.get_embeddings(data_for_gf)
+
+        adata.obsm["X_geneformer"] = embeddings
+        adata.var_names = adata.var_names.astype(str)
+
+        return adata
+
+    elif model_lower == "uce":
+        from helical.models.uce import UCE, UCEConfig
+
+        adata.var_names = adata.var_names.astype(str)
+
+        config = UCEConfig(
+            batch_size=batch_size,
+            device=device,
+            **kwargs,
+        )
+        uce_model = UCE(configurer=config)
+
+        data_for_uce = uce_model.process_data(adata)
+        embeddings = uce_model.get_embeddings(data_for_uce)
+
+        adata.obsm["X_uce"] = embeddings
+        return adata
+
+    elif model_lower == "transcriptformer":
+        from helical.models.transcriptformer.model import TranscriptFormer
+        from helical.models.transcriptformer.transcriptformer_config import TranscriptFormerConfig
+
+        config = TranscriptFormerConfig(
+            batch_size=batch_size,
+            **kwargs,
+        )
+        tf_model = TranscriptFormer(configurer=config)
+
+        data_for_tf = tf_model.process_data([adata])
+        embeddings = tf_model.get_embeddings(data_for_tf)
+
+        adata.obsm["X_transcriptformer"] = _to_numpy(embeddings).astype("float32", copy=False)
+        return adata
+
+    else:
+        raise ValueError(
+            f"Unrecognized model '{model}'. Please choose one of: 'scgpt', 'geneformer', 'uce', or 'transcriptformer'."
+        )

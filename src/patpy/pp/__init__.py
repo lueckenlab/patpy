@@ -7,6 +7,7 @@ from .basic import (
     fill_nan_distances,
     filter_small_cell_groups,
     filter_small_samples,
+    get_helical_embedding,
     is_count_data,
     prepare_data_for_phemd,
     subsample,
