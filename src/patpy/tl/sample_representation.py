@@ -1929,13 +1929,7 @@ class GloScope(SampleRepresentationMethod):
 
 
 class FACTM(SampleRepresentationMethod):
-    """
-    Patient representation using FACTM model, treating patients as samples and single cell data as structured view with optional cell type simple views.
-
-    Parameters
-    ----------
-
-    """
+    """Patient representation using FACTM model, treating patients as samples and single cell data as structured view with optional cell type simple views."""
 
     DISTANCES_UNS_KEY = "X_factm_distances"
 
@@ -1976,14 +1970,19 @@ class FACTM(SampleRepresentationMethod):
 
     def prepare_anndata(self, adata):
         """
-        Prepare AnnData for FACTM, optionally treating cell types as separate views.
+        Prepare AnnData for FACTM (https://arxiv.org/abs/2504.18914), optionally treating cell types as separate views.
 
         Parameters
         ----------
         adata : AnnData
             Annotated data matrix
         """
-        from FACTMpy import FACTModel
+        try:
+            from FACTMpy import FACTModel
+        except ImportError as e:
+            raise ImportError(
+                "FACTMpy is required for the FACTM method. Install with `pip install patpy[factm]` "
+            ) from e
 
         super().prepare_anndata(adata=adata)
 
@@ -1999,7 +1998,7 @@ class FACTM(SampleRepresentationMethod):
                 pseudobulk_data = self._get_pseudobulk(
                     aggregation=self.aggregation_mode, fill_value=np.nan, aggregate_cell_types=True
                 )
-                self.views = [view_matrix for view_matrix in pseudobulk_data]  # -> multiple  celltype view appraoch
+                self.views = list(pseudobulk_data)  # -> multiple  celltype view appraoch
                 self.views_names_mofa = self.cell_groups
             else:
                 # Aggregate ONLY by patient
@@ -2023,7 +2022,7 @@ class FACTM(SampleRepresentationMethod):
         if self.structured_view:
             structured_view = [
                 # self._normalize_total(np.exp(adata[adata.obs['sample_key'] == sample].X.toarray()))
-                np.expm1(adata[adata.obs["sample_key"] == sample].X.toarray())
+                np.expm1(adata[adata.obs[self.sample_key] == sample].X.toarray())
                 for sample in self.samples
             ]
             self.views.append(structured_view)
