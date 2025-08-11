@@ -65,6 +65,10 @@ optional-dependencies.doc = [
   "sphinxcontrib-bibtex>=1",
   "sphinxext-opengraph",
 ]
+optional-dependencies.factm = [
+  "factmpy @ git+https://github.com/lazeckam/FACTMpy.git",
+]
+
 optional-dependencies.mrvi = [
   "scvi-tools>=1.2",
   "torch>=1.13",
