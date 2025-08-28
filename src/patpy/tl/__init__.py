@@ -22,4 +22,5 @@ from .sample_representation import (
     correlate_cell_type_expression,
     correlate_composition,
     describe_metadata,
+    scLKME,
 )
