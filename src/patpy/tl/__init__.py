@@ -7,6 +7,7 @@ from .evaluation import (
     test_proportions,
 )
 from .sample_representation import (
+    FACTM,
     MOFA,
     PILOT,
     CellGroupComposition,
