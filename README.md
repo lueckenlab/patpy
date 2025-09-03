@@ -103,7 +103,7 @@ Preprint is coming soon. So far, you can refer to this repository as following:
 
 ### APA
 
-Shitov, V. (2024). patpy – sample-level analysis framework for single-cell data (Version 0.9.2) [Computer software]. https://github.com/lueckenlab/patpy/
+Shitov, V. (2024). patpy – sample-level analysis framework for single-cell data (Version 0.10.0) [Computer software]. https://github.com/lueckenlab/patpy/
 
 ### BibTeX
 
@@ -113,7 +113,7 @@ Shitov, V. (2024). patpy – sample-level analysis framework for single-cell dat
   title = {patpy – sample-level analysis framework for single-cell data},
   year = {2024},
   url = {https://github.com/lueckenlab/patpy/},
-  note = {Version 0.9.2}
+  note = {Version 0.10.0}
 }
 ```
 
