@@ -1929,7 +1929,52 @@ class GloScope(SampleRepresentationMethod):
 
 
 class FACTM(SampleRepresentationMethod):
-    """Patient representation using FACTM model, treating patients as samples and single cell data as structured view with optional cell type simple views."""
+    """
+    Patient representation using FACTM model, treating patients as samples 
+    and single cell data as structured view with optional cell type simple views.
+
+    Parameters
+    ----------
+    sample_key : str
+        Column in `.obs` containing sample (patient) IDs.
+    cell_group_key : str
+        Column in `.obs` containing cell type information.
+    layer: Optional[str], default: None
+        Layer in AnnData to use for gene expression data in simple views. 
+        This layer should contain data formatted for MOFA.
+        If None, uses `.X`.
+    layer_structured_view: Optional[str], default: None
+        Layer in AnnData to use for gene expression data. 
+        This layer should contain non-negative raw counts or count-normalized values (preffered).
+        If None, uses `.X`.
+    seed : int, default: 67
+        Random seed for reproducibility.
+    n_factors : int, default: 10
+        Number of latent factors to learn.
+    n_topics : int, default: number of cell types
+        Number of latent topics (cell types) to learn.
+    simple_views : bool, default: True
+        If True, use simple view/views for inference.
+        If False, do not use simple view/views.
+    structured_view : bool, default: True
+        If True, use a structured view for inference (FACTM).
+        If False, do not use a structured view (equivalent to MOFA).
+    aggregate_cell_types : bool, default: True
+        If True, treat each cell type as a separate view.
+        If False, aggregate gene expression across all cell types into a single view.
+    aggregation_mode: str, default: "mean"
+        Name of the aggregation function to use (e.g., 'mean', 'median', 'sum')
+    scale_views : bool, optional
+        Scale each view to unit variance.
+    prior_weights : TBD bool, default: True
+        Use spike-and-slab prior on weights.
+    spikeslab_factors : bool, default: False
+        Use spike-and-slab prior on factors.
+    iterations : int, default: 1000
+        Maximum number of training iterations.
+    tresELBO : TBD  int, default: 1
+        Iteration number to start computing the Evidence Lower Bound (ELBO).    
+    """
 
     DISTANCES_UNS_KEY = "X_factm_distances"
 
@@ -1938,6 +1983,7 @@ class FACTM(SampleRepresentationMethod):
         sample_key: str,
         cell_group_key: str,
         layer: str | None = None,
+        layer_structured_view: str | None = None,
         seed: int = 67,
         n_factors: int = 10,
         n_topics: int | None = None,
@@ -1945,60 +1991,79 @@ class FACTM(SampleRepresentationMethod):
         structured_view: bool = True,
         aggregate_cell_types: bool = True,
         aggregation_mode: str = "mean",
-        scale_views: bool = False,
+        scale_views: bool = True,
         prior_weights: list[str] | None = None,
         iterations: int = 250,
-        tresELBO: float = 1e-3,
+        tresELBO: float = 1e-3
     ):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
         self.n_factors = n_factors
         self.n_topics = n_topics
+        self.layer_structured_view = layer_structured_view
         self.simple_views = simple_views
         self.structured_view = structured_view
         self.aggregate_cell_types = aggregate_cell_types
         self.model = None
         self.sample_representation = None
-        self.views = None  # List of views (cell types) or single view plus a structured view
+        self.views = None  # List of simple views (cell types) or a single view plus a structured view
         self.views_names = None
         self.aggregation_mode = aggregation_mode
 
-        self.data_options = {"scale_views": scale_views}
+        self.data_options = {
+            "scale_views": scale_views
+        }
 
-        self.model_options = {"K": self.n_factors, "L": [self.n_topics], "W_priors": prior_weights, "seed": self.seed}
+        self.model_options = {
+            "K": self.n_factors,
+            "L": [self.n_topics],
+            "W_priors": prior_weights,
+            "seed": self.seed
+        }
 
-        self.train_options = {"max_iter": iterations, "elbo_tres": tresELBO}
+        self.train_options = {
+            "max_iter": iterations,
+            "elbo_tres": tresELBO
+        }
 
     def prepare_anndata(self, adata):
         """
-        Prepare AnnData for FACTM (https://arxiv.org/abs/2504.18914), optionally treating cell types as separate views.
+        Prepare AnnData for FACTM, optionally treating cell types as separate views.
 
         Parameters
         ----------
         adata : AnnData
             Annotated data matrix
         """
-        try:
-            from FACTMpy import FACTModel
-        except ImportError as e:
-            raise ImportError(
-                "FACTMpy is required for the FACTM method. Install with `pip install patpy[factm]` "
-            ) from e
+        from FACTMpy import FACTModel
 
         super().prepare_anndata(adata=adata)
 
         # Setting the number of topics in the structured view to number of cell types
         if self.n_topics is None:
             self.n_topics = len(self.cell_groups)
-            self.model_options["L"] = [self.n_topics]
+            self.model_options['L'] = [self.n_topics]
 
-        # Preparing simple views
+        # Preparing a structured view
+        if self.structured_view:
+            if self.layer_structured_view is None:
+                structured_view = [
+                    self.adata[self.adata.obs[self.sample_key] == sample][self.layer_structured_view].toarray()
+                    for sample in self.samples
+                ]
+            else:
+                structured_view = [
+                    self.adata[self.adata.obs[self.sample_key] == sample].layers[self.layer_structured_view].toarray()
+                    for sample in self.samples
+                ]
+
+        # Preparing simple views as in MOFA
         if self.simple_views:
             if self.aggregate_cell_types:
                 # Aggregate by BOTH sample and cell type
                 pseudobulk_data = self._get_pseudobulk(
                     aggregation=self.aggregation_mode, fill_value=np.nan, aggregate_cell_types=True
                 )
-                self.views = list(pseudobulk_data)  # -> multiple  celltype view appraoch
+                self.views = [view_matrix for view_matrix in pseudobulk_data]  # -> multiple  celltype view appraoch
                 self.views_names_mofa = self.cell_groups
             else:
                 # Aggregate ONLY by patient
@@ -2015,24 +2080,19 @@ class FACTM(SampleRepresentationMethod):
 
         # Distribution of observed data
         # - set after all the views are ready
-        self.likelihoods = ["normal" for i in range(len(self.views))]
+        # - assume all views have normal distributions
+        self.likelihoods = ['normal' for i in range(len(self.views))]
 
-        # Preparing a structured view
-        #  - reversing some transformations of 'prepare_anndata'
+        # Adding info about structured view
         if self.structured_view:
-            structured_view = [
-                # self._normalize_total(np.exp(adata[adata.obs['sample_key'] == sample].X.toarray()))
-                np.expm1(adata[adata.obs[self.sample_key] == sample].X.toarray())
-                for sample in self.samples
-            ]
             self.views.append(structured_view)
             self.structured_view_index = len(self.views)
-            self.likelihoods.append("CTM")
-        self.views_names = ["M" + str(i) for i in range(len(self.views))]
+            self.likelihoods.append('CTM')
+        self.views_names = ['M'+str(i) for i in range(len(self.views))]
 
-        factm_data = dict(zip(self.views_names, self.views, strict=False))
+        factm_data = dict(zip(self.views_names, self.views))
 
-        self.model_options["likelihoods"] = self.likelihoods
+        self.model_options['likelihoods'] = self.likelihoods
 
         factm = FACTModel(data=factm_data, **self.model_options)
 
@@ -2044,13 +2104,13 @@ class FACTM(SampleRepresentationMethod):
         row_sums = X.sum(axis=1, keepdims=True)
         row_sums[row_sums == 0] = 1
         return X * (target_sum / row_sums)
-
+    
     def _scale_simple_views(self):
-        if self.data_options["scale_views"]:
+        if self.data_options['scale_views']:
             for view_ind in range(len(self.views)):
                 std_view = np.std(self.views[view_ind], axis=0, ddof=1)
                 std_view[std_view == 0] = 1
-                self.views[view_ind] = self.views[view_ind] / std_view
+                self.views[view_ind] = self.views[view_ind]/std_view
 
     def calculate_distance_matrix(self, force=False, store_weights=False, dist="euclidean"):
         """
