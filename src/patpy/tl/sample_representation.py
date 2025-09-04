@@ -2002,7 +2002,7 @@ class GloScope_py(SampleRepresentationMethod):
         from itertools import combinations_with_replacement
         import pynndescent
 
-        data = self._get_data(self.layer)
+        data = self._get_data()
 
         # Subset the data if n_components is set
         if self.n_components is not None:
@@ -2091,7 +2091,7 @@ class GloScope_py(SampleRepresentationMethod):
         import cupy as cp
         from cuml.neighbors import NearestNeighbors
 
-        data = self._get_data(self.layer)
+        data = self._get_data()
 
         # Subset the data if n_components is set
         if self.n_components is not None:
