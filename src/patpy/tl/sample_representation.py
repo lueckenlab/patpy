@@ -1929,31 +1929,19 @@ class GloScope(SampleRepresentationMethod):
 
 
 class GloScope_py(SampleRepresentationMethod):
-    def __init__(self, sample_key, cell_group_key=None, layer="X_pca", seed=67, k=25, use_gpu=False):
+    def __init__(self, sample_key, cell_group_key=None, layer="X_pca", seed=67, k=25, use_gpu=False, n_components=None):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
         self.k = k
         self.use_gpu = use_gpu
+        self.n_components = n_components
 
         if self.use_gpu:
             self.DISTANCES_UNS_KEY = "X_gloscope_cuml_distances"
         else:
             self.DISTANCES_UNS_KEY = "X_gloscope_pynndescent_distances"
     
-    def prepare_anndata(self, adata, n_components=10):
-        """
-        Prepares an AnnData object for further usage.
-
-        Parameters
-        ----------
-        adata : AnnData
-            The AnnData object.
-        n_components : int, default: 10
-            Number of components from the embedding to use (default from .obsm['X_pca']).
-        """
+    def prepare_anndata(self, adata):
         super().prepare_anndata(adata)
-
-        # Only keep the first n components of the embedding (10 by default)
-        adata.obsm[self.layer] = adata.obsm[self.layer][:, :n_components]   
 
     @staticmethod
     def kl_divergence(r_i, r_j, m_i, m_j, d) -> float:
@@ -2003,6 +1991,8 @@ class GloScope_py(SampleRepresentationMethod):
             Number of nearest neighbors for k-nearest neighbor calculation.
         self.layer : str, default: X_pca
             Key in `.obsm` for the embeddings.
+        self.n_components : int, default: None
+            Number of embedding components that should be kept.
 
         Returns
         -------
@@ -2012,9 +2002,15 @@ class GloScope_py(SampleRepresentationMethod):
         from itertools import combinations_with_replacement
         import pynndescent
 
+        data = self._get_data(self.layer)
+
+        # Subset the data if n_components is set
+        if self.n_components is not None:
+            data = data[:, :self.n_components]
+
         # Prepare the embedding (one embedding per sample)
         embedding_dict = {
-            s: np.asarray(self._get_data[self.layer][self.adata.obs[self.sample_key] == s]) for s in self.samples
+            s: np.asarray(data[self.adata.obs[self.sample_key] == s]) for s in self.samples
         }
 
         # Precompute kNN index for each sample and kNN distances for each samplle within its own sample
@@ -2083,6 +2079,8 @@ class GloScope_py(SampleRepresentationMethod):
             Number of nearest neighbors for k-nearest neighbor calculation.
         self.layer : str, default: X_pca
             Key in `.obsm` for the embeddings.
+        self.n_components : int, default: None
+            Number of embedding components that should be kept.
 
         Returns
         -------
@@ -2093,10 +2091,16 @@ class GloScope_py(SampleRepresentationMethod):
         import cupy as cp
         from cuml.neighbors import NearestNeighbors
 
+        data = self._get_data(self.layer)
+
+        # Subset the data if n_components is set
+        if self.n_components is not None:
+            data = data[:, :self.n_components]
+
         # Prepare the embedding (one embedding per sample)
         # --> convert into cupy arrays
         embedding_dict = {
-            g: cp.asarray(self._get_data[self.layer][self.adata.obs[self.sample_key] == g]) for g in self.samples
+            g: cp.asarray(data[self.adata.obs[self.sample_key] == g]) for g in self.samples
         }
 
         # Self kNN distances for each sample (r in KL)
