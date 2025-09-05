@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning][].
 
 - `GloScope.calculate_distance_matrix` now returns a NumPy array instead of a pandas DataFrame
 
+## 0.9.3
+
+### Changed
+
+-   Update rpy2 conversion in `Gloscope.prepare_anndata()`
+
+
 ## 0.9.2
 
 ### Changed
