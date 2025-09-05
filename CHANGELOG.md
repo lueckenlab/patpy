@@ -8,11 +8,22 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.10.0
+
+### Added
+
+- `GloScope_py` sample representation method (reimplementation of the original GloScope in Python for CPU and GPU)
+
+### Changed
+
+- `GloScope.calculate_distance_matrix` now returns a NumPy array instead of a pandas DataFrame
+
 ## 0.9.3
 
 ### Changed
 
 -   Update rpy2 conversion in `Gloscope.prepare_anndata()`
+
 
 ## 0.9.2
 

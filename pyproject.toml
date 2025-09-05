@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "patpy"
-version = "0.9.3"
+version = "0.10.0"
 description = "A toolbox for patient or sample representation from single-cell data"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -64,6 +64,13 @@ optional-dependencies.doc = [
   "sphinx-tabs",
   "sphinxcontrib-bibtex>=1",
   "sphinxext-opengraph",
+]
+optional-dependencies.gloscope_py_cpu = [
+  "pynndescent",
+]
+optional-dependencies.gloscope_py_gpu = [
+  "cuml",
+  "cupy",
 ]
 optional-dependencies.mrvi = [
   "scvi-tools>=1.2",
