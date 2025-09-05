@@ -12,6 +12,7 @@ from .sample_representation import (
     CellGroupComposition,
     DiffusionEarthMoverDistance,
     GloScope,
+    GloScope_py,
     GroupedPseudobulk,
     MrVI,
     Pseudobulk,
