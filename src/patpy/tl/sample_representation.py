@@ -1929,6 +1929,11 @@ class GloScope(SampleRepresentationMethod):
 
 
 class GloScope_py(SampleRepresentationMethod):
+    """GloScope implementation in Python for CPU and GPU
+
+    Source publication: https://doi.org/10.1186/s13059-024-03398-1
+    """
+
     def __init__(self, sample_key, cell_group_key=None, layer="X_pca", seed=67, k=25, use_gpu=False, n_components=None):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
         self.k = k
@@ -1939,15 +1944,13 @@ class GloScope_py(SampleRepresentationMethod):
             self.DISTANCES_UNS_KEY = "X_gloscope_cuml_distances"
         else:
             self.DISTANCES_UNS_KEY = "X_gloscope_pynndescent_distances"
-    
-    def prepare_anndata(self, adata):
-        super().prepare_anndata(adata)
 
     @staticmethod
     def kl_divergence(r_i, r_j, m_i, m_j, d) -> float:
         """
         Calculates KL(H_i || H_j) (Kullback-Leibler divergence) based on pre-calculated kNN distances.
-        The formula is taken from the paper `Visualizing scRNA-Seq data at population scale with GloScope`
+
+        The formula is taken from the paper "Visualizing scRNA-Seq data at population scale with GloScope"
         (https://doi.org/10.1186/s13059-024-03398-1).
 
         Parameters
@@ -1978,8 +1981,7 @@ class GloScope_py(SampleRepresentationMethod):
 
     def calculate_distance_matrix_pynndescent(self):
         """
-        Calculates the symmetric Kullback-Leibler distance matrix between samples in the AnnData object
-        using PyNNDescent.
+        Calculates the symmetric Kullback-Leibler divergence using approximate kNN distances.
 
         Parameters
         ----------
@@ -2000,18 +2002,17 @@ class GloScope_py(SampleRepresentationMethod):
             The symmetric Kullback-Leibler distance matrix (samples x samples).
         """
         from itertools import combinations_with_replacement
+
         import pynndescent
 
         data = self._get_data()
 
         # Subset the data if n_components is set
         if self.n_components is not None:
-            data = data[:, :self.n_components]
+            data = data[:, : self.n_components]
 
         # Prepare the embedding (one embedding per sample)
-        embedding_dict = {
-            s: np.asarray(data[self.adata.obs[self.sample_key] == s]) for s in self.samples
-        }
+        embedding_dict = {s: np.asarray(data[self.adata.obs[self.sample_key] == s]) for s in self.samples}
 
         # Precompute kNN index for each sample and kNN distances for each samplle within its own sample
         #   --> Index can be used multiple times, which helps with the runtime
@@ -2037,8 +2038,8 @@ class GloScope_py(SampleRepresentationMethod):
                 distances.loc[s_i, s_j] = 0
                 continue
 
-            data_i = embedding_dict[s_i]   # Get embedding for s_i
-            data_j = embedding_dict[s_j]   # Get embedding for s_j
+            data_i = embedding_dict[s_i]  # Get embedding for s_i
+            data_j = embedding_dict[s_j]  # Get embedding for s_j
 
             # Get kNN distances of S_i in S_j (use precomputed index of s_j)
             _, dist_ij = index_dict[s_j].query(data_i, k=self.k)
@@ -2066,8 +2067,7 @@ class GloScope_py(SampleRepresentationMethod):
 
     def calculate_distance_matrix_cuml(self):
         """
-        Calculates symmetric Kullback-Leibler distance matrix between samples in the AnnData object
-        using RAPIDS cuML NearestNeighbors (GPU).
+        Calculates symmetric Kullback-Leibler divergence using RAPIDS cuML NearestNeighbors on GPU.
 
         Parameters
         ----------
@@ -2088,6 +2088,7 @@ class GloScope_py(SampleRepresentationMethod):
             The symmetric Kullback-Leibler distance matrix (samples x samples).
         """
         from itertools import combinations_with_replacement
+
         import cupy as cp
         from cuml.neighbors import NearestNeighbors
 
@@ -2095,19 +2096,17 @@ class GloScope_py(SampleRepresentationMethod):
 
         # Subset the data if n_components is set
         if self.n_components is not None:
-            data = data[:, :self.n_components]
+            data = data[:, : self.n_components]
 
         # Prepare the embedding (one embedding per sample)
         # --> convert into cupy arrays
-        embedding_dict = {
-            g: cp.asarray(data[self.adata.obs[self.sample_key] == g]) for g in self.samples
-        }
+        embedding_dict = {g: cp.asarray(data[self.adata.obs[self.sample_key] == g]) for g in self.samples}
 
         # Self kNN distances for each sample (r in KL)
         knn_self_dists = {}
 
         for sample, X in embedding_dict.items():
-            nn = NearestNeighbors(n_neighbors=self.k, metric='euclidean')
+            nn = NearestNeighbors(n_neighbors=self.k, metric="euclidean")
             nn.fit(X)
             dists, _ = nn.kneighbors(X)
             knn_self_dists[sample] = cp.asnumpy(dists[:, -1])  # Convert back to numpy array
@@ -2124,17 +2123,17 @@ class GloScope_py(SampleRepresentationMethod):
                 distances.loc[s_i, s_j] = 0
                 continue
 
-            data_i = embedding_dict[s_i]   # Get embedding for s_i
-            data_j = embedding_dict[s_j]   # Get embedding for s_i
+            data_i = embedding_dict[s_i]  # Get embedding for s_i
+            data_j = embedding_dict[s_j]  # Get embedding for s_i
 
             # Get kNN distances of S_i in S_j
-            nn_j = NearestNeighbors(n_neighbors=self.k, metric='euclidean')
+            nn_j = NearestNeighbors(n_neighbors=self.k, metric="euclidean")
             nn_j.fit(data_j)
             dists_ij, _ = nn_j.kneighbors(data_i)
             dists_ij = cp.asnumpy(dists_ij[:, -1])
 
             # Get kNN distances of S_j in S_i
-            nn_i = NearestNeighbors(n_neighbors=self.k, metric='euclidean')
+            nn_i = NearestNeighbors(n_neighbors=self.k, metric="euclidean")
             nn_i.fit(data_i)
             dists_ji, _ = nn_i.kneighbors(data_j)
             dists_ji = cp.asnumpy(dists_ji[:, -1])
@@ -2158,6 +2157,7 @@ class GloScope_py(SampleRepresentationMethod):
         return distances
 
     def calculate_distance_matrix(self, force: bool = False):
+        """Calculate symmetric Kullback-Leibler divergence between samples using GloScope approach"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
