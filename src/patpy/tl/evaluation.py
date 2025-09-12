@@ -3,8 +3,8 @@ import warnings
 import numpy as np
 import pandas as pd
 import scanpy as sc
-from scipy.stats import trim_mean
 from scipy import stats
+from scipy.stats import trim_mean
 
 from patpy.tl._types import _EVALUATION_METHODS, _NORMALIZATION_TYPES, _PREDICTION_TASKS
 
@@ -119,8 +119,8 @@ def _get_null_distances_distribution(
 
 def _identity_up_to_suffix(name, names) -> list:
     """Returns true if name is identical to any of the names in names, ignoring the suffixes"""
-    cropped_name = name[:name.rfind("_")]
-    return [other_name[:other_name.rfind("_")] == cropped_name for other_name in names]
+    cropped_name = name[: name.rfind("_")]
+    return [other_name[: other_name.rfind("_")] == cropped_name for other_name in names]
 
 
 def test_distances_significance(
@@ -540,6 +540,7 @@ def evaluate_representation(
 
     return result
 
+
 def _get_col_from_adata(adata, col) -> pd.Series:
     """Extract a column from .obs or .X of the annotated object"""
     if col in adata.obs.columns:
@@ -548,9 +549,11 @@ def _get_col_from_adata(adata, col) -> pd.Series:
         return pd.Series(adata[:, col].X.toarray().flatten(), index=adata.obs_names)
 
 
-def trajectory_correlation(meta_adata, root_sample,trajectory_variable, representations=None, inverse_trajectory=False, force=False):
+def trajectory_correlation(
+    meta_adata, root_sample, trajectory_variable, representations=None, inverse_trajectory=False, force=False
+):
     """Compute the correlation between the trajectory variable and the diffusion pseudotime for each representation
-    
+
     Parameters
     ----------
     meta_adata: AnnData
@@ -566,7 +569,7 @@ def trajectory_correlation(meta_adata, root_sample,trajectory_variable, represen
         Set to True if start of the trajectory is the highest value of the variable.
     force: bool, optional
         If True, the diffusion pseudotime will be recomputed even if it already exists.
-    
+
     Returns
     -------
     pd.DataFrame
@@ -596,21 +599,21 @@ def trajectory_correlation(meta_adata, root_sample,trajectory_variable, represen
         try:
             if not force and f"{representation}_dpt_pseudotime" in meta_adata.obs.columns:
                 print(f"Diffmap for {representation} already computed, skipping")
-                
+
             else:
                 print(f"Computing diffmap for {representation}")
                 ep.tl.diffmap(meta_adata, neighbors_key=f"{representation}_neighbors")
                 meta_adata.obsm[f"X_{representation}_diffmap"] = meta_adata.obsm["X_diffmap"]
                 ep.tl.dpt(meta_adata, neighbors_key=f"{representation}_neighbors")
                 meta_adata.obs.rename(columns={"dpt_pseudotime": f"{representation}_dpt_pseudotime"}, inplace=True)
-        
+
         except Exception as e:
             print(f"Error computing diffmap for {representation}: {e}")
             meta_adata.obs[f"{representation}_dpt_pseudotime"] = np.zeros(len(meta_adata.obs))
             continue
 
         target = _get_col_from_adata(meta_adata, trajectory_variable)
-        
+
         corr, _ = stats.spearmanr(target, meta_adata.obs[f"{representation}_dpt_pseudotime"], nan_policy="omit")
 
         if inverse_trajectory:
@@ -618,13 +621,15 @@ def trajectory_correlation(meta_adata, root_sample,trajectory_variable, represen
         trajectory_correlations.append(corr)
 
     trajectory_metric_df = pd.DataFrame(trajectory_correlations, index=representations, columns=["correlation"])
-    
+
     return trajectory_metric_df.sort_values("correlation", ascending=False)
 
 
-def knn_prediction_score(meta_adata, benchmark_schema: dict, representations=None, n_neighbors=3, reverse_technical_score=True):
+def knn_prediction_score(
+    meta_adata, benchmark_schema: dict, representations=None, n_neighbors=3, reverse_technical_score=True
+):
     """Compute the KNN prediction score for each representation and covariate type
-    
+
     Parameters
     ----------
     meta_adata: AnnData
@@ -672,7 +677,7 @@ def knn_prediction_score(meta_adata, benchmark_schema: dict, representations=Non
 
     results = []
 
-    for representation in representations: 
+    for representation in representations:
         for covariate_type in benchmark_schema:
             for col in benchmark_schema[covariate_type]:
                 task = benchmark_schema[covariate_type][col]
@@ -683,11 +688,7 @@ def knn_prediction_score(meta_adata, benchmark_schema: dict, representations=Non
                         distances = distances.loc[meta_adata.obs_names][meta_adata.obs_names].values
 
                     result = evaluate_representation(
-                        distances=distances,
-                        target=meta_adata.obs[col],
-                        method="knn",
-                        task=task,
-                        n_neighbors=3
+                        distances=distances, target=meta_adata.obs[col], method="knn", task=task, n_neighbors=3
                     )
                 except Exception as e:
                     print("Representation:", representation)
@@ -695,7 +696,7 @@ def knn_prediction_score(meta_adata, benchmark_schema: dict, representations=Non
                     print("Task:", task)
                     print("Error:", e)
                     print()
-                    raise(e)
+                    raise (e)
                     continue
 
                 result["representation"] = representation
@@ -705,12 +706,12 @@ def knn_prediction_score(meta_adata, benchmark_schema: dict, representations=Non
                 # Inverse technical score to interpret them as batch effect removal
                 if covariate_type == "technical":
                     result["score"] = 1 - result["score"]
-                
+
                 if result["metric"] == "spearman_r":
                     result["score"] = abs(result["score"])
-                
+
                 results.append(result)
-                
+
     return pd.DataFrame(results)
 
 
