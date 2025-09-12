@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.11.0
+
+### Added
+- Function `tl/evaluation/trajectory_correlation` to compute a corresponding SPARE metric
+- Function `tl/evaluation/knn_prediction_score` to compute a corresponding SPARE metric
+- Function `tl/evaluation/replicate_robustness` to compute a corresponding SPARE metric
+- Utils function `tl/evaluation/_get_col_from_adata`
+- Utils funciton `tl/evaluation/_identity_up_to_suffix`
+
+
 ## 0.10.0
 
 ### Added
