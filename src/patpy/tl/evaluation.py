@@ -607,7 +607,7 @@ def trajectory_correlation(
                 ep.tl.dpt(meta_adata, neighbors_key=f"{representation}_neighbors")
                 meta_adata.obs.rename(columns={"dpt_pseudotime": f"{representation}_dpt_pseudotime"}, inplace=True)
 
-        except Exception as e:
+        except (KeyError, ValueError, RuntimeError) as e:
             print(f"Error computing diffmap for {representation}: {e}")
             meta_adata.obs[f"{representation}_dpt_pseudotime"] = np.zeros(len(meta_adata.obs))
             continue
@@ -690,7 +690,7 @@ def knn_prediction_score(
                     result = evaluate_representation(
                         distances=distances, target=meta_adata.obs[col], method="knn", task=task, n_neighbors=3
                     )
-                except Exception as e:
+                except (KeyError, ValueError, RuntimeError) as e:
                     print("Representation:", representation)
                     print("Covariate:", col)
                     print("Task:", task)
