@@ -1,16 +1,16 @@
 {
   "template": "https://github.com/scverse/cookiecutter-scverse",
-  "commit": "94ef9fb6f9ad8cfe65a3d9575679c03c80c49cd1",
-  "checkout": "v0.5.0",
+  "commit": "d383d94fadff9e4e6fdb59d77c68cb900d7cedec",
+  "checkout": "v0.6.0",
   "context": {
     "cookiecutter": {
-      "project_name": "patient_representation",
-      "package_name": "patient_representation",
+      "project_name": "patpy",
+      "package_name": "patpy",
       "project_description": "Representing patients or samples from single-cell data",
       "author_full_name": "Vladimir Shitov",
       "author_email": "vladimir.shitov@helmholtz-munich.de",
       "github_user": "VladimirShitov",
-      "github_repo": "patient_representation",
+      "github_repo": "patpy",
       "license": "BSD 3-Clause License",
       "ide_integration": true,
       "_copy_without_render": [
@@ -36,7 +36,7 @@
         "trim_blocks": true
       },
       "_template": "https://github.com/scverse/cookiecutter-scverse",
-      "_commit": "94ef9fb6f9ad8cfe65a3d9575679c03c80c49cd1"
+      "_commit": "d383d94fadff9e4e6fdb59d77c68cb900d7cedec"
     }
   },
   "directory": null
