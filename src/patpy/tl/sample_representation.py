@@ -2028,7 +2028,7 @@ class GloScope_py(SampleRepresentationMethod):
 
         # Empty DataFrame for the result
         distances = pd.DataFrame(index=self.samples, columns=self.samples, dtype=float)
-        d = self.adata.obsm[self.layer].shape[1]  # Dimensionality of the embedding (needed for KL)
+        d = data.shape[1]  # Dimensionality of the embedding (needed for KL)
 
         # Iterate through all sample pairs (e.g., 'AB' -> 'AA', 'AB', 'BB')
         #   --> use combinations_with_replacement(), so only 'AB' and not 'AB', 'BA' is included
@@ -2113,7 +2113,7 @@ class GloScope_py(SampleRepresentationMethod):
 
         # Empty DataFrame for the result
         distances = pd.DataFrame(index=self.samples, columns=self.samples, dtype=float)
-        d = self.adata.obsm[self.layer].shape[1]  # Dimensionality of the embedding (needed for KL)
+        d = data.shape[1]  # Dimensionality of the embedding (needed for KL)
 
         # Iterate through all sample pairs (e.g., 'AB' -> 'AA', 'AB', 'BB')
         #   --> use combinations_with_replacement(), so only 'AB' and not 'AB', 'BA' is included
