@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.11.1
+
+### Fixed
+
+- Fix bug in `tl/sample_representation/GloScope_py` with always accessing layer in obsm instead of a general slot
+
 ## 0.11.0
 
 ### Added
