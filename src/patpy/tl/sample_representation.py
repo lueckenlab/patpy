@@ -1869,13 +1869,9 @@ class GloScope(SampleRepresentationMethod):
 
     def prepare_anndata(self, adata):
         """Prepare anndata for GloScope calculation"""
-        import anndata2ri
-        import rpy2.robjects as robjects
+        from rpy2 import robjects
         from rpy2.robjects import numpy2ri, pandas2ri
         from rpy2.robjects.packages import importr
-
-        # Activate automatic conversion between pandas/numpy/AnnData and R objects
-        anndata2ri.activate()
 
         with (robjects.default_converter + numpy2ri.converter + pandas2ri.converter).context():
             super().prepare_anndata(adata=adata)
@@ -1887,7 +1883,7 @@ class GloScope(SampleRepresentationMethod):
     def calculate_distance_matrix(self, force: bool = False):
         """Calculate distances between samples represented as GloScope embeddings"""
         import rpy2.robjects as robjects
-        from rpy2.robjects import pandas2ri
+        from rpy2.robjects import numpy2ri, pandas2ri
         from rpy2.robjects.vectors import StrVector
 
         distances = super().calculate_distance_matrix(force=force)
@@ -1897,28 +1893,33 @@ class GloScope(SampleRepresentationMethod):
 
         embedding_df = pd.DataFrame(self._get_data(), index=self.adata.obs_names)
 
-        # Assign embedding and sample IDs to R environment
-        robjects.globalenv["embedding_df"] = pandas2ri.py2rpy(embedding_df)
-        robjects.globalenv["sample_ids"] = StrVector(self.adata.obs[self.sample_key].values)
+        with (robjects.default_converter + numpy2ri.converter + pandas2ri.converter).context():
+            # Assign embedding and sample IDs to R environment
+            robjects.globalenv["embedding_df"] = pandas2ri.py2rpy(embedding_df)
+            robjects.globalenv["sample_ids"] = StrVector(self.adata.obs[self.sample_key].values)
 
-        print("Calculating GloScope distance matrix")
+            print("Calculating GloScope distance matrix")
 
-        # Call GloScope function in R
-        robjects.r(
-            f"""
-        dist_matrix <- gloscope(
-            embedding_df,
-            sample_ids,
-            dens = '{self.dens}',
-            dist_mat = '{self.dist_mat}',
-            k = {self.k},
-            BPPARAM = BiocParallel::MulticoreParam(workers = {self.n_workers}, RNGseed = {self.seed})
-        )
-        """
-        )
+            # Call GloScope function in R
+            robjects.r(
+                f"""
+            dist_matrix <- gloscope(
+                embedding_df,
+                sample_ids,
+                dens = '{self.dens}',
+                dist_mat = '{self.dist_mat}',
+                k = {self.k},
+                BPPARAM = BiocParallel::MulticoreParam(workers = {self.n_workers}, RNGseed = {self.seed})
+            )
+            """
+            )
 
-        # Retrieve the distance matrix from R environment
-        distances = robjects.r("as.data.frame(dist_matrix)")
+            # Retrieve the distance matrix from R environment
+            distances = robjects.r("as.data.frame(dist_matrix)")
+
+        # Sometimes, gloscope produces small negative distances
+        # According to developers, they can be treated as zeros: https://github.com/epurdom/GloScope/issues/3
+        distances[distances < 0] = 0
 
         self.sample_representation = distances
         self.samples = list(self.sample_representation.index)
