@@ -1916,11 +1916,11 @@ class GloScope(SampleRepresentationMethod):
 
             # Retrieve the distance matrix from R environment
             distances = robjects.r("as.data.frame(dist_matrix)")
-  
+
         # Sometimes, gloscope produces small negative distances
         # According to developers, they can be treated as zeros: https://github.com/epurdom/GloScope/issues/3
         distances[distances < 0] = 0
-        
+
         self.sample_representation = distances
         self.samples = list(self.sample_representation.index)
 
