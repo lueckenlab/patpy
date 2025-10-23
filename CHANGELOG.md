@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.11.2
+
+### Added
+
+- GloScope tutorial
+
+### Changed
+
+- Update the rpy2 interface for R implementation of GloScope
+
 ## 0.9.2
 
 ### Changed
