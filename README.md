@@ -113,7 +113,7 @@ Shitov, V. (2024). patpy – sample-level analysis framework for single-cell dat
   title = {patpy – sample-level analysis framework for single-cell data},
   year = {2024},
   url = {https://github.com/lueckenlab/patpy/},
-  note = {Version 0.11.1}
+  note = {Version 0.11.2}
 }
 ```
 

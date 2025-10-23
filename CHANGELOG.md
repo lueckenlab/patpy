@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.11.2
+
+### Added
+
+- GloScope tutorial
+
+### Changed
+
+- Update the rpy2 interface for R implementation of GloScope
+
 ## 0.11.1
 
 ### Fixed
@@ -22,7 +32,6 @@ and this project adheres to [Semantic Versioning][].
 - Function `tl/evaluation/replicate_robustness` to compute a corresponding SPARE metric
 - Utils function `tl/evaluation/_get_col_from_adata`
 - Utils funciton `tl/evaluation/_identity_up_to_suffix`
-
 
 ## 0.10.0
 
@@ -39,7 +48,6 @@ and this project adheres to [Semantic Versioning][].
 ### Changed
 
 -   Update rpy2 conversion in `Gloscope.prepare_anndata()`
-
 
 ## 0.9.2
 
