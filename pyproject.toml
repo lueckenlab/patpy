@@ -65,6 +65,13 @@ optional-dependencies.doc = [
   "sphinxcontrib-bibtex>=1",
   "sphinxext-opengraph",
 ]
+optional-dependencies.gloscope_py_cpu = [
+  "pynndescent",
+]
+optional-dependencies.gloscope_py_gpu = [
+  "cuml",
+  "cupy",
+]
 optional-dependencies.mrvi = [
   "scvi-tools>=1.2",
   "torch>=1.13",
