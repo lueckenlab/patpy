@@ -3,6 +3,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import scanpy as sc
+from scipy import stats
 from scipy.stats import trim_mean
 
 from patpy.tl._types import _EVALUATION_METHODS, _NORMALIZATION_TYPES, _PREDICTION_TASKS
@@ -114,6 +115,12 @@ def _get_null_distances_distribution(
         statistics[i] = trim_mean(norm_distances, trimmed_fraction)
 
     return statistics
+
+
+def _identity_up_to_suffix(name, names) -> list:
+    """Returns true if name is identical to any of the names in names, ignoring the suffixes"""
+    cropped_name = name[: name.rfind("_")]
+    return [other_name[: other_name.rfind("_")] == cropped_name for other_name in names]
 
 
 def test_distances_significance(
@@ -532,3 +539,199 @@ def evaluate_representation(
     result["method"] = method
 
     return result
+
+
+def _get_col_from_adata(adata, col) -> pd.Series:
+    """Extract a column from .obs or .X of the annotated object"""
+    if col in adata.obs.columns:
+        return adata.obs[col]
+    else:
+        return pd.Series(adata[:, col].X.toarray().flatten(), index=adata.obs_names)
+
+
+def trajectory_correlation(
+    meta_adata, root_sample, trajectory_variable, representations=None, inverse_trajectory=False, force=False
+):
+    """Compute the correlation between the trajectory variable and the diffusion pseudotime for each representation
+
+    Parameters
+    ----------
+    meta_adata: AnnData
+        The annotated data object with sample metadata
+    root_sample: str
+        The root sample to use for the diffusion pseudotime. It must be a presumable start of the trajectory.
+        For example, the healthiest patient if trajectory is the disease severity or the youngest patient if trajectory is the age.
+    trajectory_variable: str
+        The covariate in `meta_adata` containing the trajectory information. Must contain numbers or ordered categories.
+    representations: list of str, optional
+        The representations to compute the correlation with. If None, all representations in meta_adata.uns["sample_representations"] will be used.
+    inverse_trajectory: bool, optional
+        Set to True if start of the trajectory is the highest value of the variable.
+    force: bool, optional
+        If True, the diffusion pseudotime will be recomputed even if it already exists.
+
+    Returns
+    -------
+    pd.DataFrame
+        A dataframe with the correlation between the trajectory variable and the diffusion pseudotime for each representation.
+
+    Sets
+    ----
+    meta_adata.uns["iroot"]
+        The index of the root sample in `meta_adata.obs_names`.
+    meta_adata.obs[f"{representation}_dpt_pseudotime"]
+        The diffusion pseudotime for each representation.
+    meta_adata.obs[f"{representation}_dpt_pseudotime"]
+        The diffusion pseudotime for each representation.
+    meta_adata.obsm[f"X_{representation}_diffmap"]
+        The diffusion map for each representation.
+    """
+    import ehrapy as ep
+
+    if representations is None:
+        representations = meta_adata.uns["sample_representations"]
+
+    meta_adata.uns["iroot"] = np.flatnonzero(meta_adata.obs_names == root_sample)[0]
+
+    trajectory_correlations = []
+
+    for representation in representations:
+        try:
+            if not force and f"{representation}_dpt_pseudotime" in meta_adata.obs.columns:
+                print(f"Diffmap for {representation} already computed, skipping")
+
+            else:
+                print(f"Computing diffmap for {representation}")
+                ep.tl.diffmap(meta_adata, neighbors_key=f"{representation}_neighbors")
+                meta_adata.obsm[f"X_{representation}_diffmap"] = meta_adata.obsm["X_diffmap"]
+                ep.tl.dpt(meta_adata, neighbors_key=f"{representation}_neighbors")
+                meta_adata.obs.rename(columns={"dpt_pseudotime": f"{representation}_dpt_pseudotime"}, inplace=True)
+
+        except (KeyError, ValueError, RuntimeError) as e:
+            print(f"Error computing diffmap for {representation}: {e}")
+            meta_adata.obs[f"{representation}_dpt_pseudotime"] = np.zeros(len(meta_adata.obs))
+            continue
+
+        target = _get_col_from_adata(meta_adata, trajectory_variable)
+
+        corr, _ = stats.spearmanr(target, meta_adata.obs[f"{representation}_dpt_pseudotime"], nan_policy="omit")
+
+        if inverse_trajectory:
+            corr = -corr
+        trajectory_correlations.append(corr)
+
+    trajectory_metric_df = pd.DataFrame(trajectory_correlations, index=representations, columns=["correlation"])
+
+    return trajectory_metric_df.sort_values("correlation", ascending=False)
+
+
+def knn_prediction_score(
+    meta_adata, benchmark_schema: dict, representations=None, n_neighbors=3, reverse_technical_score=True
+):
+    """Compute the KNN prediction score for each representation and covariate type
+
+    Parameters
+    ----------
+    meta_adata: AnnData
+        The annotated data object with sample metadata
+    benchmark_schema: dict
+        The benchmark schema to use. Must have the following structure:
+        - Keys must be "relevant", "technical", and "contextual".
+        - Values for must be a dictionary with keys being the covariate names.
+        - Values for the second layer must be a string being the task type: "classification", "regression" or "ranking".
+        For example:
+        {
+            "relevant": {
+                "Disease_severity": "ranking",
+                "Swab_result": "classification",
+                "forced_expiratory_volume_in_1s": "regression",
+            },
+            "technical": {
+                "Site": "classification",
+                "Batch": "classification",
+                "n_cells": "regression",
+            },
+            "contextual": {
+                "Age": "regression",
+            },
+        }
+    representations: list of str, optional
+        The representations to compute the score for. If None, all representations in meta_adata.uns["sample_representations"] will be used.
+    n_neighbors: int, optional
+        The number of neighbors to use for the KNN prediction.
+    reverse_technical_score: bool, optional
+        If True, the technical scores will be reversed to interpret them as batch effect removal.
+
+    Returns
+    -------
+    pd.DataFrame
+        A dataframe with the KNN prediction score for each representation and covariate type. Columns are:
+        - "representation": the representation name
+        - "covariate": the covariate name
+        - "covariate_type": the covariate type
+        - "metric": the metric used to compute the score
+        - "score": the KNN prediction score
+    """
+    if representations is None:
+        representations = meta_adata.uns["sample_representations"]
+
+    results = []
+
+    for representation in representations:
+        for covariate_type in benchmark_schema:
+            for col in benchmark_schema[covariate_type]:
+                task = benchmark_schema[covariate_type][col]
+                try:
+                    distances = meta_adata.obsm[f"{representation}_distances"]
+
+                    if isinstance(distances, pd.DataFrame):
+                        distances = distances.loc[meta_adata.obs_names][meta_adata.obs_names].values
+
+                    result = evaluate_representation(
+                        distances=distances, target=meta_adata.obs[col], method="knn", task=task, n_neighbors=3
+                    )
+                except (KeyError, ValueError, RuntimeError) as e:
+                    print("Representation:", representation)
+                    print("Covariate:", col)
+                    print("Task:", task)
+                    print("Error:", e)
+                    print()
+                    raise (e)
+                    continue
+
+                result["representation"] = representation
+                result["covariate"] = col
+                result["covariate_type"] = covariate_type
+
+                # Inverse technical score to interpret them as batch effect removal
+                if covariate_type == "technical":
+                    result["score"] = 1 - result["score"]
+
+                if result["metric"] == "spearman_r":
+                    result["score"] = abs(result["score"])
+
+                results.append(result)
+
+    return pd.DataFrame(results)
+
+
+def replicate_robustness(distances_df: pd.DataFrame, replicate_identity_function=_identity_up_to_suffix) -> float:
+    """Compute the replicate robustness metric, which checks how close the repliicate samples are to each other
+
+    Parameters
+    ----------
+    distances_df: pd.DataFrame
+        The distances between samples. Must be a data frame with samples names in index and columns.
+    replicate_identity_function: Callable
+        A function that takes names of two samples and returns True if they are replicates
+
+    """
+    replicate_indexes = np.zeros(distances_df.shape[0])
+
+    for i, col in enumerate(distances_df.columns):
+        distances_df[col] = distances_df[col].astype(float)
+        dists_to_others = distances_df[col].sort_values(ascending=True)[1:]
+        replicate_idx = np.where(replicate_identity_function(col, dists_to_others.index))[0].item()
+        replicate_indexes[i] = replicate_idx
+
+    return 1 - np.mean(replicate_indexes)

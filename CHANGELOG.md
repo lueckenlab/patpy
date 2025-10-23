@@ -18,6 +18,37 @@ and this project adheres to [Semantic Versioning][].
 
 - Update the rpy2 interface for R implementation of GloScope
 
+## 0.11.1
+
+### Fixed
+
+- Fix bug in `tl/sample_representation/GloScope_py` with always accessing layer in obsm instead of a general slot
+
+## 0.11.0
+
+### Added
+- Function `tl/evaluation/trajectory_correlation` to compute a corresponding SPARE metric
+- Function `tl/evaluation/knn_prediction_score` to compute a corresponding SPARE metric
+- Function `tl/evaluation/replicate_robustness` to compute a corresponding SPARE metric
+- Utils function `tl/evaluation/_get_col_from_adata`
+- Utils funciton `tl/evaluation/_identity_up_to_suffix`
+
+## 0.10.0
+
+### Added
+
+- `GloScope_py` sample representation method (reimplementation of the original GloScope in Python for CPU and GPU)
+
+### Changed
+
+- `GloScope.calculate_distance_matrix` now returns a NumPy array instead of a pandas DataFrame
+
+## 0.9.3
+
+### Changed
+
+-   Update rpy2 conversion in `Gloscope.prepare_anndata()`
+
 ## 0.9.2
 
 ### Changed
