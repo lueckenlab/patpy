@@ -2256,3 +2256,49 @@ class MultiMil(SampleRepresentationMethod):
         train_kwargs = {"lr": self.learning_rate, "max_epochs": self.max_epochs}
         self.mil.train(**train_kwargs)
         self.mil.get_model_output()
+
+    def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
+        """Calculate distances between samples.
+
+        Parameters
+        ----------
+        force : bool = False
+            If True, recalculate the distance matrix even if it exists.
+
+        Returns
+        -------
+        distances : np.ndarray
+            Matrix of distances between patients.
+
+        .
+        """
+        import multimil as mtm
+
+        distances = super().calculate_distance_matrix(force=force)
+        if distances is not None:
+            return distances
+        distance_metric = valid_distance_metric(dist)
+
+        pb = mtm.utils.get_sample_representations(
+            self.adata,
+            sample_key=self.sample_key,
+        )
+
+        self.sample_representation = pb.X
+        distances = scipy.spatial.distance.pdist(self.sample_representation, metric=distance_metric)
+        distances = scipy.spatial.distance.squareform(distances)
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        self.adata.uns["multimil_parameters"] = {
+            "sample_key": self.sample_key,
+            "layer": self.layer,
+            "seed": self.seed,
+            "classification": self.classification,
+            "regression": self.regression,
+            "ordinal_regression": self.ordinal_regression,
+            "class_loss_coef": self.class_loss_coef,
+            "regression_loss_coef": self.regression_loss_coef,
+            "learning_rate": self.learning_rate,
+        }
+
+        return distances

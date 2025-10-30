@@ -15,6 +15,7 @@ from .sample_representation import (
     GloScope_py,
     GroupedPseudobulk,
     MrVI,
+    MultiMil,
     Pseudobulk,
     RandomVector,
     SampleRepresentationMethod,
