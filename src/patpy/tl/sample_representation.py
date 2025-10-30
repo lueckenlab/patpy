@@ -2217,3 +2217,42 @@ class MultiMil(SampleRepresentationMethod):
         self.max_epochs = max_epochs
         self.mil = None
         self.sample_representation = None
+
+    def prepare_anndata(self, adata):
+        """Prepare data, set up and train a MultiMIL model on the whole dataset.
+
+        Parameters
+        ----------
+        adata : AnnData:
+            Annotated data matrix.
+
+        """
+        import multimil as mtm
+
+        super().prepare_anndata(adata=adata)
+
+        self.adata = self._move_layer_to_X()
+
+        categorical_covariate_keys = self.classification + [self.sample_key]
+
+        mtm.model.MILClassifier.setup_anndata(
+            self.adata,
+            categorical_covariate_keys=categorical_covariate_keys if len(categorical_covariate_keys) else None,
+            continuous_covariate_keys=self.regression if len(self.regression) else None,
+            ordinal_regression_order=self.ordinal_regression if len(self.ordinal_regression) else None,
+        )
+
+        self.mil = mtm.model.MILClassifier(
+            self.adata,
+            classification=self.classification if len(self.classification) else None,
+            regression=self.regression if len(self.regression) else None,
+            ordinal_regression=self.ordinal_regression if len(self.ordinal_regression) else None,
+            sample_key=self.sample_key,
+            class_loss_coef=self.class_loss_coef,
+            regression_loss_coef=self.regression_loss_coef,
+            **self.mil_kwargs,
+        )
+
+        train_kwargs = {"lr": self.learning_rate, "max_epochs": self.max_epochs}
+        self.mil.train(**train_kwargs)
+        self.mil.get_model_output()
