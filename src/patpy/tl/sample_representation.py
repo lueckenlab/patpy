@@ -2178,3 +2178,42 @@ class GloScope_py(SampleRepresentationMethod):
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances.to_numpy()
 
         return distances.to_numpy()
+
+
+class MultiMil(SampleRepresentationMethod):
+    """Multi-task Multiple Instance Learning (https://github.com/theislab/multimil) sample representation.
+
+    This integrates  to learn cell-level
+    representations with attention and then aggregates them to sample-level
+    embeddings, finally producing a sample-by-sample distance matrix.
+    """
+
+    DISTANCES_UNS_KEY = "X_multimil_distances"
+
+    def __init__(
+        self,
+        sample_key: str,
+        cell_group_key: str | None = None,
+        layer: str | None = None,
+        seed: int = 67,
+        classification: list[str] | None = None,
+        regression: list[str] | None = None,
+        ordinal_regression: list[str] | None = None,
+        class_loss_coef: float = 0.1,
+        regression_loss_coef: float = 0.1,
+        learning_rate: float = 1e-3,
+        max_epochs: int = 200,
+        **mil_kwargs,
+    ):
+        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
+
+        self.classification = classification or []
+        self.regression = regression or []
+        self.ordinal_regression = ordinal_regression or []
+        self.class_loss_coef = class_loss_coef
+        self.regression_loss_coef = regression_loss_coef
+        self.learning_rate = learning_rate
+        self.mil_kwargs = mil_kwargs
+        self.max_epochs = max_epochs
+        self.mil = None
+        self.sample_representation = None
