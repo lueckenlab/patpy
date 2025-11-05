@@ -1930,7 +1930,7 @@ class GloScope(SampleRepresentationMethod):
             distances = robjects.r("as.data.frame(dist_matrix)")
 
         self.samples = list(distances.index)
-        
+
         self.sample_representation = _remove_negative_distances(distances.to_numpy())
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = self.sample_representation
