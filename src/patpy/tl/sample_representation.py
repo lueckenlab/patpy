@@ -96,6 +96,18 @@ def make_matrix_symmetric(matrix):
         return symmetrize(matrix)
 
 
+def _remove_negative_distances(distances: np.ndarray) -> np.ndarray:
+    """Replace negative distances with zeros"""
+    # Sometimes, gloscope produces small negative distances
+    # According to developers, they can be treated as zeros: https://github.com/epurdom/GloScope/issues/3
+    # Negative distances cause errors in the downstream methods, so we replace them with zeros here
+
+    if n_negative := (distances < 0).sum():
+        warnings.warn(f"Found {n_negative} negative distances. Replacing them with zeros.", stacklevel=2)
+
+    return np.maximum(distances, 0)
+
+
 def create_colormap(df, col, palette="Spectral"):
     """Create a color map for the unique values of the column `col` of data frame `df`"""
     unique_values = df[col].unique()
@@ -1917,16 +1929,13 @@ class GloScope(SampleRepresentationMethod):
             # Retrieve the distance matrix from R environment
             distances = robjects.r("as.data.frame(dist_matrix)")
 
-        # Sometimes, gloscope produces small negative distances
-        # According to developers, they can be treated as zeros: https://github.com/epurdom/GloScope/issues/3
-        distances[distances < 0] = 0
+        self.samples = list(distances.index)
 
-        self.sample_representation = distances
-        self.samples = list(self.sample_representation.index)
+        self.sample_representation = _remove_negative_distances(distances.to_numpy())
 
-        self.adata.uns[self.DISTANCES_UNS_KEY] = distances.to_numpy()
+        self.adata.uns[self.DISTANCES_UNS_KEY] = self.sample_representation
 
-        return distances.to_numpy()
+        return self.sample_representation
 
 
 class GloScope_py(SampleRepresentationMethod):
@@ -2164,17 +2173,14 @@ class GloScope_py(SampleRepresentationMethod):
         if distances is not None:
             return distances
 
-        # If use_gpu=True use cuML (else PyNNDescent) for the matrix calculation
         if self.use_gpu:
             distances = self.calculate_distance_matrix_cuml()
         else:
             distances = self.calculate_distance_matrix_pynndescent()
 
-        self.sample_representation = distances
-        self.samples = list(self.sample_representation.index)
+        self.samples = list(distances.index)
+        self.sample_representation = _remove_negative_distances(distances.to_numpy())
 
-        # The calculation methods return a DataFrame
-        # --> convert to a numpy array for saving/returning
-        self.adata.uns[self.DISTANCES_UNS_KEY] = distances.to_numpy()
+        self.adata.uns[self.DISTANCES_UNS_KEY] = self.sample_representation
 
-        return distances.to_numpy()
+        return self.sample_representation

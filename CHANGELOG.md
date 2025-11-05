@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.11.3
+
+### Added
+
+- An utils function `_remove_negative_distances`
+
+### Changed
+
+- In Python implementations of GloScope, remove negative distances
+
 ## 0.11.2
 
 ### Added
