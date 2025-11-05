@@ -1929,14 +1929,13 @@ class GloScope(SampleRepresentationMethod):
             # Retrieve the distance matrix from R environment
             distances = robjects.r("as.data.frame(dist_matrix)")
 
-        distances = _remove_negative_distances(distances)
+        self.samples = list(distances.index)
+        
+        self.sample_representation = _remove_negative_distances(distances.to_numpy())
 
-        self.sample_representation = distances
-        self.samples = list(self.sample_representation.index)
+        self.adata.uns[self.DISTANCES_UNS_KEY] = self.sample_representation
 
-        self.adata.uns[self.DISTANCES_UNS_KEY] = distances.to_numpy()
-
-        return distances.to_numpy()
+        return self.sample_representation
 
 
 class GloScope_py(SampleRepresentationMethod):
