@@ -98,14 +98,13 @@ def make_matrix_symmetric(matrix):
 
 def _remove_negative_distances(distances: np.ndarray) -> np.ndarray:
     """Replace negative distances with zeros"""
-
     # Sometimes, gloscope produces small negative distances
     # According to developers, they can be treated as zeros: https://github.com/epurdom/GloScope/issues/3
     # Negative distances cause errors in the downstream methods, so we replace them with zeros here
 
     if n_negative := (distances < 0).sum():
         warnings.warn(f"Found {n_negative} negative distances. Replacing them with zeros.", stacklevel=2)
-    
+
     return np.maximum(distances, 0)
 
 
