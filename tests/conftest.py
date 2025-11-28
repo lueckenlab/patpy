@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from anndata import AnnData
+from scipy.spatial.distance import pdist, squareform
 
 from datasets.synthetic import bootstrap_genes
 
@@ -75,3 +76,12 @@ def nan_heavy_matrix():
             [np.nan, 8, np.nan],
         ]
     )
+
+
+@pytest.fixture
+def toy_distances():
+    """Creates a toy distance matrix and conditions array for evaluation tests."""
+    points = np.array([[0, 1], [1, 1], [2, 2], [3, 3]])
+    distances = squareform(pdist(points))
+    conditions = pd.Series(["control", "control", "case", "case"])
+    return distances, conditions
