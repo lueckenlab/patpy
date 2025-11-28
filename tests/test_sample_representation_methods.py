@@ -1,59 +1,20 @@
 import numpy as np
-import pandas as pd
 import pytest
-import scanpy as sc
-from anndata import AnnData
 
-from datasets.synthetic import bootstrap_genes
 from patpy.tl.sample_representation import (
     CellGroupComposition,
     GroupedPseudobulk,
     Pseudobulk,
     RandomVector,
+    calculate_average_without_nans,
 )
-
-
-@pytest.fixture(scope="session")
-def synthetic_adata():
-    """Build a small but structured AnnData object using synthetic bootstrapping utilities."""
-    rng = np.random.default_rng(0)
-    n_cells, n_genes = 60, 20
-
-    base_cell = rng.poisson(lam=6, size=n_genes) + 1
-    cells = [
-        bootstrap_genes(base_cell + rng.integers(0, 3, size=n_genes), noise_scale=0.05) for _ in range(n_cells)
-    ]
-
-    sample_pattern = np.repeat([f"sample_{i}" for i in range(6)], repeats=n_cells // 6)
-    cell_type_pattern = np.tile(
-        ["ct_a", "ct_b", "ct_c", "ct_a", "ct_b", "ct_c", "ct_a", "ct_b", "ct_c", "ct_a"],
-        reps=6,
-    )
-
-    adata = AnnData(
-        np.vstack(cells),
-        obs=pd.DataFrame(
-            {
-                "sample_id": sample_pattern,
-                "cell_type": cell_type_pattern,
-            }
-        ),
-        var=pd.DataFrame(index=[f"gene_{i}" for i in range(n_genes)]),
-    )
-    return adata
-
-
-@pytest.fixture(autouse=True)
-def reset_numpy_seed():
-    """Keep numpy RNG deterministic so distance-based tests are reproducible."""
-    np.random.seed(0)
 
 
 LIGHTWEIGHT_METHODS = [
     (Pseudobulk, {"layer": "X"}),
     (GroupedPseudobulk, {"layer": "X"}),
     (RandomVector, {}),
-    (CellGroupComposition, {"layer": "X"}),
+    (CellGroupComposition, {}),
 ]
 
 
@@ -90,3 +51,27 @@ def test_distance_matrix_uses_cache_when_present(method_cls, kwargs, synthetic_a
 
     assert np.array_equal(distances, cached)
     assert adata.uns[method.DISTANCES_UNS_KEY] is cached
+
+
+# Validates averaging logic with and without NaNs, including default fill behavior.
+def test_calculate_average_without_nans(integer_matrix, float_matrix_with_nans, nan_heavy_matrix):
+    averages, sample_sizes = calculate_average_without_nans(integer_matrix, axis=0)
+    expected_averages = np.array([4, 5, 6])
+    expected_sample_sizes = np.array([3, 3, 3])
+    assert np.allclose(averages, expected_averages)
+    assert np.array_equal(sample_sizes, expected_sample_sizes)
+
+    averages, sample_sizes = calculate_average_without_nans(float_matrix_with_nans, axis=0)
+    expected_averages = np.array([2.5, 5, 7.5])
+    expected_sample_sizes = np.array([2, 2, 2])
+    assert np.allclose(averages, expected_averages)
+    assert np.array_equal(sample_sizes, expected_sample_sizes)
+
+    averages, sample_sizes = calculate_average_without_nans(nan_heavy_matrix, axis=0, default_value=0)
+    expected_averages = np.array([0, 5, 6])
+    expected_sample_sizes = np.array([0, 2, 1])
+    assert np.allclose(averages, expected_averages)
+    assert np.array_equal(sample_sizes, expected_sample_sizes)
+
+    averages = calculate_average_without_nans(nan_heavy_matrix, axis=0, return_sample_sizes=False)
+    assert np.allclose(averages, expected_averages)
