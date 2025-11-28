@@ -9,6 +9,8 @@ from patpy.tl.sample_representation import (
     calculate_average_without_nans,
 )
 
+SAMPLE_KEY = "sample_id"
+CELL_KEY = "cell_type"
 
 LIGHTWEIGHT_METHODS = [
     (Pseudobulk, {"layer": "X"}),
@@ -22,9 +24,9 @@ LIGHTWEIGHT_METHODS = [
 @pytest.mark.parametrize("method_cls, kwargs", LIGHTWEIGHT_METHODS)
 def test_distance_matrix_is_computed_and_cached(method_cls, kwargs, synthetic_adata):
     adata = synthetic_adata.copy()
-    n_samples = adata.obs["sample_id"].nunique()
+    n_samples = adata.obs[SAMPLE_KEY].nunique()
 
-    method = method_cls(sample_key="sample_id", cell_group_key="cell_type", **kwargs)
+    method = method_cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
     method.prepare_anndata(adata)
     distances = method.calculate_distance_matrix(force=True)
 
@@ -40,7 +42,7 @@ def test_distance_matrix_is_computed_and_cached(method_cls, kwargs, synthetic_ad
 def test_distance_matrix_uses_cache_when_present(method_cls, kwargs, synthetic_adata):
     adata = synthetic_adata.copy()
 
-    method = method_cls(sample_key="sample_id", cell_group_key="cell_type", **kwargs)
+    method = method_cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
     method.prepare_anndata(adata)
     baseline = method.calculate_distance_matrix(force=True)
 
