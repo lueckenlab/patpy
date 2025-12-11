@@ -6,9 +6,9 @@ import pandas as pd
 import scanpy as sc
 import scipy
 import seaborn as sns
+from scipy.sparse import issparse
 from scipy.stats import pearsonr, spearmanr
 from statsmodels.stats.multitest import multipletests
-from scipy.sparse import issparse
 
 from patpy.pp import (
     extract_metadata,
@@ -929,7 +929,8 @@ class SampleRepresentationMethod:
             for i, cell_group in enumerate(cell_groups):
                 for j, sample in enumerate(samples):
                     cells_data = data[
-                        (self.adata.obs[sample_key].values == sample) & (self.adata.obs[cell_group_key].values == cell_group)
+                        (self.adata.obs[sample_key].values == sample)
+                        & (self.adata.obs[cell_group_key].values == cell_group)
                     ]
 
                     if cells_data.size == 0:
@@ -2117,7 +2118,10 @@ class GloScope_py(SampleRepresentationMethod):
         is_sparse = issparse(data)
         if is_sparse:
             import cupyx.scipy.sparse as cpx_sp
-            embedding_dict = {g: cpx_sp.csr_matrix(data[(self.adata.obs[self.sample_key].values == g)]) for g in self.samples}
+
+            embedding_dict = {
+                g: cpx_sp.csr_matrix(data[(self.adata.obs[self.sample_key].values == g)]) for g in self.samples
+            }
         else:
             embedding_dict = {g: cp.asarray(data[(self.adata.obs[self.sample_key].values == g)]) for g in self.samples}
 
