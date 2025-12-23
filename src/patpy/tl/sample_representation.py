@@ -501,7 +501,7 @@ class SampleRepresentationMethod:
         """Return dataframe with requested `columns` in the correct rows order"""
         return extract_metadata(self.adata, self.sample_key, columns, samples=self.samples)
 
-    def __init__(self, sample_key, cell_group_key, layer=None, seed=67):
+    def __init__(self, sample_key="sample", cell_group_key="type", layer=None, seed=67):
         """Initialize the model
 
         Parameters
@@ -951,6 +951,109 @@ class SampleRepresentationMethod:
 
             return pseudobulk_data
 
+    def _seta_counts(self):
+        """Generate count matrix of cell types per sample.
+        
+        This function mimics the R setaCounts function, creating a matrix where
+        rows are samples and columns are cell types, with counts of cells in each.
+        
+        Returns
+        -------
+        np.ndarray
+            Matrix of shape (n_samples, n_cell_types) with cell counts
+        """
+        if self.adata is None:
+            raise RuntimeError("adata is not yet set. Please, run prepare_anndata() method first")
+        
+        # Check for required columns
+        required_cols = [self.sample_key, self.cell_group_key]
+        missing_cols = [col for col in required_cols if col not in self.adata.obs.columns]
+        if missing_cols:
+            raise ValueError(f"Missing required column(s): {', '.join(missing_cols)}")
+        
+        # Extract unique values for samples and cell groups
+        df = self.adata.obs[[self.sample_key, self.cell_group_key]].copy()
+        
+        # Check for invalid characters in sample IDs
+        sample_ids = df[self.sample_key].unique() #### uniqueness should be checked on the bc level...
+        invalid_pattern = r'[^A-Za-z0-9_-]'
+        invalid_ids = [sid for sid in sample_ids if pd.Series([sid]).str.contains(invalid_pattern).any()]
+        if invalid_ids:
+            warnings.warn(
+                f"Some sample IDs contain special characters: {', '.join(map(str, set(invalid_ids)))}. "
+                "This may cause issues down the line.",
+                stacklevel=2
+            )
+        
+        # Create count matrix using crosstab
+        mat = pd.crosstab(df[self.sample_key], df[self.cell_group_key])
+        
+        # Ensure the order matches self.samples and self.cell_groups if they exist
+        if self.samples is not None:
+            mat = mat.reindex(index=self.samples, fill_value=0)
+        if self.cell_groups is not None:
+            mat = mat.reindex(columns=self.cell_groups, fill_value=0)
+        
+        return mat.values
+
+class SETA(SampleRepresentationMethod):
+    """SETA (Sample-level Expression and Type Analysis) representation method.
+    
+    Computes distances between samples based on cell type composition and expression.
+    """
+    
+    DISTANCES_UNS_KEY = "X_seta_distances"
+    
+    def __init__(
+        self,
+        sample_key: str = "sample",
+        cell_group_key: str = "type",
+        batch_key: str = None,
+        layer=None,
+        seed=67,
+    ):
+        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
+        self.batch_key = batch_key
+        self.sample_representation = None
+        self.count_matrix = None
+    
+    def calculate_distance_matrix(self, force: bool = False):
+        """Calculate distance matrix between samples using SETA method.
+        
+        Parameters
+        ----------
+        force : bool, default: False
+            If True, recalculate distances even if they already exist
+        
+        Returns
+        -------
+        np.ndarray
+            Distance matrix between samples
+        """
+        distances = super().calculate_distance_matrix(force=force)
+        
+        if distances is not None and not force:
+            return distances
+        
+        self.count_matrix = self._seta_counts()
+        
+        ## TODO: clr transform, PCA
+        self.sample_representation = self.count_matrix
+        
+        distances = scipy.spatial.distance.pdist(self.sample_representation, metric='euclidean')
+        distances = scipy.spatial.distance.squareform(distances)
+        
+        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        self.adata.uns["seta_parameters"] = {
+            "sample_key": self.sample_key,
+            "cell_group_key": self.cell_group_key,
+            "batch_key": self.batch_key,
+            "layer": self.layer,
+            
+        }
+        
+        return distances
+
 
 class MrVI(SampleRepresentationMethod):
     """Deep generative modeling for quantifying sample-level heterogeneity in single-cell omics.
@@ -962,8 +1065,8 @@ class MrVI(SampleRepresentationMethod):
 
     def __init__(
         self,
-        sample_key: str,
-        cell_group_key: str,
+        sample_key: str = "sample",
+        cell_group_key: str = "type",
         batch_key: str = None,
         layer=None,
         seed=67,
@@ -1101,7 +1204,7 @@ class WassersteinTSNE(SampleRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_wasserstein_distances"
 
-    def __init__(self, sample_key, cell_group_key, replicate_key, layer="X_scvi", seed=67):
+    def __init__(self, sample_key="sample", cell_group_key="type", replicate_key=None, layer="X_scvi", seed=67):
         """Create Wasserstein distances embedding between samples
 
         Parameters
@@ -1185,9 +1288,9 @@ class PILOT(SampleRepresentationMethod):
 
     def __init__(
         self,
-        sample_key,
-        cell_group_key,
-        sample_state_col,
+        sample_key="sample",
+        cell_group_key="type",
+        sample_state_col=None,
         dataset_name="pilot_dataset",
         layer="X_pca",
         seed=67,
@@ -1305,7 +1408,7 @@ class GroupedPseudobulk(SampleRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_ct_pseudobulk_distances"
 
-    def __init__(self, sample_key, cell_group_key, layer="X_pca", seed=67):
+    def __init__(self, sample_key="sample", cell_group_key="type", layer="X_pca", seed=67):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
         self.sample_representation = None
@@ -1349,7 +1452,7 @@ class RandomVector(SampleRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_random_vector_distances"
 
-    def __init__(self, sample_key, cell_group_key, latent_dim: int = 30, seed=67):
+    def __init__(self, sample_key="sample", cell_group_key="type", latent_dim: int = 30, seed=67):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, seed=seed)
 
         self.latent_dim = latent_dim
@@ -1380,7 +1483,7 @@ class CellGroupComposition(SampleRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_composition"
 
-    def __init__(self, sample_key, cell_group_key, layer=None, seed=67):
+    def __init__(self, sample_key="sample", cell_group_key="type", layer=None, seed=67):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
         self.sample_representation = None
@@ -1426,8 +1529,8 @@ class SCPoli(SampleRepresentationMethod):
 
     def __init__(
         self,
-        sample_key,
-        cell_group_key,
+        sample_key="sample",
+        cell_group_key="type",
         latent_dim=3,
         layer=None,
         seed=67,
@@ -1511,7 +1614,7 @@ class PhEMD(SampleRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_phemd"
 
-    def __init__(self, sample_key, cell_group_key, layer=None, n_clusters: int = 8, seed=67):
+    def __init__(self, sample_key="sample", cell_group_key="type", layer=None, n_clusters: int = 8, seed=67):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
         self.n_clusters = n_clusters
@@ -1582,7 +1685,7 @@ class DiffusionEarthMoverDistance(SampleRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_diffusion_emd"
 
-    def __init__(self, sample_key, cell_group_key, layer=None, seed=67, n_neighbors: int = 15, n_scales: int = 6):
+    def __init__(self, sample_key="sample", cell_group_key="type", layer=None, seed=67, n_neighbors: int = 15, n_scales: int = 6):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
         self.n_neighbors = n_neighbors
@@ -1698,8 +1801,8 @@ class MOFA(SampleRepresentationMethod):
 
     def __init__(
         self,
-        sample_key: str,
-        cell_group_key: str,
+        sample_key: str = "sample",
+        cell_group_key: str = "type",
         layer: str | None = None,
         seed: int = 67,
         n_factors: int = 10,
@@ -1870,7 +1973,7 @@ class GloScope(SampleRepresentationMethod):
     DISTANCES_UNS_KEY = "X_gloscope_distances"
 
     def __init__(
-        self, sample_key, cell_group_key=None, layer=None, seed=67, dist_mat="KL", dens="KNN", k=25, n_workers=1
+        self, sample_key="sample", cell_group_key=None, layer=None, seed=67, dist_mat="KL", dens="KNN", k=25, n_workers=1
     ):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
         self.dist_mat = dist_mat

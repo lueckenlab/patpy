@@ -9,6 +9,7 @@ from .evaluation import (
 from .sample_representation import (
     MOFA,
     PILOT,
+    SETA,
     CellGroupComposition,
     DiffusionEarthMoverDistance,
     GloScope,
