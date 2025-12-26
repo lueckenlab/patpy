@@ -1004,7 +1004,7 @@ class SampleRepresentationMethod:
             )
 
         # create the count matrix
-        count_matrix = pd.crosstab(df[self.sample_key], df[self.cell_group_key], dropna=False)
+        count_matrix = pd.crosstab(df[self.sample_key], df[self.cell_group_key])
         return count_matrix
 
 
@@ -1055,7 +1055,7 @@ class SETA(SampleRepresentationMethod):
         clr_mat = log_counts.sub(np.log(gm), axis=0)
         return clr_mat
 
-    def calculate_distance_matrix(self, force: bool = False):
+    def calculate_distance_matrix(self, force: bool = False, dist = "euclidean"):
         """Calculate distance matrix between samples using SETA method.
 
         Computes sample-level distances based on cell type composition using the following workflow:
@@ -1083,14 +1083,17 @@ class SETA(SampleRepresentationMethod):
 
         if distances is not None and not force:
             return distances
+        
+        distance_metric = valid_distance_metric(dist)
 
         # compute compositional count matrix
         self.count_matrix = self._seta_counts(self.bc_key)
 
         # clr transform
         self.sample_representation = self._seta_clr()
+        self.sample_representation = self.sample_representation.loc[self.samples]
 
-        distances = scipy.spatial.distance.pdist(self.sample_representation, metric="euclidean")
+        distances = scipy.spatial.distance.pdist(self.sample_representation, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
@@ -1099,6 +1102,7 @@ class SETA(SampleRepresentationMethod):
             "cell_group_key": self.cell_group_key,
             "batch_key": self.batch_key,
             "bc_key": self.bc_key,
+            "distance_type": distance_metric,
             "layer": self.layer,
         }
 
