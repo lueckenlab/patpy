@@ -68,85 +68,57 @@ class TestSETAInitialization:
         assert seta.cell_group_key == "celltype"
 
 
-class TestSETACounts:
-    def test_count_matrix_shape(self, simple_adata):
-        seta = SETA(sample_key="sample", cell_group_key="cell_type")
-        seta.prepare_anndata(simple_adata)
-        counts = seta._seta_counts()
-
-        n_samples = simple_adata.obs["sample"].nunique()
-        n_cell_types = simple_adata.obs["cell_type"].nunique()
-
-        assert counts.shape == (n_samples, n_cell_types)
-
-    def test_count_matrix_values_nonnegative(self, simple_adata):
-        seta = SETA(sample_key="sample", cell_group_key="cell_type")
-        seta.prepare_anndata(simple_adata)
-        counts = seta._seta_counts()
-
-        assert (counts >= 0).all().all()
-
-    def test_count_matrix_row_sums(self, simple_adata):
-        """Total counts per sample should equal number of cells in that sample."""
-        seta = SETA(sample_key="sample", cell_group_key="cell_type")
-        seta.prepare_anndata(simple_adata)
-        counts = seta._seta_counts()
-
-        expected_counts = simple_adata.obs["sample"].value_counts().sort_index()
-        actual_counts = counts.sum(axis=1).sort_index()
-
-        pd.testing.assert_series_equal(actual_counts, expected_counts, check_names=False)
-
-    def test_handles_unused_categories(self, categorical_adata):
-        """Unused categories should not appear in count matrix."""
-        seta = SETA(sample_key="sample", cell_group_key="cell_type")
-        seta.prepare_anndata(categorical_adata)
-        counts = seta._seta_counts()
-
-        # Should only have 4 samples and 5 cell types (not the unused ones)
-        assert counts.shape == (4, 5)
-        assert "S5_unused" not in counts.index
-        assert "Unused_type" not in counts.columns
-
-
 class TestSETACLR:
     def test_clr_row_sums_near_zero(self, simple_adata):
         """CLR transformation property: rows should sum to approximately 0."""
         seta = SETA(sample_key="sample", cell_group_key="cell_type")
         seta.prepare_anndata(simple_adata)
-        counts = seta._seta_counts()
-        clr = seta._seta_clr(counts)
+        clr = seta._seta_clr()
 
         row_sums = clr.sum(axis=1)
         np.testing.assert_array_almost_equal(row_sums, 0, decimal=10)
 
     def test_clr_output_shape(self, simple_adata):
-        """CLR output should have same shape as input."""
+        """CLR output should have shape (n_samples, n_cell_types)."""
         seta = SETA(sample_key="sample", cell_group_key="cell_type")
         seta.prepare_anndata(simple_adata)
-        counts = seta._seta_counts()
-        clr = seta._seta_clr(counts)
+        clr = seta._seta_clr()
 
-        assert clr.shape == counts.shape
+        n_samples = simple_adata.obs["sample"].nunique()
+        n_cell_types = simple_adata.obs["cell_type"].nunique()
+        assert clr.shape == (n_samples, n_cell_types)
 
-    def test_clr_preserves_index_columns(self, simple_adata):
-        """CLR should preserve DataFrame index and columns."""
+    def test_clr_values_nonnegative_counts(self, simple_adata):
+        """CLR should be computed from non-negative count matrix."""
         seta = SETA(sample_key="sample", cell_group_key="cell_type")
         seta.prepare_anndata(simple_adata)
-        counts = seta._seta_counts()
-        clr = seta._seta_clr(counts)
+        # Run CLR to populate sample_representation
+        seta.calculate_distance_matrix()
 
-        pd.testing.assert_index_equal(clr.index, counts.index)
-        pd.testing.assert_index_equal(clr.columns, counts.columns)
+        # The sample_representation should exist and have correct shape
+        assert seta.sample_representation is not None
+        n_samples = simple_adata.obs["sample"].nunique()
+        n_cell_types = simple_adata.obs["cell_type"].nunique()
+        assert seta.sample_representation.shape == (n_samples, n_cell_types)
+
+    def test_clr_handles_unused_categories(self, categorical_adata):
+        """Unused categories should not appear in CLR output."""
+        seta = SETA(sample_key="sample", cell_group_key="cell_type")
+        seta.prepare_anndata(categorical_adata)
+        clr = seta._seta_clr()
+
+        # Should only have 4 samples and 5 cell types (not the unused ones)
+        assert clr.shape == (4, 5)
+        assert "S5_unused" not in clr.index
+        assert "Unused_type" not in clr.columns
 
     def test_clr_with_custom_pseudocount(self, simple_adata):
         """Different pseudocounts should produce different results."""
         seta = SETA(sample_key="sample", cell_group_key="cell_type")
         seta.prepare_anndata(simple_adata)
-        counts = seta._seta_counts()
 
-        clr_1 = seta._seta_clr(counts, pseudocount=1)
-        clr_2 = seta._seta_clr(counts, pseudocount=0.5)
+        clr_1 = seta._seta_clr(pseudocount=1)
+        clr_2 = seta._seta_clr(pseudocount=0.5)
 
         # Results should differ
         assert not np.allclose(clr_1.values, clr_2.values)

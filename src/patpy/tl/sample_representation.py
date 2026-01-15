@@ -951,31 +951,42 @@ class SampleRepresentationMethod:
 
             return pseudobulk_data
 
-    def _seta_counts(self):
-        """Generate count matrix of cell types per sample.
+    def _seta_clr(self, pseudocount=1):
+        """Compute CLR-transformed cell type composition matrix.
 
-        This function mimics the R setaCounts function, creating a matrix where
-        rows are samples and columns are cell types, with counts of cells in each.
+        Generates a count matrix of cell types per sample, then applies the centered
+        log-ratio (CLR) transformation. The CLR transformation is appropriate for
+        compositional data like cell type counts.
 
-        Handles categorical columns by removing unused categories to avoid
-        spurious zero columns in the output.
+        Parameters
+        ----------
+        pseudocount : int = 1
+            Value added to counts before log transformation to handle zeros.
 
         Returns
         -------
         pd.DataFrame
-            Count matrix of shape (n_samples, n_cell_types) with cell counts.
+            CLR-transformed matrix of shape (n_samples, n_cell_types).
         """
         # Handle categorical columns with unused categories
         sample_col = self.adata.obs[self.sample_key]
         cell_group_col = self.adata.obs[self.cell_group_key]
 
-        # Remove unused categories if present
         if hasattr(sample_col, "cat"):
             sample_col = sample_col.cat.remove_unused_categories()
         if hasattr(cell_group_col, "cat"):
             cell_group_col = cell_group_col.cat.remove_unused_categories()
 
-        return pd.crosstab(sample_col, cell_group_col)
+        # Generate count matrix
+        counts = pd.crosstab(sample_col, cell_group_col)
+
+        # Apply CLR transformation
+        counts_adjusted = counts + pseudocount
+        log_counts = np.log(counts_adjusted)
+        gm = np.exp(log_counts.mean(axis=1))
+        clr_mat = log_counts.sub(np.log(gm), axis=0)
+
+        return clr_mat
 
 
 class SETA(SampleRepresentationMethod):
@@ -999,6 +1010,7 @@ class SETA(SampleRepresentationMethod):
         self,
         sample_key: str = "sample",
         cell_group_key: str = "type",
+        layer=None,
         seed=67,
     ):
         """Initialize the SETA model.
@@ -1009,39 +1021,11 @@ class SETA(SampleRepresentationMethod):
             Column in `.obs` containing sample IDs.
         cell_group_key : str = "type"
             Column in `.obs` containing cell type annotations.
-        layer : Optional[str] = None
-            Not used by SETA since it only requires cell type annotations, not expression data.
-            Kept for API consistency with other methods.
         seed : int = 67
             Random seed for reproducibility. Not currently used by SETA.
         """
-        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, seed=seed)
+        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
         self.sample_representation = None
-
-    def _seta_clr(self, compositional_counts, pseudocount=1):
-        """Apply centered log-ratio (CLR) transformation to count matrix.
-
-        The CLR transformation is appropriate for compositional data like cell type
-        counts. It applies log transformation after adding a pseudocount, then centers
-        by subtracting the geometric mean.
-
-        Parameters
-        ----------
-        compositional_counts : pd.DataFrame
-            Count matrix of shape (n_samples, n_cell_types) with cell counts per sample.
-        pseudocount : int = 1
-            Value added to counts before log transformation to handle zeros.
-
-        Returns
-        -------
-        pd.DataFrame
-            CLR-transformed matrix of shape (n_samples, n_cell_types).
-        """
-        counts_adjusted = compositional_counts + pseudocount
-        log_counts = np.log(counts_adjusted)
-        gm = np.exp(log_counts.mean(axis=1))
-        clr_mat = log_counts.sub(np.log(gm), axis=0)
-        return clr_mat
 
     def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distance matrix between samples using SETA method.
@@ -1085,7 +1069,7 @@ class SETA(SampleRepresentationMethod):
 
         distance_metric = valid_distance_metric(dist)
 
-        self.sample_representation = self._seta_clr(self._seta_counts())
+        self.sample_representation = self._seta_clr()
         self.sample_representation = self.sample_representation.loc[self.samples]
 
         distances = scipy.spatial.distance.pdist(self.sample_representation, metric=distance_metric)
