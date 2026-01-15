@@ -1,4 +1,3 @@
-import re
 import warnings
 from collections.abc import Callable
 
@@ -952,67 +951,46 @@ class SampleRepresentationMethod:
 
             return pseudobulk_data
 
-    def _seta_counts(self, bc_col):
+    def _seta_counts(self):
         """Generate count matrix of cell types per sample.
 
         This function mimics the R setaCounts function, creating a matrix where
         rows are samples and columns are cell types, with counts of cells in each.
 
-        Parameters
-        ----------
-        bc_col : str
-            Barcode column identifier. Use "index" to use the DataFrame index
-            as barcodes, or specify a column name in `adata.obs`.
+        Handles categorical columns by removing unused categories to avoid
+        spurious zero columns in the output.
 
         Returns
         -------
         pd.DataFrame
             Count matrix of shape (n_samples, n_cell_types) with cell counts.
         """
-        # extract metadata
-        obj = self.adata.obs.copy()
+        # Handle categorical columns with unused categories
+        sample_col = self.adata.obs[self.sample_key]
+        cell_group_col = self.adata.obs[self.cell_group_key]
 
-        # convert categorical columns to str
-        cat_cols = obj.select_dtypes(include=["category"]).columns.tolist()
-        if cat_cols:
-            print(f"Converting categorical columns to string: {', '.join(cat_cols)}")
-            for col in cat_cols:
-                obj[col] = obj[col].astype(str)
+        # Remove unused categories if present
+        if hasattr(sample_col, "cat"):
+            sample_col = sample_col.cat.remove_unused_categories()
+        if hasattr(cell_group_col, "cat"):
+            cell_group_col = cell_group_col.cat.remove_unused_categories()
 
-        # index as barcode
-        if bc_col == "index":
-            obj["__barcodes__"] = obj.index
-            bc_col = "__barcodes__"
-
-        # make sure that required cols exist
-        required = [bc_col, self.sample_key, self.cell_group_key]
-        missing = [col for col in required if col not in obj.columns]
-        if missing:
-            raise ValueError(f"Missing required column(s): {', '.join(missing)}")
-
-        # remove duplicates
-        df = obj[required].drop_duplicates()
-
-        # warn about special characters in sample IDs
-        sample_ids = df[self.sample_key].unique()
-        invalid_ids = [sid for sid in sample_ids if not re.match(r"^[A-Za-z0-9_-]+$", str(sid))]
-        if invalid_ids:
-            warnings.warn(
-                f"Some sample IDs contain special characters: {', '.join(map(str, invalid_ids))}. "
-                "This may cause issues down the line",
-                stacklevel=2,
-            )
-
-        # create the count matrix
-        count_matrix = pd.crosstab(df[self.sample_key], df[self.cell_group_key])
-        return count_matrix
+        return pd.crosstab(sample_col, cell_group_col)
 
 
 class SETA(SampleRepresentationMethod):
     """Python implementation of SETA (Sample-level Expression and Type Analysis) representation method.
 
-    Computes distances between samples based on cell type composition and expression.
-    source: https://www.bioconductor.org/packages//release/bioc/html/SETA.html
+    Computes distances between samples based on cell type composition using centered log-ratio (CLR)
+    transformation. This is a lightweight method that only uses cell type counts, not gene expression.
+
+    Source: https://www.bioconductor.org/packages//release/bioc/html/SETA.html
+
+    Attributes
+    ----------
+    sample_representation : pd.DataFrame
+        CLR-transformed cell type composition matrix of shape (n_samples, n_cell_types).
+        Available after calling `calculate_distance_matrix`.
     """
 
     DISTANCES_UNS_KEY = "X_seta_distances"
@@ -1021,18 +999,26 @@ class SETA(SampleRepresentationMethod):
         self,
         sample_key: str = "sample",
         cell_group_key: str = "type",
-        bc_key: str = "index",
-        batch_key: str = None,
-        layer=None,
         seed=67,
     ):
-        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
-        self.batch_key = batch_key
-        self.bc_key = bc_key
-        self.sample_representation = None
-        self.count_matrix = None
+        """Initialize the SETA model.
 
-    def _seta_clr(self, pseudocount=1):
+        Parameters
+        ----------
+        sample_key : str = "sample"
+            Column in `.obs` containing sample IDs.
+        cell_group_key : str = "type"
+            Column in `.obs` containing cell type annotations.
+        layer : Optional[str] = None
+            Not used by SETA since it only requires cell type annotations, not expression data.
+            Kept for API consistency with other methods.
+        seed : int = 67
+            Random seed for reproducibility. Not currently used by SETA.
+        """
+        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, seed=seed)
+        self.sample_representation = None
+
+    def _seta_clr(self, compositional_counts, pseudocount=1):
         """Apply centered log-ratio (CLR) transformation to count matrix.
 
         The CLR transformation is appropriate for compositional data like cell type
@@ -1041,7 +1027,9 @@ class SETA(SampleRepresentationMethod):
 
         Parameters
         ----------
-        pseudocount : int, default: 1
+        compositional_counts : pd.DataFrame
+            Count matrix of shape (n_samples, n_cell_types) with cell counts per sample.
+        pseudocount : int = 1
             Value added to counts before log transformation to handle zeros.
 
         Returns
@@ -1049,48 +1037,55 @@ class SETA(SampleRepresentationMethod):
         pd.DataFrame
             CLR-transformed matrix of shape (n_samples, n_cell_types).
         """
-        counts_adjusted = self.count_matrix + pseudocount
+        counts_adjusted = compositional_counts + pseudocount
         log_counts = np.log(counts_adjusted)
         gm = np.exp(log_counts.mean(axis=1))
         clr_mat = log_counts.sub(np.log(gm), axis=0)
         return clr_mat
 
-    def calculate_distance_matrix(self, force: bool = False, dist = "euclidean"):
+    def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distance matrix between samples using SETA method.
 
         Computes sample-level distances based on cell type composition using the following workflow:
+
         1. Generate cell type count matrix via `_seta_counts`
         2. Apply CLR transformation via `_seta_clr`
-        3. Calculate Euclidean distances between CLR-transformed samples
+        3. Calculate pairwise distances between CLR-transformed samples
 
         Parameters
         ----------
-        force : bool, default: False
+        force : bool = False
             If True, recalculate distances even if they already exist in `adata.uns`.
+        dist : str = "euclidean"
+            Distance metric to use. One of "euclidean", "cosine", or "cityblock".
 
         Returns
         -------
         np.ndarray
             Symmetric distance matrix of shape (n_samples, n_samples).
 
+        Sets
+        ----
+        self.sample_representation : pd.DataFrame
+            CLR-transformed cell type composition matrix.
+        adata.uns["X_seta_distances"] : np.ndarray
+            Cached distance matrix.
+        adata.uns["seta_parameters"] : dict
+            Parameters used for computation.
+
         Notes
         -----
         Distances are cached in `adata.uns["X_seta_distances"]` and parameters are stored
         in `adata.uns["seta_parameters"]` for reproducibility.
         """
-        # checks whether distances are already computed
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None and not force:
             return distances
-        
+
         distance_metric = valid_distance_metric(dist)
 
-        # compute compositional count matrix
-        self.count_matrix = self._seta_counts(self.bc_key)
-
-        # clr transform
-        self.sample_representation = self._seta_clr()
+        self.sample_representation = self._seta_clr(self._seta_counts())
         self.sample_representation = self.sample_representation.loc[self.samples]
 
         distances = scipy.spatial.distance.pdist(self.sample_representation, metric=distance_metric)
@@ -1100,8 +1095,6 @@ class SETA(SampleRepresentationMethod):
         self.adata.uns["seta_parameters"] = {
             "sample_key": self.sample_key,
             "cell_group_key": self.cell_group_key,
-            "batch_key": self.batch_key,
-            "bc_key": self.bc_key,
             "distance_type": distance_metric,
             "layer": self.layer,
         }
