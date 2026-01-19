@@ -951,140 +951,6 @@ class SampleRepresentationMethod:
 
             return pseudobulk_data
 
-    def _seta_clr(self, pseudocount=1):
-        """Compute CLR-transformed cell type composition matrix.
-
-        Generates a count matrix of cell types per sample, then applies the centered
-        log-ratio (CLR) transformation. The CLR transformation is appropriate for
-        compositional data like cell type counts.
-
-        Parameters
-        ----------
-        pseudocount : int = 1
-            Value added to counts before log transformation to handle zeros.
-
-        Returns
-        -------
-        pd.DataFrame
-            CLR-transformed matrix of shape (n_samples, n_cell_types).
-        """
-        # Handle categorical columns with unused categories
-        sample_col = self.adata.obs[self.sample_key]
-        cell_group_col = self.adata.obs[self.cell_group_key]
-
-        if hasattr(sample_col, "cat"):
-            sample_col = sample_col.cat.remove_unused_categories()
-        if hasattr(cell_group_col, "cat"):
-            cell_group_col = cell_group_col.cat.remove_unused_categories()
-
-        # Generate count matrix
-        counts = pd.crosstab(sample_col, cell_group_col)
-
-        # Apply CLR transformation
-        counts_adjusted = counts + pseudocount
-        log_counts = np.log(counts_adjusted)
-        gm = np.exp(log_counts.mean(axis=1))
-        clr_mat = log_counts.sub(np.log(gm), axis=0)
-
-        return clr_mat
-
-
-class SETA(SampleRepresentationMethod):
-    """Python implementation of SETA (Sample-level Expression and Type Analysis) representation method.
-
-    Computes distances between samples based on cell type composition using centered log-ratio (CLR)
-    transformation. This is a lightweight method that only uses cell type counts, not gene expression.
-
-    Source: https://www.bioconductor.org/packages//release/bioc/html/SETA.html
-
-    Attributes
-    ----------
-    sample_representation : pd.DataFrame
-        CLR-transformed cell type composition matrix of shape (n_samples, n_cell_types).
-        Available after calling `calculate_distance_matrix`.
-    """
-
-    DISTANCES_UNS_KEY = "X_seta_distances"
-
-    def __init__(
-        self,
-        sample_key: str = "sample",
-        cell_group_key: str = "type",
-        layer=None,
-        seed=67,
-    ):
-        """Initialize the SETA model.
-
-        Parameters
-        ----------
-        sample_key : str = "sample"
-            Column in `.obs` containing sample IDs.
-        cell_group_key : str = "type"
-            Column in `.obs` containing cell type annotations.
-        seed : int = 67
-            Random seed for reproducibility. Not currently used by SETA.
-        """
-        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
-        self.sample_representation = None
-
-    def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
-        """Calculate distance matrix between samples using SETA method.
-
-        Computes sample-level distances based on cell type composition using the following workflow:
-
-        1. Generate cell type count matrix via `_seta_counts`
-        2. Apply CLR transformation via `_seta_clr`
-        3. Calculate pairwise distances between CLR-transformed samples
-
-        Parameters
-        ----------
-        force : bool = False
-            If True, recalculate distances even if they already exist in `adata.uns`.
-        dist : str = "euclidean"
-            Distance metric to use. One of "euclidean", "cosine", or "cityblock".
-
-        Returns
-        -------
-        np.ndarray
-            Symmetric distance matrix of shape (n_samples, n_samples).
-
-        Sets
-        ----
-        self.sample_representation : pd.DataFrame
-            CLR-transformed cell type composition matrix.
-        adata.uns["X_seta_distances"] : np.ndarray
-            Cached distance matrix.
-        adata.uns["seta_parameters"] : dict
-            Parameters used for computation.
-
-        Notes
-        -----
-        Distances are cached in `adata.uns["X_seta_distances"]` and parameters are stored
-        in `adata.uns["seta_parameters"]` for reproducibility.
-        """
-        distances = super().calculate_distance_matrix(force=force)
-
-        if distances is not None and not force:
-            return distances
-
-        distance_metric = valid_distance_metric(dist)
-
-        self.sample_representation = self._seta_clr()
-        self.sample_representation = self.sample_representation.loc[self.samples]
-
-        distances = scipy.spatial.distance.pdist(self.sample_representation, metric=distance_metric)
-        distances = scipy.spatial.distance.squareform(distances)
-
-        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
-        self.adata.uns["seta_parameters"] = {
-            "sample_key": self.sample_key,
-            "cell_group_key": self.cell_group_key,
-            "distance_type": distance_metric,
-            "layer": self.layer,
-        }
-
-        return distances
-
 
 class MrVI(SampleRepresentationMethod):
     """Deep generative modeling for quantifying sample-level heterogeneity in single-cell omics.
@@ -1510,35 +1376,100 @@ class RandomVector(SampleRepresentationMethod):
 
 
 class CellGroupComposition(SampleRepresentationMethod):
-    """A simple baseline, which represents samples as composition of their cell groups (for example, cell type fractions)"""
+    """A simple baseline, which represents samples as composition of their cell groups (for example, cell type fractions).
+
+    Optionally applies centered log-ratio (CLR) transformation, which is the approach used by SETA.
+
+    Source (SETA): https://www.bioconductor.org/packages//release/bioc/html/SETA.html
+    """
 
     DISTANCES_UNS_KEY = "X_composition"
 
-    def __init__(self, sample_key="sample", cell_group_key="type", layer=None, seed=67):
+    def __init__(self, sample_key="sample", cell_group_key="type", apply_clr=False, pseudocount=1, layer=None, seed=67):
+        """Initialize CellGroupComposition
+
+        Parameters
+        ----------
+        sample_key : str = "sample"
+            Column in `.obs` containing sample IDs.
+        cell_group_key : str = "type"
+            Column in `.obs` containing cell group annotations (e.g., cell types).
+        apply_clr : bool = False
+            If True, apply centered log-ratio (CLR) transformation to the composition
+            data before computing distances. This is the approach used by SETA.
+        pseudocount : float = 1
+            Value added to counts before log transformation when `apply_clr=True`.
+        layer : str = None
+            Not used by this method. Kept for API consistency.
+        seed : int = 67
+            Random seed. Not used by this method. Kept for API consistency.
+        """
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
+        self.apply_clr = apply_clr
+        self.pseudocount = pseudocount
         self.sample_representation = None
+
+    def _compute_clr(self, sample_col, cell_group_col):
+        """Compute CLR-transformed cell type composition matrix"""
+        # Generate count matrix
+        counts = pd.crosstab(sample_col, cell_group_col)
+
+        # Apply CLR transformation
+        counts_adjusted = counts + self.pseudocount
+        log_counts = np.log(counts_adjusted)
+        gm = np.exp(log_counts.mean(axis=1))
+        clr_mat = log_counts.sub(np.log(gm), axis=0)
+
+        return clr_mat
 
     def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between samples represented as cell group composition vectors"""
-        distances = super().calculate_distance_matrix(force=force)
+        is_correct_params_in_uns = (
+            "composition_parameters" in self.adata.uns
+            and self.adata.uns["composition_parameters"].get("apply_clr") == self.apply_clr
+            and self.adata.uns["composition_parameters"].get("pseudocount")
+            == (self.pseudocount if self.apply_clr else None)
+        )
+        is_recalculated = force or not is_correct_params_in_uns
 
-        if distances is not None:
-            return distances
+        if self.DISTANCES_UNS_KEY in self.adata.uns:
+            if is_recalculated:
+                warnings.warn(f"Rewriting uns key {self.DISTANCES_UNS_KEY}", stacklevel=1)
+            else:
+                return self.adata.uns[self.DISTANCES_UNS_KEY]
 
         distance_metric = valid_distance_metric(dist)
 
-        # Calculate proportions of the cell groups for each sample
-        self.sample_representation = pd.crosstab(
-            self.adata.obs[self.sample_key], self.adata.obs[self.cell_group_key], normalize="index"
-        )
+        sample_col = self.adata.obs[self.sample_key]
+        cell_group_col = self.adata.obs[self.cell_group_key]
+
+        # Handle categorical columns with unused categories
+        if hasattr(sample_col, "cat"):
+            sample_col = sample_col.cat.remove_unused_categories()
+        if hasattr(cell_group_col, "cat"):
+            cell_group_col = cell_group_col.cat.remove_unused_categories()
+
+        if self.apply_clr:
+            # CLR transformation (SETA-style)
+            self.sample_representation = self._compute_clr(sample_col, cell_group_col)
+        else:
+            # Standard proportions
+            self.sample_representation = pd.crosstab(sample_col, cell_group_col, normalize="index")
+
         self.sample_representation = self.sample_representation.loc[self.samples]
 
         distances = scipy.spatial.distance.pdist(self.sample_representation.values, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
-        self.adata.uns["composition_parameters"] = {"sample_key": self.sample_key, "distance_type": distance_metric}
+        self.adata.uns["composition_parameters"] = {
+            "sample_key": self.sample_key,
+            "cell_group_key": self.cell_group_key,
+            "distance_type": distance_metric,
+            "apply_clr": self.apply_clr,
+            "pseudocount": self.pseudocount if self.apply_clr else None,
+        }
 
         return distances
 
