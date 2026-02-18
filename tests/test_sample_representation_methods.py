@@ -21,6 +21,7 @@ from patpy.tl.sample_representation import (
     calculate_average_without_nans,
     correlate_cell_type_expression,
     correlate_composition,
+    create_colormap,
     make_matrix_symmetric,
     valid_aggregate,
     valid_distance_metric,
@@ -562,3 +563,148 @@ def test_correlate_cell_type_expression_raises_for_invalid_method(synthetic_adat
         correlate_cell_type_expression(
             meta, adata, SAMPLE_KEY, CELL_KEY, target="target", layer="X", min_sample_size=0, method="kendall"
         )
+
+
+# ---------------------------------------------------------------------------
+# create_colormap
+# ---------------------------------------------------------------------------
+
+
+def test_create_colormap_returns_series_with_unique_color_per_category(synthetic_adata):
+    result = create_colormap(synthetic_adata.obs, "cell_type")
+    assert len(result) == len(synthetic_adata.obs)
+    assert result.nunique() == synthetic_adata.obs["cell_type"].nunique()
+
+
+# ---------------------------------------------------------------------------
+# GroupedPseudobulk with non-default aggregate / distance parameters
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("aggregate,dist", [("median", "euclidean"), ("sum", "cosine")])
+def test_grouped_pseudobulk_non_default_params(aggregate, dist, synthetic_adata):
+    adata = synthetic_adata.copy()
+    n_samples = adata.obs[SAMPLE_KEY].nunique()
+    method = GroupedPseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X")
+    method.prepare_anndata(adata)
+    distances = method.calculate_distance_matrix(force=True, aggregate=aggregate, dist=dist)
+    assert distances.shape == (n_samples, n_samples)
+    assert np.allclose(distances, distances.T)
+
+
+# ---------------------------------------------------------------------------
+# SampleRepresentationMethod._move_layer_to_X
+# ---------------------------------------------------------------------------
+
+
+def test_move_layer_to_x_returns_same_adata_when_layer_is_x(synthetic_adata):
+    method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X")
+    method.prepare_anndata(synthetic_adata.copy())
+    result = method._move_layer_to_X()
+    assert result is method.adata
+
+
+def test_move_layer_to_x_moves_layer_data_to_x(synthetic_adata):
+    adata = synthetic_adata.copy()
+    layer_data = adata.X.copy() * 2
+    adata.layers["scaled"] = layer_data
+    method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="scaled")
+    method.prepare_anndata(adata)
+    with pytest.warns(UserWarning, match="adata.layers"):
+        result = method._move_layer_to_X()
+    assert result is not method.adata
+    assert np.array_equal(result.X, layer_data)
+    assert "X_old" in result.obsm
+
+
+# ---------------------------------------------------------------------------
+# SampleRepresentationMethod.predict_metadata
+# ---------------------------------------------------------------------------
+
+
+def _prepare_method_with_distances(adata):
+    """Return a Pseudobulk method with distances already computed."""
+    method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X")
+    method.prepare_anndata(adata)
+    method.calculate_distance_matrix(force=True)
+    return method
+
+
+def test_predict_metadata_classification(synthetic_adata):
+    adata = synthetic_adata.copy()
+    method = _prepare_method_with_distances(adata)
+    n_samples = len(method.samples)
+    metadata = pd.DataFrame({"condition": ["A", "B"] * (n_samples // 2)}, index=method.samples)
+
+    y_true, y_pred = method.predict_metadata("condition", metadata=metadata)
+
+    assert len(y_true) == n_samples
+    assert len(y_pred) == n_samples
+    assert set(y_pred).issubset({"A", "B"})
+
+
+def test_predict_metadata_regression(synthetic_adata):
+    adata = synthetic_adata.copy()
+    method = _prepare_method_with_distances(adata)
+    n_samples = len(method.samples)
+    metadata = pd.DataFrame({"score": np.arange(n_samples, dtype=float)}, index=method.samples)
+
+    y_true, y_pred = method.predict_metadata("score", metadata=metadata, task="regression")
+
+    assert len(y_true) == n_samples
+    assert len(y_pred) == n_samples
+
+
+def test_predict_metadata_invalid_task_raises(synthetic_adata):
+    adata = synthetic_adata.copy()
+    method = _prepare_method_with_distances(adata)
+    n_samples = len(method.samples)
+    metadata = pd.DataFrame({"target": [0] * n_samples}, index=method.samples)
+
+    with pytest.raises(ValueError, match="not supported"):
+        method.predict_metadata("target", metadata=metadata, task="ranking")
+
+
+# ---------------------------------------------------------------------------
+# GloScope_py with n_components
+# ---------------------------------------------------------------------------
+
+
+def test_gloscope_py_with_n_components(pbmc3k_adata):
+    pytest.importorskip("pynndescent")
+    adata = pbmc3k_adata.copy()
+    n_samples = adata.obs[SAMPLE_KEY].nunique()
+
+    method = GloScope_py(
+        sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca", n_components=5
+    )
+    method.prepare_anndata(adata)
+    distances = method.calculate_distance_matrix(force=True)
+
+    assert distances.shape == (n_samples, n_samples)
+    assert np.allclose(distances, distances.T, atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# WassersteinTSNE recomputation with different covariance_weight
+# ---------------------------------------------------------------------------
+
+
+def test_wasserstein_tsne_warns_when_recomputing_with_different_weight(pbmc3k_adata):
+    pytest.importorskip("WassersteinTSNE")
+    adata = pbmc3k_adata.copy()
+
+    method = WassersteinTSNE(
+        sample_key=SAMPLE_KEY,
+        cell_group_key=PBMC_CELL_KEY,
+        replicate_key=PBMC_CELL_KEY,
+        layer="X_pca",
+    )
+    method.prepare_anndata(adata)
+    method.calculate_distance_matrix(covariance_weight=0.5)
+
+    with pytest.warns(UserWarning, match="Rewriting"):
+        new_distances = method.calculate_distance_matrix(covariance_weight=0.3)
+
+    assert new_distances.shape == (adata.obs[SAMPLE_KEY].nunique(), adata.obs[SAMPLE_KEY].nunique())
+    assert adata.uns["wasserstein_covariance_weight"] == 0.3
