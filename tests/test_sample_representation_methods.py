@@ -1,5 +1,7 @@
 import numpy as np
+import pandas as pd
 import pytest
+from anndata import AnnData
 
 from patpy.tl.sample_representation import (
     CellGroupComposition,
@@ -15,7 +17,11 @@ from patpy.tl.sample_representation import (
     RandomVector,
     SCPoli,
     WassersteinTSNE,
+    _remove_negative_distances,
     calculate_average_without_nans,
+    correlate_cell_type_expression,
+    correlate_composition,
+    make_matrix_symmetric,
     valid_aggregate,
     valid_distance_metric,
 )
@@ -330,3 +336,229 @@ def test_gloscope_py(pbmc3k_adata):
 
     _assert_distances(distances, n_samples, adata.uns, method.DISTANCES_UNS_KEY)
     _assert_cache_respected(method, adata.uns, distances)
+
+
+# ---------------------------------------------------------------------------
+# make_matrix_symmetric
+# ---------------------------------------------------------------------------
+
+
+def test_make_matrix_symmetric_leaves_symmetric_matrix_unchanged():
+    m = np.array([[0.0, 1.0, 2.0], [1.0, 0.0, 3.0], [2.0, 3.0, 0.0]])
+    result = make_matrix_symmetric(m)
+    assert np.array_equal(result, m)
+
+
+def test_make_matrix_symmetric_fixes_asymmetric_matrix():
+    m = np.array([[0.0, 2.0, 0.0], [0.0, 0.0, 4.0], [0.0, 0.0, 0.0]])
+    with pytest.warns(UserWarning, match="not symmetric"):
+        result = make_matrix_symmetric(m)
+    assert np.allclose(result, result.T)
+    assert np.isclose(result[0, 1], 1.0)  # (2 + 0) / 2
+    assert np.isclose(result[1, 2], 2.0)  # (4 + 0) / 2
+
+
+# ---------------------------------------------------------------------------
+# _remove_negative_distances
+# ---------------------------------------------------------------------------
+
+
+def test_remove_negative_distances_leaves_non_negative_unchanged():
+    d = np.array([[0.0, 1.0], [1.0, 0.0]])
+    result = _remove_negative_distances(d)
+    assert np.array_equal(result, d)
+
+
+def test_remove_negative_distances_clips_to_zero_and_warns():
+    d = np.array([[0.0, -0.001, 1.0], [-0.001, 0.0, 2.0], [1.0, 2.0, 0.0]])
+    with pytest.warns(UserWarning, match="negative"):
+        result = _remove_negative_distances(d)
+    assert (result >= 0).all()
+    assert result[0, 1] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# GloScope_py.kl_divergence (static math method)
+# ---------------------------------------------------------------------------
+
+
+def test_kl_divergence_equal_distances():
+    # When r_i == r_j the log ratio is 0, so KL = log(m_j / (m_i - 1))
+    r = np.ones(10)
+    result = GloScope_py.kl_divergence(r_i=r, r_j=r, m_i=10, m_j=10, d=5)
+    assert np.isclose(result, np.log(10 / 9))
+
+
+def test_kl_divergence_returns_scalar():
+    rng = np.random.default_rng(42)
+    r_i = rng.uniform(0.5, 1.5, 20)
+    r_j = rng.uniform(0.5, 1.5, 20)
+    result = GloScope_py.kl_divergence(r_i=r_i, r_j=r_j, m_i=20, m_j=25, d=10)
+    assert np.isscalar(result) or result.ndim == 0
+
+
+# ---------------------------------------------------------------------------
+# _get_data branch coverage
+# ---------------------------------------------------------------------------
+
+
+def test_get_data_from_obsm(synthetic_adata):
+    adata = synthetic_adata.copy()
+    adata.obsm["X_pca"] = np.random.default_rng(0).normal(size=(adata.n_obs, 10))
+    method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X_pca")
+    method.prepare_anndata(adata)
+    with pytest.warns(UserWarning, match="adata.obsm"):
+        data = method._get_data()
+    assert data.shape == (adata.n_obs, 10)
+
+
+def test_get_data_from_layers(synthetic_adata):
+    adata = synthetic_adata.copy()
+    adata.layers["counts"] = adata.X.copy()
+    method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="counts")
+    method.prepare_anndata(adata)
+    with pytest.warns(UserWarning, match="adata.layers"):
+        data = method._get_data()
+    assert data.shape == adata.shape
+
+
+def test_get_data_invalid_layer_raises(synthetic_adata):
+    method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="nonexistent")
+    method.prepare_anndata(synthetic_adata.copy())
+    with pytest.raises(ValueError, match="Cannot find layer"):
+        method._get_data()
+
+
+# ---------------------------------------------------------------------------
+# Pseudobulk with non-default aggregate / distance parameters
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("aggregate,dist", [("median", "euclidean"), ("sum", "cosine")])
+def test_pseudobulk_non_default_params(aggregate, dist, synthetic_adata):
+    adata = synthetic_adata.copy()
+    n_samples = adata.obs[SAMPLE_KEY].nunique()
+    method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X")
+    method.prepare_anndata(adata)
+    distances = method.calculate_distance_matrix(force=True, aggregate=aggregate, dist=dist)
+    assert distances.shape == (n_samples, n_samples)
+    assert np.allclose(distances, distances.T)
+
+
+# ---------------------------------------------------------------------------
+# SampleRepresentationMethod.embed
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("embed_method", ["MDS", "TSNE", "UMAP"])
+def test_embed_produces_2d_coordinates(embed_method, synthetic_adata):
+    if embed_method == "UMAP":
+        pytest.importorskip("umap")
+    adata = synthetic_adata.copy()
+    n_samples = adata.obs[SAMPLE_KEY].nunique()
+    method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X")
+    method.prepare_anndata(adata)
+    method.calculate_distance_matrix(force=True)
+
+    coords = method.embed(method=embed_method)
+
+    assert coords.shape == (n_samples, 2)
+    assert embed_method in method.embeddings
+
+
+def test_embed_unsupported_method_raises(synthetic_adata):
+    adata = synthetic_adata.copy()
+    method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X")
+    method.prepare_anndata(adata)
+    method.calculate_distance_matrix(force=True)
+
+    with pytest.raises(ValueError, match="not supported"):
+        method.embed(method="PCA")
+
+
+# ---------------------------------------------------------------------------
+# SampleRepresentationMethod.to_adata
+# ---------------------------------------------------------------------------
+
+
+def test_to_adata_returns_anndata_with_correct_shape(synthetic_adata):
+    adata = synthetic_adata.copy()
+    n_samples = adata.obs[SAMPLE_KEY].nunique()
+    method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X")
+    method.prepare_anndata(adata)
+    method.calculate_distance_matrix(force=True)
+
+    samples_adata = method.to_adata()
+
+    assert isinstance(samples_adata, AnnData)
+    assert samples_adata.n_obs == n_samples
+
+
+# ---------------------------------------------------------------------------
+# correlate_composition
+# ---------------------------------------------------------------------------
+
+
+def _make_meta_adata(adata, target_key="target", seed=0):
+    """Create a minimal sample-level AnnData with a numeric target column."""
+    sample_ids = adata.obs[SAMPLE_KEY].unique()
+    rng = np.random.default_rng(seed)
+    return AnnData(obs=pd.DataFrame({target_key: rng.normal(size=len(sample_ids))}, index=sample_ids))
+
+
+def test_correlate_composition_returns_expected_columns(synthetic_adata):
+    adata = synthetic_adata.copy()
+    meta = _make_meta_adata(adata)
+
+    result = correlate_composition(meta, adata, SAMPLE_KEY, CELL_KEY, target="target")
+
+    assert isinstance(result, pd.DataFrame)
+    assert {"correlation", "p_value", "p_value_adj", "-log_p_value_adj"}.issubset(result.columns)
+    assert len(result) == adata.obs[CELL_KEY].nunique()
+
+
+def test_correlate_composition_pearson(synthetic_adata):
+    adata = synthetic_adata.copy()
+    meta = _make_meta_adata(adata)
+
+    result = correlate_composition(meta, adata, SAMPLE_KEY, CELL_KEY, target="target", method="pearson")
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == adata.obs[CELL_KEY].nunique()
+
+
+def test_correlate_composition_raises_for_invalid_method(synthetic_adata):
+    adata = synthetic_adata.copy()
+    meta = _make_meta_adata(adata)
+
+    with pytest.raises(ValueError, match="spearman"):
+        correlate_composition(meta, adata, SAMPLE_KEY, CELL_KEY, target="target", method="kendall")
+
+
+# ---------------------------------------------------------------------------
+# correlate_cell_type_expression
+# ---------------------------------------------------------------------------
+
+
+def test_correlate_cell_type_expression_returns_expected_columns(synthetic_adata):
+    adata = synthetic_adata.copy()
+    meta = _make_meta_adata(adata)
+
+    result = correlate_cell_type_expression(
+        meta, adata, SAMPLE_KEY, CELL_KEY, target="target", layer="X", min_sample_size=0
+    )
+
+    assert isinstance(result, pd.DataFrame)
+    assert {"cell_type", "gene_name", "correlation", "p_value", "n_observations", "-log_p_value_adj"}.issubset(
+        result.columns
+    )
+
+
+def test_correlate_cell_type_expression_raises_for_invalid_method(synthetic_adata):
+    adata = synthetic_adata.copy()
+    meta = _make_meta_adata(adata)
+
+    with pytest.raises(ValueError, match="spearman"):
+        correlate_cell_type_expression(
+            meta, adata, SAMPLE_KEY, CELL_KEY, target="target", layer="X", min_sample_size=0, method="kendall"
+        )
