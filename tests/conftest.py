@@ -78,6 +78,25 @@ def nan_heavy_matrix():
     )
 
 
+@pytest.fixture(scope="session")
+def pbmc3k_adata():
+    """Preprocessed PBMC3k dataset with randomly assigned sample labels.
+
+    Provides real single-cell data with X_pca embedding and louvain cell-type
+    annotations, suitable for methods that require biological structure in the
+    data (e.g. DiffusionEMD, GloScope, WassersteinTSNE, PILOT, MOFA).
+    """
+    import scanpy as sc
+
+    adata = sc.datasets.pbmc3k_processed()
+    rng = np.random.default_rng(0)
+    n_samples = 4
+    adata.obs["sample_id"] = rng.choice(
+        [f"sample_{i}" for i in range(n_samples)], size=adata.n_obs
+    ).astype(str)
+    return adata
+
+
 @pytest.fixture
 def toy_distances():
     """Creates a toy distance matrix and conditions array for evaluation tests."""
