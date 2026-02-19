@@ -190,7 +190,9 @@ def test_wasserstein_tsne(pbmc3k_adata):
 
 
 def test_pilot(pbmc3k_adata):
-    pytest.importorskip("pilotpy", exc_type=Exception)  # Raises error if R is not installed, so broad exception is necessary
+    pytest.importorskip(
+        "pilotpy", exc_type=Exception
+    )  # Raises error if R is not installed, so broad exception is necessary
     adata = pbmc3k_adata.copy()
     adata.obs["state"] = "control"
     n_samples = adata.obs[SAMPLE_KEY].nunique()
