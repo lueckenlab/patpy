@@ -4,15 +4,15 @@ import pytest
 from anndata import AnnData
 
 from patpy.tl.sample_representation import (
+    MOFA,
+    PILOT,
     CellGroupComposition,
     DiffusionEarthMoverDistance,
     GloScope,
     GloScope_py,
     GroupedPseudobulk,
-    MOFA,
     MrVI,
     PhEMD,
-    PILOT,
     Pseudobulk,
     RandomVector,
     SCPoli,
@@ -218,9 +218,7 @@ def test_scpoli(synthetic_adata):
     adata = synthetic_adata.copy()
     n_samples = adata.obs[SAMPLE_KEY].nunique()
 
-    method = SCPoli(
-        sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, n_epochs=1, pretraining_epochs=1
-    )
+    method = SCPoli(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, n_epochs=1, pretraining_epochs=1)
     method.prepare_anndata(adata)
     distances = method.calculate_distance_matrix(force=True)
 
@@ -258,9 +256,7 @@ def test_diffusion_emd(pbmc3k_adata):
     adata = pbmc3k_adata.copy()
     n_samples = adata.obs[SAMPLE_KEY].nunique()
 
-    method = DiffusionEarthMoverDistance(
-        sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca"
-    )
+    method = DiffusionEarthMoverDistance(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca")
     method.prepare_anndata(adata)
     distances = method.calculate_distance_matrix(force=True)
 
@@ -301,7 +297,7 @@ def _skip_if_gloscope_r_unavailable():
     """Skip the test if rpy2 or the GloScope R package are not available."""
     pytest.importorskip("rpy2")
     try:
-        import rpy2.robjects as ro  # noqa: PLC0415
+        import rpy2.robjects as ro
 
         ro.r("library(GloScope)")
     except Exception as exc:
@@ -675,9 +671,7 @@ def test_gloscope_py_with_n_components(pbmc3k_adata):
     adata = pbmc3k_adata.copy()
     n_samples = adata.obs[SAMPLE_KEY].nunique()
 
-    method = GloScope_py(
-        sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca", n_components=5
-    )
+    method = GloScope_py(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca", n_components=5)
     method.prepare_anndata(adata)
     distances = method.calculate_distance_matrix(force=True)
 

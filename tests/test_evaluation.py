@@ -38,7 +38,6 @@ def test_get_null_distances_distribution(toy_distances):
     assert not np.isnan(null_dist).any()
 
 
-
 # Verify k-NN prediction shape and label domain for classification.
 def test_predict_knn(toy_distances):
     distances, _ = toy_distances

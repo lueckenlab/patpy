@@ -14,9 +14,7 @@ def synthetic_adata():
     n_cells, n_genes = 60, 20
 
     base_cell = rng.poisson(lam=6, size=n_genes) + 1
-    cells = [
-        bootstrap_genes(base_cell + rng.integers(0, 3, size=n_genes), noise_scale=0.05) for _ in range(n_cells)
-    ]
+    cells = [bootstrap_genes(base_cell + rng.integers(0, 3, size=n_genes), noise_scale=0.05) for _ in range(n_cells)]
 
     sample_pattern = np.repeat([f"sample_{i}" for i in range(6)], repeats=n_cells // 6)
     cell_type_pattern = np.tile(
@@ -91,9 +89,7 @@ def pbmc3k_adata():
     adata = sc.datasets.pbmc3k_processed()
     rng = np.random.default_rng(0)
     n_samples = 4
-    adata.obs["sample_id"] = rng.choice(
-        [f"sample_{i}" for i in range(n_samples)], size=adata.n_obs
-    ).astype(str)
+    adata.obs["sample_id"] = rng.choice([f"sample_{i}" for i in range(n_samples)], size=adata.n_obs).astype(str)
     return adata
 
 
