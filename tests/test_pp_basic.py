@@ -72,11 +72,12 @@ def test_calculate_compositional_metrics(synthetic_adata):
 
 # Validate QC metric aggregation and column naming.
 def test_calculate_cell_qc_metrics(synthetic_adata):
-    synthetic_adata.obs["QC_ngenes"] = np.linspace(10, 70, synthetic_adata.n_obs, dtype=int)
-    synthetic_adata.obs["QC_total_UMI"] = np.linspace(100, 400, synthetic_adata.n_obs, dtype=int)
+    adata = synthetic_adata.copy()
+    adata.obs["QC_ngenes"] = np.linspace(10, 70, adata.n_obs, dtype=int)
+    adata.obs["QC_total_UMI"] = np.linspace(100, 400, adata.n_obs, dtype=int)
 
     result = calculate_cell_qc_metrics(
-        synthetic_adata,
+        adata,
         sample_key=SAMPLE_KEY,
         cell_qc_vars=["QC_ngenes", "QC_total_UMI"],
         agg_function=np.median,
@@ -85,6 +86,7 @@ def test_calculate_cell_qc_metrics(synthetic_adata):
     assert "median_QC_ngenes" in result.columns
     assert "median_QC_total_UMI" in result.columns
     assert not result.isna().any().any()
+    assert set(result.index) == set(adata.obs[SAMPLE_KEY])
 
 
 # Confirm cell counts per sample are tallied correctly.
@@ -114,10 +116,24 @@ def test_filter_small_samples(synthetic_adata):
 
 # Ensure undersized or absent cell groups are removed.
 def test_filter_small_cell_groups(synthetic_adata):
+    # Pass-through: threshold below the minimum group size — all cell types kept.
     filtered = filter_small_cell_groups(
         synthetic_adata, sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, cluster_size_threshold=2
     )
+    assert set(filtered.obs[CELL_KEY].unique()) == set(synthetic_adata.obs[CELL_KEY].unique())
 
+    # Filtering: add a rare cell type that exists only in one sample with one cell,
+    # which is below the threshold for all other samples (0 < threshold).
+    adata = synthetic_adata.copy()
+    rare_row = adata[:1].copy()
+    rare_row.obs[CELL_KEY] = "rare_ct"
+    from anndata import concat
+
+    adata_with_rare = concat([adata, rare_row])
+    filtered = filter_small_cell_groups(
+        adata_with_rare, sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, cluster_size_threshold=2
+    )
+    assert "rare_ct" not in filtered.obs[CELL_KEY].values
     assert set(filtered.obs[CELL_KEY].unique()) == set(synthetic_adata.obs[CELL_KEY].unique())
 
 
@@ -131,12 +147,13 @@ def test_subsample(synthetic_adata):
 
 # Verify metadata extraction preserves order and handles duplicate sample key column.
 def test_extract_metadata_with_sample_column(synthetic_adata):
-    donor_condition = {sample: f"group_{i}" for i, sample in enumerate(synthetic_adata.obs[SAMPLE_KEY].unique())}
-    synthetic_adata.obs["donor_condition"] = synthetic_adata.obs[SAMPLE_KEY].map(donor_condition)
+    adata = synthetic_adata.copy()
+    donor_condition = {sample: f"group_{i}" for i, sample in enumerate(adata.obs[SAMPLE_KEY].unique())}
+    adata.obs["donor_condition"] = adata.obs[SAMPLE_KEY].map(donor_condition)
 
-    metadata = extract_metadata(synthetic_adata, sample_key=SAMPLE_KEY, columns=[SAMPLE_KEY, "donor_condition"])
+    metadata = extract_metadata(adata, sample_key=SAMPLE_KEY, columns=[SAMPLE_KEY, "donor_condition"])
 
-    assert list(metadata.index) == list(synthetic_adata.obs[SAMPLE_KEY].unique())
+    assert list(metadata.index) == list(adata.obs[SAMPLE_KEY].unique())
     assert SAMPLE_KEY in metadata.columns
     assert "donor_condition" in metadata.columns
 
