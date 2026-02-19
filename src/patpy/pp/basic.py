@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import scanpy as sc
+import scipy.sparse as sp
 
 
 def prepare_data_for_phemd(adata, sample_col, n_top_var_genes: int = 100):
@@ -22,7 +23,10 @@ def prepare_data_for_phemd(adata, sample_col, n_top_var_genes: int = 100):
     top_variance = adata.var["variances"].sort_values(ascending=False)[:n_top_var_genes]
     selected_genes = top_variance.index
 
-    expression_data = adata.X.toarray()
+    if sp.issparse(adata.X):
+        expression_data = adata.X.toarray()
+    else:
+        expression_data = adata.X
     samples_names = adata.obs[sample_col]
 
     return expression_data, adata.var_names, selected_genes, samples_names
