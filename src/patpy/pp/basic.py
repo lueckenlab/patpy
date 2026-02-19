@@ -23,6 +23,7 @@ def prepare_data_for_phemd(adata, sample_col, n_top_var_genes: int = 100):
     selected_genes = top_variance.index
 
     import scipy.sparse as sp
+
     if sp.issparse(adata.X):
         expression_data = adata.X.toarray()
     else:

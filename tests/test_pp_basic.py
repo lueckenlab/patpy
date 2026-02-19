@@ -123,9 +123,7 @@ def test_filter_small_cell_groups(synthetic_adata):
 
 # Check subsampling respects per-category minimums and fraction sizing.
 def test_subsample(synthetic_adata):
-    subsampled = subsample(
-        synthetic_adata, obs_category_col=CELL_KEY, min_samples_per_category=1, fraction=0.5
-    )
+    subsampled = subsample(synthetic_adata, obs_category_col=CELL_KEY, min_samples_per_category=1, fraction=0.5)
 
     assert subsampled.shape[0] <= synthetic_adata.shape[0]
     assert all(ct in subsampled.obs[CELL_KEY].values for ct in synthetic_adata.obs[CELL_KEY].unique())
