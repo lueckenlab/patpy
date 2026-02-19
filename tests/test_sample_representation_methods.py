@@ -302,7 +302,7 @@ def _skip_if_gloscope_r_unavailable():
         import rpy2.robjects as ro
 
         ro.r("library(GloScope)")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         pytest.skip(f"GloScope R package not available: {exc}")
 
 
