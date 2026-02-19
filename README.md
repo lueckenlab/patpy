@@ -31,10 +31,16 @@ Thank you for your patience and interest. Stay tuned for updates!
 ---
 
 [![Tests][badge-tests]][link-tests]
+[![Coverage][badge-coverage]][link-coverage]
+[![PyPI][badge-pypi]][link-pypi]
 [![Documentation][badge-docs]][link-docs]
 
 [badge-tests]: https://img.shields.io/github/actions/workflow/status/lueckenlab/patpy/test.yaml?branch=main
 [link-tests]: https://github.com/lueckenlab/patpy/actions/workflows/test.yml
+[badge-coverage]: https://codecov.io/gh/lueckenlab/patpy/branch/main/graph/badge.svg
+[link-coverage]: https://codecov.io/gh/lueckenlab/patpy
+[badge-pypi]: https://img.shields.io/pypi/v/patpy
+[link-pypi]: https://pypi.org/project/patpy/
 [badge-docs]: https://img.shields.io/readthedocs/patpy
 
 ## Getting started
