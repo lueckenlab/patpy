@@ -6,6 +6,7 @@ import pandas as pd
 import scanpy as sc
 import scipy
 import seaborn as sns
+from scipy.sparse import issparse
 from scipy.stats import pearsonr, spearmanr
 from statsmodels.stats.multitest import multipletests
 
@@ -69,9 +70,8 @@ def make_matrix_symmetric(matrix):
     import warnings
 
     import numpy as np
-    import scipy.sparse
 
-    is_sparse = scipy.sparse.issparse(matrix)
+    is_sparse = issparse(matrix)
 
     def is_symmetric(mat):
         if is_sparse:
@@ -929,7 +929,8 @@ class SampleRepresentationMethod:
             for i, cell_group in enumerate(cell_groups):
                 for j, sample in enumerate(samples):
                     cells_data = data[
-                        (self.adata.obs[sample_key] == sample) & (self.adata.obs[cell_group_key] == cell_group)
+                        (self.adata.obs[sample_key].values == sample)
+                        & (self.adata.obs[cell_group_key].values == cell_group)
                     ]
 
                     if cells_data.size == 0:
@@ -942,7 +943,7 @@ class SampleRepresentationMethod:
             pseudobulk_data = np.zeros(shape=(len(samples), data.shape[1]))
 
             for j, sample in enumerate(samples):
-                cells_data = data[self.adata.obs[sample_key] == sample]
+                cells_data = data[(self.adata.obs[sample_key].values == sample)]
 
                 if cells_data.size == 0:
                     pseudobulk_data[j] = fill_value
@@ -1284,7 +1285,7 @@ class Pseudobulk(SampleRepresentationMethod):
         self.sample_representation = np.zeros(shape=(len(self.samples), data.shape[1]))
 
         for i, sample in enumerate(self.samples):
-            sample_cells = data[self.adata.obs[self.sample_key] == sample, :]
+            sample_cells = data[(self.adata.obs[self.sample_key].values == sample), :]
             self.sample_representation[i] = aggregation_func(sample_cells, axis=0)
 
         distances = scipy.spatial.distance.pdist(self.sample_representation, metric=distance_metric)
@@ -2022,7 +2023,11 @@ class GloScope_py(SampleRepresentationMethod):
             data = data[:, : self.n_components]
 
         # Prepare the embedding (one embedding per sample)
-        embedding_dict = {s: np.asarray(data[self.adata.obs[self.sample_key] == s]) for s in self.samples}
+        is_sparse = issparse(data)
+        if is_sparse:
+            embedding_dict = {s: data[(self.adata.obs[self.sample_key].values == s)] for s in self.samples}
+        else:
+            embedding_dict = {s: np.asarray(data[(self.adata.obs[self.sample_key].values == s)]) for s in self.samples}
 
         # Precompute kNN index for each sample and kNN distances for each samplle within its own sample
         #   --> Index can be used multiple times, which helps with the runtime
@@ -2110,7 +2115,15 @@ class GloScope_py(SampleRepresentationMethod):
 
         # Prepare the embedding (one embedding per sample)
         # --> convert into cupy arrays
-        embedding_dict = {g: cp.asarray(data[self.adata.obs[self.sample_key] == g]) for g in self.samples}
+        is_sparse = issparse(data)
+        if is_sparse:
+            import cupyx.scipy.sparse as cpx_sp
+
+            embedding_dict = {
+                g: cpx_sp.csr_matrix(data[(self.adata.obs[self.sample_key].values == g)]) for g in self.samples
+            }
+        else:
+            embedding_dict = {g: cp.asarray(data[(self.adata.obs[self.sample_key].values == g)]) for g in self.samples}
 
         # Self kNN distances for each sample (r in KL)
         knn_self_dists = {}
