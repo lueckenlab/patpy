@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.11.4
+
+### Added
+
+- Tests for all sample representation methods
+- Tests for preprocessing functions in `pp/basic.py`
+- Tests for evaluation utilities in `tl/evaluation.py`
+- `conftest.py` with reusable fixtures
+
+### Fixed
+
+- `prepare_data_for_phemd` now handles dense matrices in addition to sparse ones
+
 ## 0.11.3
 
 ### Added
