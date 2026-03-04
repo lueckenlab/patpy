@@ -82,6 +82,9 @@ optional-dependencies.pilot = [
 optional-dependencies.scpoli = [
   "scarches>=0.5.1",
 ]
+optional-dependencies.mixmil = [
+  "mixmil>=0.1.2",
+]
 optional-dependencies.test = [
   "coverage",
   "pytest",
