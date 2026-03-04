@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import warnings
-from typing import List, Literal, Optional
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 import scanpy as sc
+
 
 class SupervisedSampleMethod:
     """Base class for supervised sample-level representation methods.
@@ -38,7 +39,7 @@ class SupervisedSampleMethod:
         self,
         sample_key: str,
         label_key: str,
-        cell_group_key: Optional[str] = None,
+        cell_group_key: str | None = None,
         layer: str = "X_pca",
         seed: int = 42,
     ):
@@ -48,10 +49,10 @@ class SupervisedSampleMethod:
         self.layer = layer
         self.seed = seed
 
-        self.adata: Optional[sc.AnnData] = None
-        self.samples: Optional[np.ndarray] = None
-        self.labels: Optional[pd.Series] = None
-        self.cell_groups: Optional[np.ndarray] = None
+        self.adata: sc.AnnData | None = None
+        self.samples: np.ndarray | None = None
+        self.labels: pd.Series | None = None
+        self.cell_groups: np.ndarray | None = None
 
     def prepare_anndata(self, adata: sc.AnnData) -> None:
         """Store ``adata``, populate ``self.samples`` and ``self.labels``.
@@ -68,13 +69,9 @@ class SupervisedSampleMethod:
         self.adata = adata
 
         if self.sample_key not in adata.obs.columns:
-            raise ValueError(
-                f"sample_key='{self.sample_key}' not found in adata.obs."
-            )
+            raise ValueError(f"sample_key='{self.sample_key}' not found in adata.obs.")
         if self.label_key not in adata.obs.columns:
-            raise ValueError(
-                f"label_key='{self.label_key}' not found in adata.obs."
-            )
+            raise ValueError(f"label_key='{self.label_key}' not found in adata.obs.")
 
         self.samples = adata.obs[self.sample_key].unique()
 
@@ -115,9 +112,7 @@ class SupervisedSampleMethod:
             If called before :meth:`prepare_anndata`.
         """
         self._check_fitted()
-        raise NotImplementedError(
-            f"{type(self).__name__} must implement get_sample_scores()."
-        )
+        raise NotImplementedError(f"{type(self).__name__} must implement get_sample_scores().")
 
     def get_cell_scores(self) -> pd.DataFrame:
         """Return per-cell attention or contribution scores.
@@ -137,9 +132,7 @@ class SupervisedSampleMethod:
             If called before :meth:`prepare_anndata`.
         """
         self._check_fitted()
-        raise NotImplementedError(
-            f"{type(self).__name__} must implement get_cell_scores()."
-        )
+        raise NotImplementedError(f"{type(self).__name__} must implement get_cell_scores().")
 
     def get_sample_embeddings(self) -> pd.DataFrame:
         """Return latent donor-level embeddings (optional).
@@ -159,9 +152,7 @@ class SupervisedSampleMethod:
             Default implementation — override in subclasses that provide
             donor embeddings.
         """
-        raise NotImplementedError(
-            f"{type(self).__name__} does not provide sample embeddings."
-        )
+        raise NotImplementedError(f"{type(self).__name__} does not provide sample embeddings.")
 
     def calculate_distance_matrix(self, dist: str = "euclidean") -> np.ndarray:
         """Compute a donor x donor distance matrix from sample embeddings.
@@ -186,9 +177,7 @@ class SupervisedSampleMethod:
 
     def _check_fitted(self) -> None:
         if self.adata is None:
-            raise RuntimeError(
-                "Model is not yet fitted. Call prepare_anndata() first."
-            )
+            raise RuntimeError("Model is not yet fitted. Call prepare_anndata() first.")
 
     def _get_layer_data(self) -> np.ndarray:
         """Return the cell-level feature matrix from ``self.layer``."""
@@ -199,13 +188,11 @@ class SupervisedSampleMethod:
             return self.adata.layers[self.layer]
         if self.layer in ("X", None):
             return self.adata.X
-        raise ValueError(
-            f"layer='{self.layer}' not found in adata.obsm or adata.layers."
-        )
+        raise ValueError(f"layer='{self.layer}' not found in adata.obsm or adata.layers.")
 
     def plot_sample_scores(
         self,
-        group_by: Optional[str] = None,
+        group_by: str | None = None,
         ax=None,
     ):
         """Plot per-donor scores, optionally grouped by a metadata column.
@@ -230,9 +217,7 @@ class SupervisedSampleMethod:
 
         if group_by in self.adata.obs.columns:
             meta = (
-                self.adata.obs[[self.sample_key, group_by]]
-                .drop_duplicates(self.sample_key)
-                .set_index(self.sample_key)
+                self.adata.obs[[self.sample_key, group_by]].drop_duplicates(self.sample_key).set_index(self.sample_key)
             )
             scores = scores.join(meta)
 
@@ -339,17 +324,17 @@ class MixMIL(SupervisedSampleMethod):
         self,
         sample_key: str,
         label_key: str,
-        cell_group_key: Optional[str] = None,
+        cell_group_key: str | None = None,
         layer: str = "X_pca",
         n_pcs: int = 50,
-        likelihood: Optional[Literal["binomial", "categorical"]] = "binomial",
-        n_trials: Optional[int] = 2,
+        likelihood: Literal["binomial", "categorical"] | None = "binomial",
+        n_trials: int | None = 2,
         n_epochs: int = 2000,
         batch_size: int = 64,
         lr: float = 1e-3,
         encode_sex: bool = True,
         encode_age: bool = True,
-        additional_covariates: Optional[List[str]] = None,
+        additional_covariates: list[str] | None = None,
         dtype: str = "float32",
         seed: int = 67,
     ):
@@ -374,7 +359,7 @@ class MixMIL(SupervisedSampleMethod):
         self._model = None
         self._history = None
 
-        self._donor_order: Optional[np.ndarray] = None
+        self._donor_order: np.ndarray | None = None
 
     def prepare_anndata(self, adata) -> None:
         """Train MixMIL on ``adata``.
@@ -392,9 +377,7 @@ class MixMIL(SupervisedSampleMethod):
         try:
             from mixmil import MixMIL as _MixMIL
         except ImportError as e:
-            raise ImportError(
-                "mixmil is required. Install with:  pip install mixmil"
-            ) from e
+            raise ImportError("mixmil is required. Install with:  pip install mixmil") from e
 
         super().prepare_anndata(adata)
         self._ensure_layer()
@@ -404,7 +387,9 @@ class MixMIL(SupervisedSampleMethod):
 
         if self.likelihood is not None:
             model = _MixMIL.init_with_mean_model(
-                Xs, F, Y,
+                Xs,
+                F,
+                Y,
                 likelihood=self.likelihood,
                 n_trials=self.n_trials,
             )
@@ -414,7 +399,9 @@ class MixMIL(SupervisedSampleMethod):
             model = _MixMIL(Q=Q, K=K)
 
         self._history = model.train(
-            Xs, F, Y,
+            Xs,
+            F,
+            Y,
             n_epochs=self.n_epochs,
             batch_size=self.batch_size,
             lr=self.lr,
@@ -481,10 +468,7 @@ class MixMIL(SupervisedSampleMethod):
         iidx = pd.Categorical(sorted_donors).codes
         indptr = np.concatenate([[0], np.bincount(iidx).cumsum()])
 
-        Xs = [
-            torch.from_numpy(X_sorted[s:e])
-            for s, e in zip(indptr[:-1], indptr[1:], strict=True)
-        ]
+        Xs = [torch.from_numpy(X_sorted[s:e]) for s, e in zip(indptr[:-1], indptr[1:], strict=True)]
 
         with torch.no_grad():
             w, _ = self._model.get_weights(Xs)
@@ -529,18 +513,15 @@ class MixMIL(SupervisedSampleMethod):
         iidx = pd.Categorical(sorted_donors).codes
         indptr = np.concatenate([[0], np.bincount(iidx).cumsum()])
 
-        Xs = [
-            torch.from_numpy(X_sorted[s:e])
-            for s, e in zip(indptr[:-1], indptr[1:], strict=True)
-        ]
+        Xs = [torch.from_numpy(X_sorted[s:e]) for s, e in zip(indptr[:-1], indptr[1:], strict=True)]
 
         with torch.no_grad():
-            w, _ = self._model.get_weights(Xs) 
+            w, _ = self._model.get_weights(Xs)
 
         embeddings = []
         for bag_X, bag_w in zip(Xs, w, strict=True):
-            w_scalar = bag_w.mean(dim=1, keepdim=True) 
-            emb = (w_scalar * bag_X).sum(dim=0).numpy()  
+            w_scalar = bag_w.mean(dim=1, keepdim=True)
+            emb = (w_scalar * bag_X).sum(dim=0).numpy()
             embeddings.append(emb)
 
         embeddings_arr = np.stack(embeddings)
@@ -548,7 +529,7 @@ class MixMIL(SupervisedSampleMethod):
         return pd.DataFrame(embeddings_arr, index=self._donor_order, columns=cols)
 
     @property
-    def training_history(self) -> Optional[list]:
+    def training_history(self) -> list | None:
         """List of per-step loss dicts returned by MixMIL training."""
         return self._history
 
@@ -586,8 +567,7 @@ class MixMIL(SupervisedSampleMethod):
 
         if self.layer not in self.adata.obsm:
             warnings.warn(
-                f"Key '{self.layer}' not found in adata.obsm. "
-                f"Computing PCA with n_comps={self.n_pcs}.",
+                f"Key '{self.layer}' not found in adata.obsm. Computing PCA with n_comps={self.n_pcs}.",
                 stacklevel=3,
             )
             sc.pp.pca(self.adata, n_comps=self.n_pcs)
@@ -617,10 +597,7 @@ class MixMIL(SupervisedSampleMethod):
         donor_order = np.array(cat.categories)
         indptr = np.concatenate([[0], np.bincount(iidx).cumsum()])
 
-        Xs = [
-            torch.from_numpy(X_sorted[s:e])
-            for s, e in zip(indptr[:-1], indptr[1:], strict=True)
-        ]
+        Xs = [torch.from_numpy(X_sorted[s:e]) for s, e in zip(indptr[:-1], indptr[1:], strict=True)]
         n_donors = len(donor_order)
 
         covariate_list = [torch.ones((n_donors, 1), dtype=dtype_torch)]
@@ -637,9 +614,7 @@ class MixMIL(SupervisedSampleMethod):
         if self.encode_sex:
             if "sex" in self.adata.obs.columns:
                 codes = pd.Categorical(_donor_col("sex")).codes.astype(self.dtype)
-                covariate_list.append(
-                    torch.tensor(codes, dtype=dtype_torch).unsqueeze(1)
-                )
+                covariate_list.append(torch.tensor(codes, dtype=dtype_torch).unsqueeze(1))
             else:
                 warnings.warn(
                     "encode_sex=True but 'sex' not found in adata.obs; skipping.",
@@ -652,8 +627,7 @@ class MixMIL(SupervisedSampleMethod):
                 age_t = torch.tensor(age, dtype=dtype_torch).unsqueeze(1)
                 mean, std = age_t.mean(), age_t.std()
                 if std > 0 and not (
-                    torch.isclose(mean, torch.zeros(1), atol=1e-2)
-                    and torch.isclose(std, torch.ones(1), atol=1e-2)
+                    torch.isclose(mean, torch.zeros(1), atol=1e-2) and torch.isclose(std, torch.ones(1), atol=1e-2)
                 ):
                     age_t = (age_t - mean) / std
                 covariate_list.append(age_t)
@@ -666,18 +640,13 @@ class MixMIL(SupervisedSampleMethod):
         for cov in self.additional_covariates:
             if cov in self.adata.obs.columns:
                 vals = _donor_col(cov).astype("float32")
-                covariate_list.append(
-                    torch.tensor(vals, dtype=dtype_torch).unsqueeze(1)
-                )
+                covariate_list.append(torch.tensor(vals, dtype=dtype_torch).unsqueeze(1))
             elif cov in self.adata.obsm:
                 # obsm covariate — must already be donor-level (n_donors x d)
                 vals = self.adata.obsm[cov].astype("float32")
                 covariate_list.append(torch.from_numpy(vals))
             else:
-                raise ValueError(
-                    f"additional_covariates entry '{cov}' not found in "
-                    "adata.obs or adata.obsm."
-                )
+                raise ValueError(f"additional_covariates entry '{cov}' not found in adata.obs or adata.obsm.")
 
         F = torch.cat(covariate_list, dim=1)
 
