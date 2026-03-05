@@ -14,8 +14,8 @@ N_CELLS_PER_DONOR = 20
 N_CELLS = N_DONORS * N_CELLS_PER_DONOR
 N_GENES = 50
 N_PCA_DIMS = 10
-N_UCE_DIMS = 1280   
-PULSAR_HIDDEN = 16 
+N_UCE_DIMS = 1280
+PULSAR_HIDDEN = 16
 
 
 @pytest.fixture
@@ -354,7 +354,7 @@ def test_mixmil_warns_and_skips_missing_sex_column(supervised_adata):
         label_key=LABEL_KEY,
         layer="X_pca",
         n_epochs=2,
-        encode_sex=True, 
+        encode_sex=True,
         encode_age=False,
     )
     with pytest.warns(UserWarning, match="sex"):
@@ -376,7 +376,7 @@ def test_mixmil_warns_and_skips_missing_age_column(supervised_adata):
         layer="X_pca",
         n_epochs=2,
         encode_sex=False,
-        encode_age=True,  
+        encode_age=True,
     )
     with pytest.warns(UserWarning, match="age"):
         model.prepare_anndata(adata)
@@ -486,8 +486,7 @@ def mock_pulsar_model(monkeypatch, pulsar_adata):
             return self
 
         def forward(self, cell_embeddings, *args, **kwargs):
-
-            proj = self.proj(cell_embeddings)  
+            proj = self.proj(cell_embeddings)
 
             batch, seq, h = proj.shape
             cls = torch.zeros(batch, 1, h)
@@ -500,14 +499,25 @@ def mock_pulsar_model(monkeypatch, pulsar_adata):
     tiny_model = _TinyModel()
 
     import types
+
     pulsar_model_mod = types.ModuleType("pulsar.model")
     pulsar_model_mod.PULSAR = _TinyModel
     monkeypatch.setitem(__import__("sys").modules, "pulsar", types.ModuleType("pulsar"))
     monkeypatch.setitem(__import__("sys").modules, "pulsar.model", pulsar_model_mod)
 
-    def _fake_extract(adata, model, label_name=None, donor_id_key="donor_id",
-                      embedding_key="X_uce", device="cpu", sample_cell_num=8,
-                      resample_num=1, batch_size=4, seed=0, **kwargs):
+    def _fake_extract(
+        adata,
+        model,
+        label_name=None,
+        donor_id_key="donor_id",
+        embedding_key="X_uce",
+        device="cpu",
+        sample_cell_num=8,
+        resample_num=1,
+        batch_size=4,
+        seed=0,
+        **kwargs,
+    ):
         rng = np.random.default_rng(seed)
         result = {}
         for donor in adata.obs[donor_id_key].unique():
@@ -612,7 +622,7 @@ def test_pulsar_cell_scores_are_bounded(pulsar_adata, mock_pulsar_model):
 
 def test_pulsar_raises_before_fit(pulsar_adata):
     """All output methods raise RuntimeError when called before prepare_anndata."""
-    pytest.importorskip("torch")   # PULSAR needs torch even before fitting
+    pytest.importorskip("torch")  # PULSAR needs torch even before fitting
     from patpy.tl.supervised import PULSAR
 
     model = PULSAR(sample_key=SAMPLE_KEY, label_key=LABEL_KEY)
@@ -668,6 +678,7 @@ def test_pulsar_donor_index_matches_across_outputs(pulsar_adata, mock_pulsar_mod
 def test_pulsar_fit_linear_probe_classification(pulsar_adata, mock_pulsar_model):
     """fit_linear_probe returns accuracy and f1 for a classification task."""
     from patpy.tl.supervised import PULSAR
+
     pytest.importorskip("sklearn")
 
     adata = pulsar_adata.copy()
@@ -692,6 +703,7 @@ def test_pulsar_fit_linear_probe_classification(pulsar_adata, mock_pulsar_model)
 def test_pulsar_fit_linear_probe_regression(pulsar_adata, mock_pulsar_model):
     """fit_linear_probe returns r2 and pearson for a regression task."""
     from patpy.tl.supervised import PULSAR
+
     pytest.importorskip("sklearn")
 
     adata = pulsar_adata.copy()
@@ -720,6 +732,7 @@ def test_pulsar_fit_linear_probe_regression(pulsar_adata, mock_pulsar_model):
 def test_pulsar_fit_linear_probe_invalid_task_raises(pulsar_adata, mock_pulsar_model):
     """fit_linear_probe raises ValueError for an unsupported task type."""
     from patpy.tl.supervised import PULSAR
+
     pytest.importorskip("sklearn")
 
     adata = pulsar_adata.copy()
