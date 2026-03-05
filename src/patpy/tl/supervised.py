@@ -737,14 +737,8 @@ class PULSAR(SupervisedSampleMethod):
         self.device = device
         self.resample_num = resample_num
 
-        # Set after prepare_anndata
         self._pulsar_model = None
-        # (n_donors, hidden_dim) CLS embeddings, indexed by donor order
         self._donor_embeddings: Optional[pd.DataFrame] = None
-
-    # ------------------------------------------------------------------
-    # Fit / extract
-    # ------------------------------------------------------------------
 
     def prepare_anndata(self, adata) -> None:
         """Load PULSAR model and extract donor-level CLS embeddings.
@@ -774,39 +768,29 @@ class PULSAR(SupervisedSampleMethod):
                 "If you only have PCA embeddings, use MixMIL instead."
             )
 
-        # Warn when the embedding dimensionality looks too small for UCE/PULSAR.
-        # UCE embeddings are typically 1280-dim; PCA is usually ≤50-dim.
         emb_dim = adata.obsm[self.layer].shape[1]
         if emb_dim < 256:
             warnings.warn(
                 f"adata.obsm['{self.layer}'] has only {emb_dim} dimensions. "
                 "PULSAR expects high-dimensional cell embeddings such as UCE (~1280-dim). "
                 "Low-dimensional inputs like PCA will produce unreliable donor embeddings. "
-                "Consider computing UCE embeddings first, or use MixMIL for PCA-based inputs.",
+                "Consider computing UCE embeddings first.",
                 UserWarning,
                 stacklevel=2,
             )
 
-        # Load model — handle transformers version incompatibility where
-        # older PULSAR checkpoints define '_tied_weights_keys' but newer
-        # transformers expects 'all_tied_weights_keys'.
         try:
             self._pulsar_model = _PulsarModel.from_pretrained(self.pretrained_model)
         except AttributeError as e:
             if "all_tied_weights_keys" in str(e) or "_tied_weights_keys" in str(e):
                 raise RuntimeError(
                     "PULSAR failed to load due to a transformers version mismatch. "
-                    "The PULSAR checkpoint uses '_tied_weights_keys' but your installed "
-                    "transformers version expects 'all_tied_weights_keys'. "
-                    "Downgrade transformers to a compatible version:\n"
-                    "    pip install 'transformers<4.44'\n"
                     "or install PULSAR from source which may ship a patched version:\n"
                     "    pip install git+https://github.com/snap-stanford/PULSAR"
                 ) from e
             raise
         self._pulsar_model.eval()
 
-        # Move to device
         try:
             import torch
             self._pulsar_model = self._pulsar_model.to(self.device)
@@ -819,8 +803,8 @@ class PULSAR(SupervisedSampleMethod):
             )
             self.device = "cpu"
             self._pulsar_model = self._pulsar_model.to("cpu")
+            self._pulsar_model = self._pulsar_model.to(torch.bfloat16)
 
-        # Extract embeddings using PULSAR's own utility
         donor_embedding_collection = extract_donor_embeddings_from_h5ad(
             adata,
             model=self._pulsar_model,
@@ -834,12 +818,10 @@ class PULSAR(SupervisedSampleMethod):
             seed=self.seed,
         )
 
-        # Average across resamples and build donor × dim DataFrame
         donor_ids = []
         embeddings = []
         for donor_id, data in donor_embedding_collection.items():
             donor_ids.append(donor_id)
-            # data["embedding"] is a list of arrays (one per resample)
             embeddings.append(np.mean(data["embedding"], axis=0))
 
         embeddings_arr = np.stack(embeddings)
@@ -848,12 +830,7 @@ class PULSAR(SupervisedSampleMethod):
             embeddings_arr, index=donor_ids, columns=cols
         )
 
-        # Keep samples in the order PULSAR returned them
         self.samples = np.array(donor_ids)
-
-    # ------------------------------------------------------------------
-    # Primary outputs
-    # ------------------------------------------------------------------
 
     def get_sample_embeddings(self) -> pd.DataFrame:
         """Per-donor CLS embeddings from PULSAR.
@@ -881,7 +858,7 @@ class PULSAR(SupervisedSampleMethod):
         pd.DataFrame
             Indexed by donor ID with columns:
 
-            * ``"score"`` – L2 norm of the donor CLS embedding.
+            * ``"score"`` - L2 norm of the donor CLS embedding.
         """
         self._check_fitted()
         norms = np.linalg.norm(self._donor_embeddings.values, axis=1)
@@ -903,7 +880,7 @@ class PULSAR(SupervisedSampleMethod):
         """
         self._check_fitted()
 
-        cell_embeddings = self.adata.obsm[self.layer]  # (n_cells, emb_dim)
+        cell_embeddings = self.adata.obsm[self.layer]  
         donor_col = self.adata.obs[self.sample_key].values
 
         scores = np.zeros(len(self.adata))
@@ -913,11 +890,9 @@ class PULSAR(SupervisedSampleMethod):
             if not mask.any() or donor_id not in self._donor_embeddings.index:
                 continue
 
-            cls_vec = self._donor_embeddings.loc[donor_id].values  # (hidden_dim,)
-            cells = cell_embeddings[mask]                           # (n_cells, emb_dim)
+            cls_vec = self._donor_embeddings.loc[donor_id].values  
+            cells = cell_embeddings[mask]                           
 
-            # Project onto CLS (dot product, both assumed roughly unit-scale)
-            # Use only the first min(cells.shape[1], cls_vec.shape[0]) dims
             d = min(cells.shape[1], cls_vec.shape[0])
             dot = np.abs(cells[:, :d] @ cls_vec[:d])
             cell_norms = np.linalg.norm(cells[:, :d], axis=1) + 1e-8
@@ -925,10 +900,6 @@ class PULSAR(SupervisedSampleMethod):
             scores[mask] = dot / (cell_norms * cls_norm)
 
         return pd.DataFrame({"score": scores}, index=self.adata.obs_names)
-
-    # ------------------------------------------------------------------
-    # Convenience: linear probe for downstream prediction
-    # ------------------------------------------------------------------
 
     def fit_linear_probe(
         self,
@@ -1010,10 +981,6 @@ class PULSAR(SupervisedSampleMethod):
 
         else:
             raise ValueError(f"task must be 'classification' or 'regression', got '{task}'.")
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _check_fitted(self) -> None:
         if self._donor_embeddings is None:
