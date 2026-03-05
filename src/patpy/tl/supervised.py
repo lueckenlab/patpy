@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Literal
+from typing import Literal, Optional
 
 import numpy as np
 import pandas as pd
@@ -81,7 +81,7 @@ class SupervisedSampleMethod:
             .set_index(self.sample_key)
             .loc[self.samples, self.label_key]
         )
-        n_per_donor = adata.obs.groupby(self.sample_key)[self.label_key].nunique()
+        n_per_donor = adata.obs.groupby(self.sample_key, observed=True)[self.label_key].nunique()
         ambiguous = n_per_donor[n_per_donor > 1]
         if len(ambiguous) > 0:
             warnings.warn(
@@ -654,3 +654,369 @@ class MixMIL(SupervisedSampleMethod):
         Y = torch.tensor(y_vals, dtype=torch.float32).unsqueeze(1)
 
         return Xs, F, Y, donor_order
+
+
+class PULSAR(SupervisedSampleMethod):
+    """Donor-level representation via the PULSAR foundation model by Pang et al. 2025 (https://www.biorxiv.org/content/10.1101/2025.11.24.685470v1).
+
+    PULSAR processes a bag of cell embeddings (e.g. UCE) through a
+    transformer encoder and returns a CLS token as the donor embedding.
+    This wrapper loads a pre-trained PULSAR model (from HuggingFace or a
+    local path) and extracts donor-level representations following the
+    patpy ``SupervisedSampleMethod`` interface.
+
+    Unlike MixMIL, PULSAR is used **zero-shot** — it does not fine-tune on
+    ``label_key``.  The label is used only for evaluation helpers inherited
+    from ``SupervisedSampleMethod`` (e.g. ``plot_sample_scores``).
+
+    Parameters
+    ----------
+    sample_key : str
+        Column in ``adata.obs`` with donor / sample identifiers.
+    label_key : str
+        Column in ``adata.obs`` with the donor-level label (e.g. age,
+        disease status).  Used for evaluation and plotting only — PULSAR
+        itself is applied zero-shot.
+    cell_group_key : str or None, optional
+        Column in ``adata.obs`` with cell-type annotations (used by
+        inherited plotting helpers only).
+    layer : str, default ``"X_uce"``
+        Key in ``adata.obsm`` containing per-cell embeddings (e.g. UCE).
+        PULSAR expects embeddings in this slot.
+    pretrained_model : str, default ``"KuanP/pulsar-pbmc"``
+        HuggingFace model ID or local path to load PULSAR weights from.
+    sample_cell_num : int, default 1024
+        Number of cells to sample per donor when extracting embeddings.
+        Sampling is done with replacement when a donor has fewer cells.
+    batch_size : int, default 10
+        Number of donors processed per forward pass.
+    device : str, default ``"cuda"``
+        Device for model inference (``"cuda"`` or ``"cpu"``).
+    resample_num : int, default 1
+        Number of stochastic resampling passes per donor. Results are
+        averaged. Increase for more stable embeddings at the cost of speed.
+    seed : int, default 67
+        Random seed for cell sampling reproducibility.
+
+    Examples
+    --------
+    >>> import patpy.tl.supervised as pts
+    >>> model = pts.PULSAR(
+    ...     sample_key="donor_id",
+    ...     label_key="age",
+    ...     layer="X_uce",
+    ... )
+    >>> model.prepare_anndata(adata)
+    >>> embeddings = model.get_sample_embeddings()   # (n_donors, 512)
+    >>> scores = model.get_sample_scores()           # same, with column "score"
+    """
+
+    def __init__(
+        self,
+        sample_key: str,
+        label_key: str,
+        cell_group_key: Optional[str] = None,
+        layer: str = "X_uce",
+        pretrained_model: str = "KuanP/pulsar-pbmc",
+        sample_cell_num: int = 1024,
+        batch_size: int = 10,
+        device: str = "cuda",
+        resample_num: int = 1,
+        seed: int = 67,
+    ):
+        super().__init__(
+            sample_key=sample_key,
+            label_key=label_key,
+            cell_group_key=cell_group_key,
+            layer=layer,
+            seed=seed,
+        )
+        self.pretrained_model = pretrained_model
+        self.sample_cell_num = sample_cell_num
+        self.batch_size = batch_size
+        self.device = device
+        self.resample_num = resample_num
+
+        # Set after prepare_anndata
+        self._pulsar_model = None
+        # (n_donors, hidden_dim) CLS embeddings, indexed by donor order
+        self._donor_embeddings: Optional[pd.DataFrame] = None
+
+    # ------------------------------------------------------------------
+    # Fit / extract
+    # ------------------------------------------------------------------
+
+    def prepare_anndata(self, adata) -> None:
+        """Load PULSAR model and extract donor-level CLS embeddings.
+
+        Parameters
+        ----------
+        adata : AnnData
+            Must contain ``sample_key`` and ``label_key`` in ``.obs``, and
+            per-cell embeddings under ``layer`` in ``.obsm``.
+        """
+        try:
+            from pulsar.model import PULSAR as _PulsarModel
+            from pulsar.utils import extract_donor_embeddings_from_h5ad
+        except ImportError as e:
+            raise ImportError(
+                "pulsar is required. Install from: "
+                "https://github.com/snap-stanford/PULSAR"
+            ) from e
+
+        super().prepare_anndata(adata)
+
+        if self.layer not in adata.obsm:
+            raise ValueError(
+                f"layer='{self.layer}' not found in adata.obsm. "
+                "PULSAR requires pre-computed cell embeddings (e.g. UCE) "
+                f"in adata.obsm['{self.layer}']. "
+                "If you only have PCA embeddings, use MixMIL instead."
+            )
+
+        # Warn when the embedding dimensionality looks too small for UCE/PULSAR.
+        # UCE embeddings are typically 1280-dim; PCA is usually ≤50-dim.
+        emb_dim = adata.obsm[self.layer].shape[1]
+        if emb_dim < 256:
+            warnings.warn(
+                f"adata.obsm['{self.layer}'] has only {emb_dim} dimensions. "
+                "PULSAR expects high-dimensional cell embeddings such as UCE (~1280-dim). "
+                "Low-dimensional inputs like PCA will produce unreliable donor embeddings. "
+                "Consider computing UCE embeddings first, or use MixMIL for PCA-based inputs.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        # Load model — handle transformers version incompatibility where
+        # older PULSAR checkpoints define '_tied_weights_keys' but newer
+        # transformers expects 'all_tied_weights_keys'.
+        try:
+            self._pulsar_model = _PulsarModel.from_pretrained(self.pretrained_model)
+        except AttributeError as e:
+            if "all_tied_weights_keys" in str(e) or "_tied_weights_keys" in str(e):
+                raise RuntimeError(
+                    "PULSAR failed to load due to a transformers version mismatch. "
+                    "The PULSAR checkpoint uses '_tied_weights_keys' but your installed "
+                    "transformers version expects 'all_tied_weights_keys'. "
+                    "Downgrade transformers to a compatible version:\n"
+                    "    pip install 'transformers<4.44'\n"
+                    "or install PULSAR from source which may ship a patched version:\n"
+                    "    pip install git+https://github.com/snap-stanford/PULSAR"
+                ) from e
+            raise
+        self._pulsar_model.eval()
+
+        # Move to device
+        try:
+            import torch
+            self._pulsar_model = self._pulsar_model.to(self.device)
+            self._pulsar_model = self._pulsar_model.to(torch.bfloat16)
+        except Exception as e:
+            warnings.warn(
+                f"Could not move model to device='{self.device}': {e}. "
+                "Falling back to CPU.",
+                stacklevel=2,
+            )
+            self.device = "cpu"
+            self._pulsar_model = self._pulsar_model.to("cpu")
+
+        # Extract embeddings using PULSAR's own utility
+        donor_embedding_collection = extract_donor_embeddings_from_h5ad(
+            adata,
+            model=self._pulsar_model,
+            label_name=self.label_key,
+            donor_id_key=self.sample_key,
+            embedding_key=self.layer,
+            device=self.device,
+            sample_cell_num=self.sample_cell_num,
+            resample_num=self.resample_num,
+            batch_size=self.batch_size,
+            seed=self.seed,
+        )
+
+        # Average across resamples and build donor × dim DataFrame
+        donor_ids = []
+        embeddings = []
+        for donor_id, data in donor_embedding_collection.items():
+            donor_ids.append(donor_id)
+            # data["embedding"] is a list of arrays (one per resample)
+            embeddings.append(np.mean(data["embedding"], axis=0))
+
+        embeddings_arr = np.stack(embeddings)
+        cols = [f"dim_{i}" for i in range(embeddings_arr.shape[1])]
+        self._donor_embeddings = pd.DataFrame(
+            embeddings_arr, index=donor_ids, columns=cols
+        )
+
+        # Keep samples in the order PULSAR returned them
+        self.samples = np.array(donor_ids)
+
+    # ------------------------------------------------------------------
+    # Primary outputs
+    # ------------------------------------------------------------------
+
+    def get_sample_embeddings(self) -> pd.DataFrame:
+        """Per-donor CLS embeddings from PULSAR.
+
+        Returns
+        -------
+        pd.DataFrame
+            Shape ``(n_donors, hidden_dim)`` (typically 512 for
+            ``pulsar-pbmc``), indexed by donor ID.
+            Columns are named ``"dim_0"``, ``"dim_1"``, …
+        """
+        self._check_fitted()
+        return self._donor_embeddings
+
+    def get_sample_scores(self) -> pd.DataFrame:
+        """Per-donor scores derived from the CLS embedding norm.
+
+        Because PULSAR is zero-shot (no label-specific output head), we
+        expose the L2 norm of the CLS embedding as a scalar ``"score"``.
+        For downstream prediction tasks use :meth:`get_sample_embeddings`
+        directly and fit a linear probe.
+
+        Returns
+        -------
+        pd.DataFrame
+            Indexed by donor ID with columns:
+
+            * ``"score"`` – L2 norm of the donor CLS embedding.
+        """
+        self._check_fitted()
+        norms = np.linalg.norm(self._donor_embeddings.values, axis=1)
+        return pd.DataFrame({"score": norms}, index=self._donor_embeddings.index)
+
+    def get_cell_scores(self) -> pd.DataFrame:
+        """Per-cell contribution scores (mean absolute CLS projection).
+
+        PULSAR does not expose explicit attention weights in its public API.
+        As a proxy, we project each cell's raw embedding onto the donor CLS
+        vector and use the absolute cosine similarity as the contribution
+        score, reflecting how much each cell aligns with the donor-level
+        representation.
+
+        Returns
+        -------
+        pd.DataFrame
+            Indexed by ``adata.obs_names`` with column ``"score"``.
+        """
+        self._check_fitted()
+
+        cell_embeddings = self.adata.obsm[self.layer]  # (n_cells, emb_dim)
+        donor_col = self.adata.obs[self.sample_key].values
+
+        scores = np.zeros(len(self.adata))
+
+        for donor_id in self.samples:
+            mask = donor_col == donor_id
+            if not mask.any() or donor_id not in self._donor_embeddings.index:
+                continue
+
+            cls_vec = self._donor_embeddings.loc[donor_id].values  # (hidden_dim,)
+            cells = cell_embeddings[mask]                           # (n_cells, emb_dim)
+
+            # Project onto CLS (dot product, both assumed roughly unit-scale)
+            # Use only the first min(cells.shape[1], cls_vec.shape[0]) dims
+            d = min(cells.shape[1], cls_vec.shape[0])
+            dot = np.abs(cells[:, :d] @ cls_vec[:d])
+            cell_norms = np.linalg.norm(cells[:, :d], axis=1) + 1e-8
+            cls_norm = np.linalg.norm(cls_vec[:d]) + 1e-8
+            scores[mask] = dot / (cell_norms * cls_norm)
+
+        return pd.DataFrame({"score": scores}, index=self.adata.obs_names)
+
+    # ------------------------------------------------------------------
+    # Convenience: linear probe for downstream prediction
+    # ------------------------------------------------------------------
+
+    def fit_linear_probe(
+        self,
+        target: Optional[str] = None,
+        task: Literal["classification", "regression"] = "classification",
+        test_size: float = 0.2,
+        random_state: int = 42,
+    ) -> dict:
+        """Fit a simple linear probe on top of PULSAR embeddings.
+
+        This mirrors the usage pattern shown in the PULSAR tutorials
+        (Ridge regression for age, LogisticRegression for disease status),
+        providing a quick way to evaluate embedding quality within patpy.
+
+        Parameters
+        ----------
+        target : str, optional
+            Column in ``adata.obs`` to predict. Defaults to ``label_key``.
+        task : {"classification", "regression"}, default ``"classification"``
+            Type of prediction task.
+        test_size : float, default 0.2
+            Fraction of donors held out for evaluation.
+        random_state : int, default 42
+
+        Returns
+        -------
+        dict
+            Keys: ``"model"``, ``"X_train"``, ``"X_test"``, ``"y_train"``,
+            ``"y_test"``, ``"y_pred"``, and metric keys depending on task
+            (``"accuracy"``/ ``"f1"`` for classification; ``"r2"``/
+            ``"pearson"`` for regression).
+        """
+        from sklearn.model_selection import train_test_split
+
+        self._check_fitted()
+        target = target or self.label_key
+
+        X = self._donor_embeddings.values
+        y = self.labels.loc[self._donor_embeddings.index].values
+
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=random_state,
+            stratify=(y if task == "classification" else None),
+        )
+
+        if task == "classification":
+            from sklearn.linear_model import LogisticRegression
+            from sklearn.metrics import accuracy_score, f1_score
+
+            clf = LogisticRegression(
+                max_iter=1000, random_state=random_state, class_weight="balanced"
+            )
+            clf.fit(X_train, y_train)
+            y_pred = clf.predict(X_test)
+            return {
+                "model": clf,
+                "X_train": X_train, "X_test": X_test,
+                "y_train": y_train, "y_test": y_test, "y_pred": y_pred,
+                "accuracy": accuracy_score(y_test, y_pred),
+                "f1": f1_score(y_test, y_pred, average="weighted", zero_division=0),
+            }
+
+        elif task == "regression":
+            from sklearn.linear_model import Ridge
+            from sklearn.metrics import r2_score
+            from scipy.stats import pearsonr
+
+            reg = Ridge(alpha=0.1)
+            reg.fit(X_train, y_train)
+            y_pred = reg.predict(X_test)
+            pearson_r, _ = pearsonr(y_test, y_pred)
+            return {
+                "model": reg,
+                "X_train": X_train, "X_test": X_test,
+                "y_train": y_train, "y_test": y_test, "y_pred": y_pred,
+                "r2": r2_score(y_test, y_pred),
+                "pearson": pearson_r,
+            }
+
+        else:
+            raise ValueError(f"task must be 'classification' or 'regression', got '{task}'.")
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _check_fitted(self) -> None:
+        if self._donor_embeddings is None:
+            raise RuntimeError(
+                "Model is not fitted. Call prepare_anndata() first."
+            )
