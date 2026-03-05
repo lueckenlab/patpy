@@ -75,15 +75,15 @@ optional-dependencies.gloscope_py_gpu = [
 optional-dependencies.mixmil = [
   "mixmil>=0.1.2",
 ]
-optional-dependencies.pulsar = [
-  "pulsar @ git+https://github.com/snap-stanford/PULSAR.git@main",
-]
 optional-dependencies.mrvi = [
   "scvi-tools>=1.2",
   "torch>=1.13",
 ]
 optional-dependencies.pilot = [
   "pilotpy",
+]
+optional-dependencies.pulsar = [
+  "pulsar @ git+https://github.com/snap-stanford/PULSAR.git@main",
 ]
 optional-dependencies.scpoli = [
   "scarches>=0.5.1",
