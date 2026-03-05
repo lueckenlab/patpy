@@ -875,7 +875,7 @@ class PULSAR(SupervisedSampleMethod):
         """
         self._check_fitted()
 
-        cell_embeddings = self.adata.obsm[self.layer]  
+        cell_embeddings = self.adata.obsm[self.layer]
         donor_col = self.adata.obs[self.sample_key].values
 
         scores = np.zeros(len(self.adata))
@@ -885,8 +885,8 @@ class PULSAR(SupervisedSampleMethod):
             if not mask.any() or donor_id not in self._donor_embeddings.index:
                 continue
 
-            cls_vec = self._donor_embeddings.loc[donor_id].values  
-            cells = cell_embeddings[mask]                           
+            cls_vec = self._donor_embeddings.loc[donor_id].values
+            cells = cell_embeddings[mask]
 
             d = min(cells.shape[1], cls_vec.shape[0])
             dot = np.abs(cells[:, :d] @ cls_vec[:d])
