@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Literal, Optional
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -707,15 +707,15 @@ class PULSAR(SupervisedSampleMethod):
     ...     layer="X_uce",
     ... )
     >>> model.prepare_anndata(adata)
-    >>> embeddings = model.get_sample_embeddings()   # (n_donors, 512)
-    >>> scores = model.get_sample_scores()           # same, with column "score"
+    >>> embeddings = model.get_sample_embeddings()  # (n_donors, 512)
+    >>> scores = model.get_sample_scores()  # same, with column "score"
     """
 
     def __init__(
         self,
         sample_key: str,
         label_key: str,
-        cell_group_key: Optional[str] = None,
+        cell_group_key: str | None = None,
         layer: str = "X_uce",
         pretrained_model: str = "KuanP/pulsar-pbmc",
         sample_cell_num: int = 1024,
@@ -740,7 +740,7 @@ class PULSAR(SupervisedSampleMethod):
         # Set after prepare_anndata
         self._pulsar_model = None
         # (n_donors, hidden_dim) CLS embeddings, indexed by donor order
-        self._donor_embeddings: Optional[pd.DataFrame] = None
+        self._donor_embeddings: pd.DataFrame | None = None
 
     # ------------------------------------------------------------------
     # Fit / extract
@@ -759,10 +759,7 @@ class PULSAR(SupervisedSampleMethod):
             from pulsar.model import PULSAR as _PulsarModel
             from pulsar.utils import extract_donor_embeddings_from_h5ad
         except ImportError as e:
-            raise ImportError(
-                "pulsar is required. Install from: "
-                "https://github.com/snap-stanford/PULSAR"
-            ) from e
+            raise ImportError("pulsar is required. Install from: https://github.com/snap-stanford/PULSAR") from e
 
         super().prepare_anndata(adata)
 
@@ -809,12 +806,12 @@ class PULSAR(SupervisedSampleMethod):
         # Move to device
         try:
             import torch
+
             self._pulsar_model = self._pulsar_model.to(self.device)
             self._pulsar_model = self._pulsar_model.to(torch.bfloat16)
         except Exception as e:
             warnings.warn(
-                f"Could not move model to device='{self.device}': {e}. "
-                "Falling back to CPU.",
+                f"Could not move model to device='{self.device}': {e}. Falling back to CPU.",
                 stacklevel=2,
             )
             self.device = "cpu"
@@ -844,9 +841,7 @@ class PULSAR(SupervisedSampleMethod):
 
         embeddings_arr = np.stack(embeddings)
         cols = [f"dim_{i}" for i in range(embeddings_arr.shape[1])]
-        self._donor_embeddings = pd.DataFrame(
-            embeddings_arr, index=donor_ids, columns=cols
-        )
+        self._donor_embeddings = pd.DataFrame(embeddings_arr, index=donor_ids, columns=cols)
 
         # Keep samples in the order PULSAR returned them
         self.samples = np.array(donor_ids)
@@ -914,7 +909,7 @@ class PULSAR(SupervisedSampleMethod):
                 continue
 
             cls_vec = self._donor_embeddings.loc[donor_id].values  # (hidden_dim,)
-            cells = cell_embeddings[mask]                           # (n_cells, emb_dim)
+            cells = cell_embeddings[mask]  # (n_cells, emb_dim)
 
             # Project onto CLS (dot product, both assumed roughly unit-scale)
             # Use only the first min(cells.shape[1], cls_vec.shape[0]) dims
@@ -932,7 +927,7 @@ class PULSAR(SupervisedSampleMethod):
 
     def fit_linear_probe(
         self,
-        target: Optional[str] = None,
+        target: str | None = None,
         task: Literal["classification", "regression"] = "classification",
         test_size: float = 0.2,
         random_state: int = 42,
@@ -970,7 +965,10 @@ class PULSAR(SupervisedSampleMethod):
         y = self.labels.loc[self._donor_embeddings.index].values
 
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=random_state,
+            X,
+            y,
+            test_size=test_size,
+            random_state=random_state,
             stratify=(y if task == "classification" else None),
         )
 
@@ -978,23 +976,24 @@ class PULSAR(SupervisedSampleMethod):
             from sklearn.linear_model import LogisticRegression
             from sklearn.metrics import accuracy_score, f1_score
 
-            clf = LogisticRegression(
-                max_iter=1000, random_state=random_state, class_weight="balanced"
-            )
+            clf = LogisticRegression(max_iter=1000, random_state=random_state, class_weight="balanced")
             clf.fit(X_train, y_train)
             y_pred = clf.predict(X_test)
             return {
                 "model": clf,
-                "X_train": X_train, "X_test": X_test,
-                "y_train": y_train, "y_test": y_test, "y_pred": y_pred,
+                "X_train": X_train,
+                "X_test": X_test,
+                "y_train": y_train,
+                "y_test": y_test,
+                "y_pred": y_pred,
                 "accuracy": accuracy_score(y_test, y_pred),
                 "f1": f1_score(y_test, y_pred, average="weighted", zero_division=0),
             }
 
         elif task == "regression":
+            from scipy.stats import pearsonr
             from sklearn.linear_model import Ridge
             from sklearn.metrics import r2_score
-            from scipy.stats import pearsonr
 
             reg = Ridge(alpha=0.1)
             reg.fit(X_train, y_train)
@@ -1002,8 +1001,11 @@ class PULSAR(SupervisedSampleMethod):
             pearson_r, _ = pearsonr(y_test, y_pred)
             return {
                 "model": reg,
-                "X_train": X_train, "X_test": X_test,
-                "y_train": y_train, "y_test": y_test, "y_pred": y_pred,
+                "X_train": X_train,
+                "X_test": X_test,
+                "y_train": y_train,
+                "y_test": y_test,
+                "y_pred": y_pred,
                 "r2": r2_score(y_test, y_pred),
                 "pearson": pearson_r,
             }
@@ -1017,6 +1019,4 @@ class PULSAR(SupervisedSampleMethod):
 
     def _check_fitted(self) -> None:
         if self._donor_embeddings is None:
-            raise RuntimeError(
-                "Model is not fitted. Call prepare_anndata() first."
-            )
+            raise RuntimeError("Model is not fitted. Call prepare_anndata() first.")
