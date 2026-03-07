@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 from anndata import AnnData
 
+from patpy.tl._base_sample_method import _create_colormap
 from patpy.tl.sample_representation import (
     MOFA,
     PILOT,
@@ -24,9 +25,6 @@ from patpy.tl.sample_representation import (
     make_matrix_symmetric,
     valid_aggregate,
     valid_distance_metric,
-)
-from patpy.tl._base_sample_method import (
-    _create_colormap
 )
 
 SAMPLE_KEY = "sample_id"
@@ -426,7 +424,10 @@ def test_get_data_from_layers(synthetic_adata):
 def test_get_data_invalid_layer_raises(synthetic_adata):
     method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="nonexistent")
     method.prepare_anndata(synthetic_adata.copy())
-    with pytest.raises(ValueError, match="layer='nonexistent' not found in adata.obsm or adata.layers. Please make sure it is specified correctly."):
+    with pytest.raises(
+        ValueError,
+        match="layer='nonexistent' not found in adata.obsm or adata.layers. Please make sure it is specified correctly.",
+    ):
         method._get_data()
 
 

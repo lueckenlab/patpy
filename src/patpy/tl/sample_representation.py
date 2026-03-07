@@ -7,20 +7,18 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import scipy
-import seaborn as sns
 from pandas.api.types import is_numeric_dtype
 from scipy.stats import pearsonr, spearmanr
 from statsmodels.stats.multitest import multipletests
 
 from patpy.pp import (
-    extract_metadata,
     fill_nan_distances,
     filter_small_samples,
     is_count_data,
     subsample,
 )
-from patpy.tl._types import _EVALUATION_METHODS
 from patpy.tl._base_sample_method import BaseSampleMethod
+from patpy.tl._types import _EVALUATION_METHODS
 
 VALID_AGGREGATES = {"mean": np.mean, "median": np.median, "sum": np.sum}
 
@@ -120,8 +118,6 @@ def describe_metadata(metadata: pd.DataFrame) -> None:
     metadata : pd.DataFrame
         File with metadata for the samples. Or any pandas data frame you want to describe
     """
-    from pandas.api.types import is_numeric_dtype
-
     n = metadata.shape[0]
 
     numeric_cols = []
@@ -544,7 +540,7 @@ class SampleRepresentationMethod(BaseSampleMethod):
             na_color=na_color,
             axes=axes,
         )
-    
+
     def to_adata(self, metadata: pd.DataFrame = None, *args, **kwargs):
         """Convert samples data to AnnData object
 
