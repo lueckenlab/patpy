@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "patpy"
-version = "0.11.4"
+version = "0.12.1"
 description = "A toolbox for patient or sample representation from single-cell data"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -89,6 +89,12 @@ optional-dependencies.test = [
 ]
 optional-dependencies.wassersteintsne = [
   "wassersteintsne>=1.1",
+]
+optional-dependencies.de = [
+  "pertpy[de]>=1.0.5",
+]
+optional-dependencies.milo-edger = [
+  "pertpy[milo-edger]>=1.0.5",
 ]
 # https://docs.pypi.org/project_metadata/#project-urls
 urls.Documentation = "https://patpy.readthedocs.io/"
