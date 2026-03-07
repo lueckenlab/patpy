@@ -86,7 +86,7 @@ def build_all_pairwise_contrasts(
 
     contrasts = []
     for i, group in enumerate(labels):
-        for baseline in labels[i + 1:]:
+        for baseline in labels[i + 1 :]:
             contrasts.append(
                 {
                     "group": group,
@@ -123,9 +123,7 @@ def add_combined_condition_column(
 
     Examples
     --------
-    >>> adata = add_combined_condition_column(
-    ...     adata, ["timepoint", "disease_subtype"], new_col="tp_disease"
-    ... )
+    >>> adata = add_combined_condition_column(adata, ["timepoint", "disease_subtype"], new_col="tp_disease")
     >>> adata.obs["tp_disease"].unique()
     array(['T1_A', 'T1_B', 'T2_A', 'T2_B'], dtype=object)
     """
@@ -208,8 +206,7 @@ def _iter_contrasts(
 
     if not results:
         raise RuntimeError(
-            "All contrasts failed or returned no results. "
-            "Check your data, design, and condition columns."
+            "All contrasts failed or returned no results. Check your data, design, and condition columns."
         )
 
     return pd.concat(results, ignore_index=True)
@@ -346,7 +343,7 @@ class ConditionComparison:
     >>> cc = ptd.ConditionComparison(pt.tl.EdgeR, layer="counts", paired_by="patient_id")
     >>>
     >>> res_tp_subtype = cc.run(pdata, condition_cols=["timepoint", "disease_subtype"])
-    >>> res_tp_only    = cc.run(pdata, condition_cols=["timepoint"])
+    >>> res_tp_only = cc.run(pdata, condition_cols=["timepoint"])
     """
 
     def __init__(self, model_cls: Any, **default_kwargs: Any) -> None:
