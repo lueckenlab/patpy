@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.12.0
+
+### Added
+
+- **`SupervisedSampleMethod`** base class (`tl/_base_sample_method.py`) providing a shared scaffold for unsupervised and supervised sample-level methods.  
+- **`MixMIL`** wrapper (`tl/supervised/_mixmil.py`) for the attention-based
+  multi-instance mixed model by Engelmann et al. 2024
+  (<https://arxiv.org/abs/2311.02455>).
+- **`PULSAR`** wrapper (`tl/supervised/_pulsar.py`) for the zero-shot foundation model by Pang et al. 2025 (<https://doi.org/10.1101/2025.11.24.685470>).
+- Tests for all supervised methods in `tests/test_supervised_methods.py`,
+  including fixtures with deterministic mock backends (no network access or
+  GPU required), multi-label MixMIL tests, and PULSAR linear probe tests.
+
 ## 0.11.4
 
 ### Added
