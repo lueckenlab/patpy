@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## [0.12.1]
+
+### Added — `patpy.tl.condition_utils`
+
+New module providing utilities for running any pertpy differential method
+across all pairwise contrasts of a multi-dimensional condition space.
+
+- **`run_condition_combinations(model_cls, adata, condition_cols, **kwargs)`** — one-liner that takes any pertpy class with a `compare_groups` classmethod, enumerates all observed pairwise condition contrasts, runs the model for each, and returns a concatenated DataFrame with a `"contrast"` column.
+- **`ConditionComparison(model_cls, **defaults)`** — thin class wrapper around the above; stores the model class and default kwargs so the same configuration can be reused across multiple datasets or condition axes via `.run()`.
+- **`build_condition_combinations(adata, condition_cols)`** — returns a DataFrame of all *observed* (not Cartesian) combinations of multiple condition columns, with a joined `"label"` column.
+- **`build_all_pairwise_contrasts(adata, condition_cols)`** — returns a list of `{group, baseline, label}` dicts for every pairwise contrast of observed condition combinations.
+- **`add_combined_condition_column(adata, condition_cols, new_col)`** — adds a concatenated condition label column to `adata.obs` in-place.
+- **`filter_adata_to_conditions(adata, condition_col, groups)`** — subsets an AnnData to cells belonging to specific condition groups.
+
 ## 0.11.4
 
 ### Added
