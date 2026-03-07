@@ -25,6 +25,6 @@ from .sample_representation import (
     describe_metadata,
 )
 from .supervised import (
-    PULSAR, 
+    PULSAR,
     MixMIL,
 )

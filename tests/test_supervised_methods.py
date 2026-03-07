@@ -8,11 +8,10 @@ import pandas as pd
 import pytest
 import scanpy as sc
 
-
-N_CELLS = 200        
+N_CELLS = 200
 N_GENES = 30
 N_DONORS = 10
-N_PCS = 8           
+N_PCS = 8
 CELLS_PER_DONOR = N_CELLS // N_DONORS
 
 
@@ -77,10 +76,12 @@ class _FakeMixMIL:
 
     def predict(self, Xs):
         import torch
+
         return torch.full((len(Xs), self.P), 0.5)
 
     def get_weights(self, Xs):
         import torch
+
         return [torch.full((x.shape[0], self.P), 1.0 / x.shape[0]) for x in Xs], None
 
 
@@ -106,7 +107,6 @@ def mixmil_model(basic_adata, _mock_mixmil):
     return model
 
 
-
 @pytest.fixture
 def mixmil_model_multilabel(basic_adata, _mock_mixmil):
     """MixMIL trained jointly on disease + age (P=2 outputs)."""
@@ -122,6 +122,7 @@ def mixmil_model_multilabel(basic_adata, _mock_mixmil):
     model.prepare_anndata(basic_adata)
     return model
 
+
 class _FakePulsarModel:
     @classmethod
     def from_pretrained(cls, path):
@@ -134,16 +135,13 @@ class _FakePulsarModel:
         return self
 
 
-def _fake_extract_donor_embeddings(adata, model, label_name, donor_id_key,
-                                   embedding_key, device, sample_cell_num,
-                                   resample_num, batch_size, seed):
+def _fake_extract_donor_embeddings(
+    adata, model, label_name, donor_id_key, embedding_key, device, sample_cell_num, resample_num, batch_size, seed
+):
     """Deterministic 512-dim embeddings seeded by ``seed``."""
     donors = adata.obs[donor_id_key].unique()
     rng = np.random.default_rng(seed)
-    return {
-        donor: {"embedding": rng.random((resample_num, 512)).astype("float32")}
-        for donor in donors
-    }
+    return {donor: {"embedding": rng.random((resample_num, 512)).astype("float32")} for donor in donors}
 
 
 @pytest.fixture
@@ -160,9 +158,7 @@ def _mock_pulsar(monkeypatch):
 
 @pytest.fixture
 def pulsar_adata(basic_adata):
-    basic_adata.obsm["X_uce"] = np.random.default_rng(1).random(
-        (N_CELLS, 1280)
-    ).astype("float32")
+    basic_adata.obsm["X_uce"] = np.random.default_rng(1).random((N_CELLS, 1280)).astype("float32")
     return basic_adata
 
 
@@ -192,7 +188,6 @@ def _make_base(sample_key="donor_id", cell_group_key="cell_type", layer="X_pca")
 
 
 class TestBaseSampleMethod:
-
     def test_check_fitted_raises_before_prepare(self):
         """_check_fitted must raise before prepare_anndata is called."""
         base = _make_base()
@@ -202,7 +197,7 @@ class TestBaseSampleMethod:
     def test_check_fitted_passes_after_prepare(self, basic_adata):
         base = _make_base()
         base.prepare_anndata(basic_adata)
-        base._check_fitted()  
+        base._check_fitted()
 
     def test_prepare_anndata_finds_correct_number_of_donors(self, basic_adata):
         base = _make_base()
@@ -281,7 +276,6 @@ def _make_supervised(label_keys=None, tasks=None):
 
 
 class TestSupervisedSampleMethod:
-
     def test_mismatched_label_and_tasks_raises(self):
         from patpy.tl.supervised import SupervisedSampleMethod
 
@@ -379,7 +373,6 @@ class TestSupervisedSampleMethod:
 
 
 class TestMixMIL:
-
     def test_prepare_anndata_missing_layer_raises(self, basic_adata, _mock_mixmil):
         from patpy.tl.supervised import MixMIL
 
@@ -542,7 +535,6 @@ class TestMixMIL:
         losses = [e["loss"] for e in mixmil_model.training_history]
         assert losses[-1] <= losses[0]
 
-
     def test_multilabel_get_sample_importance_has_both_columns(self, mixmil_model_multilabel):
         """Multi-label model must return one importance column per label."""
         scores = mixmil_model_multilabel.get_sample_importance()
@@ -568,7 +560,6 @@ class TestMixMIL:
 
 
 class TestPULSAR:
-
     def test_prepare_anndata_missing_layer_raises(self, basic_adata, _mock_pulsar):
         from patpy.tl.supervised import PULSAR
 

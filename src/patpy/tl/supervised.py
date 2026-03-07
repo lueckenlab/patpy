@@ -10,6 +10,7 @@ import scanpy as sc
 from patpy.tl._base_sample_method import BaseSampleMethod
 from patpy.tl._types import _PREDICTION_TASKS
 
+
 class SupervisedSampleMethod(BaseSampleMethod):
     """Base class for supervised sample-level representation methods.
 
@@ -62,13 +63,12 @@ class SupervisedSampleMethod(BaseSampleMethod):
 
         if len(label_keys) != len(tasks):
             raise ValueError(
-                f"label_keys (len={len(label_keys)}) and tasks (len={len(tasks)}) "
-                "must have the same length."
+                f"label_keys (len={len(label_keys)}) and tasks (len={len(tasks)}) must have the same length."
             )
 
         self.label_keys = list(label_keys)
         self.tasks = list(tasks)
-        self.labels: pd.DataFrame | None = None 
+        self.labels: pd.DataFrame | None = None
 
     def prepare_anndata(self, adata: sc.AnnData) -> None:
         """Validate *adata*, populate :attr:`samples` and :attr:`labels`.
@@ -116,7 +116,6 @@ class SupervisedSampleMethod(BaseSampleMethod):
 
         self.labels = pd.concat(label_frames, axis=1)
 
-
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
         """Return per-donor prediction importances / posterior means.
 
@@ -148,9 +147,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
         if not force and self.adata is not None and cache_key in self.adata.uns:
             return pd.DataFrame(self.adata.uns[cache_key], index=self.samples)
 
-        raise NotImplementedError(
-            f"{type(self).__name__} must implement get_sample_importance()."
-        )
+        raise NotImplementedError(f"{type(self).__name__} must implement get_sample_importance().")
 
     def get_cell_importance(self, force: bool = False) -> pd.DataFrame:
         """Return per-cell attention or contribution scores.
@@ -185,10 +182,8 @@ class SupervisedSampleMethod(BaseSampleMethod):
         if not force and all(c in self.adata.obs.columns for c in importance_cols):
             return self.adata.obs[importance_cols]
 
-        raise NotImplementedError(
-            f"{type(self).__name__} must implement get_cell_importance()."
-        )
-    
+        raise NotImplementedError(f"{type(self).__name__} must implement get_cell_importance().")
+
     def get_sample_representations(self) -> pd.DataFrame:
         """Return latent donor-level embeddings (optional).
 
@@ -207,9 +202,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
             Default implementation — override in subclasses that provide
             donor embeddings.
         """
-        raise NotImplementedError(
-            f"{type(self).__name__} does not provide sample representations / embeddings."
-        )
+        raise NotImplementedError(f"{type(self).__name__} does not provide sample representations / embeddings.")
 
     def calculate_distance_matrix(self, dist: str = "euclidean") -> np.ndarray:
         """Compute a donor x donor distance matrix from sample representations.
@@ -319,6 +312,7 @@ class MixMIL(SupervisedSampleMethod):
     >>> scores = model.get_sample_importance()
     >>> importance = model.get_cell_importance()
     """
+
     def __init__(
         self,
         sample_key: str,
@@ -368,9 +362,7 @@ class MixMIL(SupervisedSampleMethod):
         try:
             from mixmil import MixMIL as _MixMIL
         except ImportError as e:
-            raise ImportError(
-                "mixmil is required. Install with: pip install mixmil"
-            ) from e
+            raise ImportError("mixmil is required. Install with: pip install mixmil") from e
 
         super().prepare_anndata(adata)
 
@@ -384,7 +376,9 @@ class MixMIL(SupervisedSampleMethod):
 
         if self.likelihood is not None:
             model = _MixMIL.init_with_mean_model(
-                Xs, F, Y,
+                Xs,
+                F,
+                Y,
                 likelihood=self.likelihood,
                 n_trials=self.n_trials,
             )
@@ -394,7 +388,9 @@ class MixMIL(SupervisedSampleMethod):
             model = _MixMIL(Q=Q, K=K)
 
         self._history = model.train(
-            Xs, F, Y,
+            Xs,
+            F,
+            Y,
             n_epochs=self.n_epochs,
             batch_size=self.batch_size,
             lr=self.lr,
@@ -483,9 +479,7 @@ class MixMIL(SupervisedSampleMethod):
         if label is None:
             label = self.label_keys[0]
         elif label not in self.label_keys:
-            raise ValueError(
-                f"label='{label}' is not in label_keys={self.label_keys}."
-            )
+            raise ValueError(f"label='{label}' is not in label_keys={self.label_keys}.")
 
         label_idx = self.label_keys.index(label)
         importance_col = f"{label}_importance"
@@ -505,10 +499,7 @@ class MixMIL(SupervisedSampleMethod):
         iidx = pd.Categorical(sorted_donors).codes
         indptr = np.concatenate([[0], np.bincount(iidx).cumsum()])
 
-        Xs = [
-            torch.from_numpy(X_sorted[s:e])
-            for s, e in zip(indptr[:-1], indptr[1:], strict=True)
-        ]
+        Xs = [torch.from_numpy(X_sorted[s:e]) for s, e in zip(indptr[:-1], indptr[1:], strict=True)]
 
         with torch.no_grad():
             w, _ = self._model.get_weights(Xs)
@@ -559,10 +550,7 @@ class MixMIL(SupervisedSampleMethod):
         iidx = pd.Categorical(sorted_donors).codes
         indptr = np.concatenate([[0], np.bincount(iidx).cumsum()])
 
-        Xs = [
-            torch.from_numpy(X_sorted[s:e])
-            for s, e in zip(indptr[:-1], indptr[1:], strict=True)
-        ]
+        Xs = [torch.from_numpy(X_sorted[s:e]) for s, e in zip(indptr[:-1], indptr[1:], strict=True)]
 
         with torch.no_grad():
             w, _ = self._model.get_weights(Xs)
@@ -611,10 +599,7 @@ class MixMIL(SupervisedSampleMethod):
         # and align self.samples to it so scores/importances line up
         self.samples = np.array(cat.categories)
 
-        Xs = [
-            torch.from_numpy(X_sorted[s:e])
-            for s, e in zip(indptr[:-1], indptr[1:], strict=True)
-        ]
+        Xs = [torch.from_numpy(X_sorted[s:e]) for s, e in zip(indptr[:-1], indptr[1:], strict=True)]
 
         n_donors = len(self.samples)
         covariate_list = [torch.ones((n_donors, 1), dtype=dtype_torch)]
@@ -628,10 +613,7 @@ class MixMIL(SupervisedSampleMethod):
                 vals = self.adata.obsm[cov].astype("float32")
                 covariate_list.append(torch.from_numpy(vals))
             else:
-                raise ValueError(
-                    f"additional_covariates entry '{cov}' not found in "
-                    "adata.obs or adata.obsm."
-                )
+                raise ValueError(f"additional_covariates entry '{cov}' not found in adata.obs or adata.obsm.")
 
         F = torch.cat(covariate_list, dim=1)
 
@@ -644,7 +626,7 @@ class MixMIL(SupervisedSampleMethod):
         Y = torch.tensor(y_cols, dtype=torch.float32)  # (n_donors, P)
 
         return Xs, F, Y
-    
+
 
 class PULSAR(SupervisedSampleMethod):
     """Donor-level representation via the PULSAR foundation model by Pang et al. 2025 (https://www.biorxiv.org/content/10.1101/2025.11.24.685470v1).
@@ -731,7 +713,6 @@ class PULSAR(SupervisedSampleMethod):
         self._pulsar_model = None
         self._donor_embeddings: pd.DataFrame | None = None
 
-
     def prepare_anndata(self, adata: sc.AnnData) -> None:
         """Load PULSAR model and extract donor-level CLS embeddings.
 
@@ -746,9 +727,7 @@ class PULSAR(SupervisedSampleMethod):
             from pulsar.model import PULSAR as _PulsarModel
             from pulsar.utils import extract_donor_embeddings_from_h5ad
         except ImportError as e:
-            raise ImportError(
-                "pulsar is required. Install from: https://github.com/snap-stanford/PULSAR"
-            ) from e
+            raise ImportError("pulsar is required. Install from: https://github.com/snap-stanford/PULSAR") from e
 
         super().prepare_anndata(adata)
 
@@ -933,7 +912,7 @@ class PULSAR(SupervisedSampleMethod):
         )
         self.adata.obs[importance_col] = scores
         return cell_importances
-    
+
     def fit_linear_probe(
         self,
         target: str | None = None,
@@ -978,7 +957,8 @@ class PULSAR(SupervisedSampleMethod):
         y = self.labels.loc[self._donor_embeddings.index, target].values
 
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y,
+            X,
+            y,
             test_size=test_size,
             random_state=random_state,
             stratify=(y if task == "classification" else None),
@@ -988,9 +968,7 @@ class PULSAR(SupervisedSampleMethod):
             from sklearn.linear_model import LogisticRegression
             from sklearn.metrics import accuracy_score, f1_score
 
-            clf = LogisticRegression(
-                max_iter=1000, random_state=random_state, class_weight="balanced"
-            )
+            clf = LogisticRegression(max_iter=1000, random_state=random_state, class_weight="balanced")
             clf.fit(X_train, y_train)
             y_pred = clf.predict(X_test)
             return {
@@ -1024,6 +1002,4 @@ class PULSAR(SupervisedSampleMethod):
                 "pearson": pearson_r,
             }
 
-        raise ValueError(
-            f"task must be 'classification' or 'regression', got '{task}'."
-        )
+        raise ValueError(f"task must be 'classification' or 'regression', got '{task}'.")

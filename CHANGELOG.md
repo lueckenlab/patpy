@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning][].
 
 ### Added
 
-- **`SupervisedSampleMethod`** base class (`tl/_base_sample_method.py`) providing a shared scaffold for unsupervised and supervised sample-level methods.  
+- **`SupervisedSampleMethod`** base class (`tl/_base_sample_method.py`) providing a shared scaffold for unsupervised and supervised sample-level methods.
 - **`MixMIL`** wrapper (`tl/supervised/_mixmil.py`) for the attention-based
   multi-instance mixed model by Engelmann et al. 2024
   (<https://arxiv.org/abs/2311.02455>).

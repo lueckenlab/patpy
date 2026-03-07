@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
@@ -10,12 +9,14 @@ import seaborn as sns
 
 from patpy.pp import extract_metadata, fill_nan_distances
 
+
 def _create_colormap(df: pd.DataFrame, col: str, palette: str = "Spectral") -> pd.Series:
     """Map unique values of *col* to colours from *palette*."""
     unique_values = df[col].unique()
     colors = sns.color_palette(palette, n_colors=len(unique_values))
     color_map = dict(zip(unique_values, colors, strict=False))
     return df[col].map(color_map)
+
 
 class BaseSampleMethod:
     """Base class for SampleRepresentationMethod and SupervisedSampleMethod class.
@@ -89,8 +90,7 @@ class BaseSampleMethod:
             return self.adata.layers[self.layer]
 
         raise ValueError(
-            f"layer='{self.layer}' not found in adata.obsm or adata.layers. "
-            "Please make sure it is specified correctly."
+            f"layer='{self.layer}' not found in adata.obsm or adata.layers. Please make sure it is specified correctly."
         )
 
     def _move_layer_to_X(self) -> sc.AnnData:
@@ -120,7 +120,7 @@ class BaseSampleMethod:
         )
         new_adata.obsm["X_old"] = self.adata.X
         return new_adata
-    
+
     def _extract_metadata(self, columns: list[str]) -> pd.DataFrame:
         """Return a DataFrame with *columns* aligned to :attr:`samples`."""
         return extract_metadata(self.adata, self.sample_key, columns, samples=self.samples)
@@ -128,9 +128,7 @@ class BaseSampleMethod:
     def _check_fitted(self) -> None:
         """Raise :class:`RuntimeError` if :meth:`prepare_anndata` has not been called."""
         if self.adata is None:
-            raise RuntimeError(
-                f"{type(self).__name__} is not fitted. Call prepare_anndata() first."
-            )
+            raise RuntimeError(f"{type(self).__name__} is not fitted. Call prepare_anndata() first.")
 
     def embed(
         self,
@@ -195,9 +193,7 @@ class BaseSampleMethod:
             ).fit_transform(distances)
 
         else:
-            raise ValueError(
-                f"Method '{method}' is not supported. Choose one of ['MDS', 'TSNE', 'UMAP']."
-            )
+            raise ValueError(f"Method '{method}' is not supported. Choose one of ['MDS', 'TSNE', 'UMAP'].")
 
         self.embeddings[method] = coords
         return coords
@@ -232,9 +228,7 @@ class BaseSampleMethod:
             return sns.clustermap(distances, row_linkage=linkage, col_linkage=linkage)
 
         metadata = self._extract_metadata(columns=metadata_cols)
-        annotation_colors = pd.DataFrame(
-            {col: _create_colormap(metadata, col) for col in metadata_cols}
-        )
+        annotation_colors = pd.DataFrame({col: _create_colormap(metadata, col) for col in metadata_cols})
 
         return sns.clustermap(
             pd.DataFrame(distances, index=annotation_colors.index, columns=annotation_colors.index),
@@ -297,9 +291,7 @@ class BaseSampleMethod:
         embedding_df = pd.concat([embedding_df, metadata_df], axis=1)
 
         if axes is None:
-            _, axes = plt.subplots(
-                nrows=1, ncols=len(metadata_cols), sharey=True, figsize=(len(metadata_cols) * 5, 5)
-            )
+            _, axes = plt.subplots(nrows=1, ncols=len(metadata_cols), sharey=True, figsize=(len(metadata_cols) * 5, 5))
 
         axes_flat = axes.flatten() if isinstance(axes, np.ndarray) else axes
 
