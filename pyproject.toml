@@ -11,7 +11,6 @@ license = { file = "LICENSE" }
 maintainers = [
   { name = "Vladimir Shitov", email = "vladimir.shitov@helmholtz-munich.de" },
 ]
-
 authors = [
   { name = "Vladimir Shitov" },
 ]
@@ -22,6 +21,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
   "anndata>=0.8",
@@ -37,7 +37,6 @@ dependencies = [
   # for debug logging (referenced from the issue template)
   "session-info2",
 ]
-
 optional-dependencies.dev = [
   # CLI for bumping the version number
   "pre-commit",
@@ -65,10 +64,10 @@ optional-dependencies.doc = [
   "sphinxcontrib-bibtex>=1",
   "sphinxext-opengraph",
 ]
-optional-dependencies.gloscope_py_cpu = [
+optional-dependencies.gloscope-py-cpu = [
   "pynndescent",
 ]
-optional-dependencies.gloscope_py_gpu = [
+optional-dependencies.gloscope-py-gpu = [
   "cuml",
   "cupy",
 ]
@@ -95,38 +94,26 @@ urls.Documentation = "https://patpy.readthedocs.io/"
 urls.Homepage = "https://github.com/lueckenlab/patpy"
 urls.Source = "https://github.com/lueckenlab/patpy"
 
-[tool.hatch.metadata]
-allow-direct-references = true # Allow installing packages from git repositories
-
-[tool.hatch.envs.default]
-installer = "uv"
-features = [ "dev" ]
-
-[tool.hatch.envs.docs]
-features = [ "doc" ]
-scripts.build = "sphinx-build -M html docs docs/_build -W {args}"
-scripts.open = "python -m webbrowser -t docs/_build/html/index.html"
-scripts.clean = "git clean -fdX -- {args:docs}"
-
-# Test the lowest and highest supported Python versions with normal deps
-[[tool.hatch.envs.hatch-test.matrix]]
-deps = [ "stable" ]
-python = [ "3.10", "3.13" ]
-
-# Test the newest supported Python version also with pre-release deps
-[[tool.hatch.envs.hatch-test.matrix]]
-deps = [ "pre" ]
-python = [ "3.13" ]
-
-[tool.hatch.envs.hatch-test]
-features = [ "test" ]
-
-[tool.hatch.envs.hatch-test.overrides]
+[tool.hatch]
+envs.default.installer = "uv"
+envs.default.features = [ "dev" ]
+envs.docs.features = [ "doc" ]
+envs.docs.scripts.build = "sphinx-build -M html docs docs/_build -W {args}"
+envs.docs.scripts.open = "python -m webbrowser -t docs/_build/html/index.html"
+envs.docs.scripts.clean = "git clean -fdX -- {args:docs}"
+envs.hatch-test.features = [ "test" ]
+envs.hatch-test.matrix = [
+  # Test the lowest and highest supported Python versions with normal deps
+  { deps = [ "stable" ], python = [ "3.10", "3.13" ] },
+  # Test the newest supported Python version also with pre-release deps
+  { deps = [ "pre" ], python = [ "3.13" ] },
+]
 # If the matrix variable `deps` is set to "pre",
 # set the environment variable `UV_PRERELEASE` to "allow".
-matrix.deps.env-vars = [
+envs.hatch-test.overrides.matrix.deps.env-vars = [
   { key = "UV_PRERELEASE", value = "allow", if = [ "pre" ] },
 ]
+metadata.allow-direct-references = true  # Allow installing packages from git repositories
 
 [tool.black]
 line-length = 120
@@ -139,9 +126,7 @@ extend-include = [ "*.ipynb" ]
 exclude = [
   "docs/notebooks/**",
 ]
-
 format.docstring-code-format = true
-
 lint.select = [
   "B",      # flake8-bugbear
   "BLE",    # flake8-blind-except
@@ -175,18 +160,18 @@ lint.per-file-ignores."docs/*" = [ "I" ]
 lint.per-file-ignores."tests/*" = [ "D" ]
 lint.pydocstyle.convention = "numpy"
 
-[tool.pytest.ini_options]
-testpaths = [ "tests" ]
-xfail_strict = true
-addopts = [
+[tool.pytest]
+ini_options.testpaths = [ "tests" ]
+ini_options.xfail_strict = true
+ini_options.addopts = [
   "--import-mode=importlib", # allow using test files with same name
 ]
 
-[tool.coverage.run]
-source = [ "patpy" ]
-omit = [
+[tool.coverage]
+run.omit = [
   "**/test_*.py",
 ]
+run.source = [ "patpy" ]
 
 [tool.cruft]
 skip = [
