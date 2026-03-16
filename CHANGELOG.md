@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning][].
 - Tests for all supervised methods in `tests/test_supervised_methods.py`,
   including fixtures with deterministic mock backends (no network access or
   GPU required), multi-label MixMIL tests, and PULSAR linear probe tests.
+- Base class for sample methods: (`tl/_base_sample_method/BaseSampleMethod`)
+- `fit_linear_probe()` method for sample-level methods
+- States for sample-level methods with `_check_adata_loaded()` and `_check_fitted()`
+- Tests for supervised methods
+
+### Changed
+
+- Both `SupervisedSampleMethod` and `SampleRepresentationMethod` now inherit basic functionality from `BaseSampleMethod`
 
 ## 0.11.4
 
