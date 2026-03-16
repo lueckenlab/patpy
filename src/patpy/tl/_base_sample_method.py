@@ -129,10 +129,12 @@ class BaseSampleMethod:
         """Raise :class:`RuntimeError` if :meth:`prepare_anndata` has not been called."""
         if self.adata is None:
             raise RuntimeError(f"{type(self).__name__} is not fitted. Call prepare_anndata() first.")
+        
+    def calculate_distance_matrix(self):
+        raise NotImplementedError
 
     def embed(
         self,
-        distances: np.ndarray,
         method: str = "UMAP",
         n_jobs: int = -1,
         verbose: bool = False,
@@ -155,6 +157,7 @@ class BaseSampleMethod:
         coordinates : np.ndarray
             Array of shape ``(n_samples, 2)``.
         """
+        distances = self.calculate_distance_matrix()
         distances = fill_nan_distances(distances)
 
         if method == "MDS":
@@ -240,7 +243,6 @@ class BaseSampleMethod:
 
     def plot_embedding(
         self,
-        distances: np.ndarray,
         method: str = "UMAP",
         metadata_cols: list[str] | None = None,
         continuous_palette: str = "viridis",
@@ -252,8 +254,6 @@ class BaseSampleMethod:
 
         Parameters
         ----------
-        distances
-            Square distance matrix used to compute (or look up) the embedding.
         method
             Embedding method.  One of ``"MDS"``, ``"TSNE"``, ``"UMAP"``.
         metadata_cols
@@ -272,7 +272,7 @@ class BaseSampleMethod:
         import matplotlib.pyplot as plt
 
         if method not in self.embeddings:
-            self.embed(distances, method=method)
+            self.embed(method=method)
 
         embedding_df = pd.DataFrame(
             self.embeddings[method],
