@@ -134,12 +134,6 @@ def extract_metadata(adata: sc.AnnData, sample_key: str, columns: list, samples:
 
     metadata = adata.obs[[sample_key, *columns]].drop_duplicates()
 
-    if (metadata[sample_key].value_counts() > 1).any():
-        warnings.warn(
-            "Metadata contains multiple values for the same sample, taking only the first occurence", stacklevel=2
-        )
-        metadata.drop_duplicates(subset=[sample_key], keep="first")
-
     # Check if the sample key is also in columns to avoid reindexing errors
     need_to_rename_sample_key = sample_key in columns
 
@@ -153,6 +147,12 @@ def extract_metadata(adata: sc.AnnData, sample_key: str, columns: list, samples:
     if need_to_rename_sample_key:
         metadata.rename(columns={sample_key + "_dupl": sample_key}, inplace=True)
 
+    if (metadata.index.value_counts() > 1).any():
+        warnings.warn(
+            "Metadata contains multiple values for the same sample, taking only the first occurence", stacklevel=2
+        )
+        metadata = metadata[~metadata.index.duplicated(keep="first")]
+    
     return metadata.loc[samples]
 
 
