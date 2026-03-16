@@ -449,7 +449,6 @@ class SampleRepresentationMethod(BaseSampleMethod):
             layer=layer,
             seed=seed,
         )
-        self.sample_representation = None
         self.samples_adata = None
 
     def prepare_anndata(self, adata):
