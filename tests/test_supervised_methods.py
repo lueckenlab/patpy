@@ -671,8 +671,14 @@ class TestPULSAR:
 
     def test_fit_linear_probe_classification_keys(self, pulsar_model):
         result = pulsar_model.fit_linear_probe(target="disease", task="classification")
-        for key in ("model", "X_train", "X_test", "y_train", "y_test", "y_pred", "accuracy", "f1"):
+        for key in ("model", "test_sample_labels", "y_test", "y_pred", "accuracy", "f1"):
             assert key in result
+
+    def test_fit_linear_probe_classification_no_data_matrices(self, pulsar_model):
+        """Return dict must not contain the expensive raw data matrices."""
+        result = pulsar_model.fit_linear_probe(target="disease", task="classification")
+        for key in ("X_train", "X_test", "y_train"):
+            assert key not in result
 
     def test_fit_linear_probe_classification_accuracy_in_range(self, pulsar_model):
         result = pulsar_model.fit_linear_probe(target="disease", task="classification")
@@ -680,18 +686,63 @@ class TestPULSAR:
 
     def test_fit_linear_probe_regression_keys(self, pulsar_model):
         result = pulsar_model.fit_linear_probe(target="age", task="regression")
-        for key in ("model", "X_train", "X_test", "y_train", "y_test", "y_pred", "r2", "pearson"):
+        for key in ("model", "test_sample_labels", "y_test", "y_pred", "r2", "pearson"):
             assert key in result
 
+    def test_fit_linear_probe_regression_no_data_matrices(self, pulsar_model):
+        result = pulsar_model.fit_linear_probe(target="age", task="regression")
+        for key in ("X_train", "X_test", "y_train"):
+            assert key not in result
+
     def test_fit_linear_probe_train_test_sizes(self, pulsar_model):
-        """test_size=0.2 with 10 donors → 2 test, 8 train.
-        Uses regression with 'age' (continuous) to avoid sklearn's stratification
-        check failing when each class has only 1 member (10 unique age values).
-        """
-        # so sklearn accepts the 10 unique continuous age values without complaint.
+        """test_size=0.2 with 10 donors → 2 test, 8 train."""
         result = pulsar_model.fit_linear_probe(target="age", task="regression", test_size=0.2)
+        assert len(result["test_sample_labels"]) == 2
         assert len(result["y_test"]) == 2
-        assert len(result["y_train"]) == 8
+
+    def test_fit_linear_probe_random_split_stores_test_sample_labels(self, pulsar_model):
+        """After a random split, model.test_sample_labels must be populated."""
+        assert pulsar_model.test_sample_labels is None
+        pulsar_model.fit_linear_probe(target="age", task="regression", test_size=0.2)
+        assert pulsar_model.test_sample_labels is not None
+        assert len(pulsar_model.test_sample_labels) == 2
+
+    def test_fit_linear_probe_explicit_test_sample_labels(self, pulsar_model):
+        """When test_sample_labels is provided, exactly those samples appear in the test set."""
+        held_out = ["donor_00", "donor_01", "donor_02"]
+        result = pulsar_model.fit_linear_probe(
+            target="age", task="regression", test_sample_labels=held_out
+        )
+        assert sorted(result["test_sample_labels"]) == sorted(held_out)
+        assert len(result["y_test"]) == len(held_out)
+
+    def test_fit_linear_probe_explicit_labels_overwrite_the_field(self, pulsar_model):
+        """When caller supplies test_sample_labels, model.test_sample_labels is not overwritten."""
+        held_out = ["donor_00", "donor_01"]
+        pulsar_model.fit_linear_probe(
+            target="age", task="regression", test_sample_labels=held_out
+        )
+        # field should still be None — the caller owns the split
+        assert pulsar_model.test_sample_labels == held_out
+
+        new_held_out = ["donor_00", "donor_02"]
+
+        pulsar_model.fit_linear_probe(
+            target="age", task="regression", test_sample_labels=new_held_out
+        )
+        # field should still be None — the caller owns the split
+        assert pulsar_model.test_sample_labels == new_held_out
+
+
+    def test_fit_linear_probe_explicit_labels_train_is_complement(self, pulsar_model):
+        """Training set must be exactly the complement of the provided test labels."""
+        held_out = {"donor_00", "donor_01", "donor_02"}
+        result = pulsar_model.fit_linear_probe(
+            target="age", task="regression", test_sample_labels=list(held_out)
+        )
+        all_donors = set(pulsar_model.sample_representation.index)
+        expected_train = all_donors - held_out
+        assert len(result["y_test"]) + len(expected_train) == len(all_donors)
 
     def test_fit_linear_probe_invalid_task_raises(self, pulsar_model):
         with pytest.raises(ValueError, match="task must be"):
@@ -701,4 +752,4 @@ class TestPULSAR:
         """target=None must use label_keys[0], which is 'age' (continuous, > 1)."""
         result = pulsar_model.fit_linear_probe(task="regression")
         # age values are 20, 23, ... — all above 1 — distinguishable from binary disease
-        assert np.unique(result["y_train"]).max() > 1
+        assert np.unique(result["y_test"]).max() > 1
