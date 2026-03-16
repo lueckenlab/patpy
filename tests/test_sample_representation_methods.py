@@ -1,7 +1,14 @@
+import importlib.util
+
 import numpy as np
 import pandas as pd
 import pytest
 from anndata import AnnData
+
+
+def _skip_if_missing(module: str) -> pytest.MarkDecorator:
+    available = importlib.util.find_spec(module) is not None
+    return pytest.mark.skipif(not available, reason=f"{module} not installed")
 
 from patpy.tl._base_sample_method import _create_colormap
 from patpy.tl.sample_representation import (
@@ -37,6 +44,24 @@ LIGHTWEIGHT_METHODS = [
     (GroupedPseudobulk, {"layer": "X"}),
     (RandomVector, {}),
     (CellGroupComposition, {}),
+]
+
+# All SampleRepresentationMethod subclasses with the minimal constructor kwargs needed
+# to instantiate them (no prepare_anndata is called, so no external deps are required).
+_ALL_SR_METHODS = [
+    pytest.param(Pseudobulk, {"layer": "X"}, id="Pseudobulk"),
+    pytest.param(GroupedPseudobulk, {"layer": "X"}, id="GroupedPseudobulk"),
+    pytest.param(RandomVector, {}, id="RandomVector"),
+    pytest.param(CellGroupComposition, {}, id="CellGroupComposition"),
+    pytest.param(MrVI, {}, id="MrVI"),
+    pytest.param(WassersteinTSNE, {"replicate_key": CELL_KEY}, id="WassersteinTSNE"),
+    pytest.param(PILOT, {"sample_state_col": "disease"}, id="PILOT", marks=_skip_if_missing("pilotpy")),
+    pytest.param(SCPoli, {}, id="SCPoli"),
+    pytest.param(PhEMD, {}, id="PhEMD"),
+    pytest.param(DiffusionEarthMoverDistance, {}, id="DiffusionEarthMoverDistance"),
+    pytest.param(MOFA, {}, id="MOFA"),
+    pytest.param(GloScope, {}, id="GloScope", marks=_skip_if_missing("rpy2")),
+    pytest.param(GloScope_py, {}, id="GloScope_py"),
 ]
 
 
@@ -707,3 +732,133 @@ def test_wasserstein_tsne_warns_when_recomputing_with_different_weight(pbmc3k_ad
 
     assert new_distances.shape == (adata.obs[SAMPLE_KEY].nunique(), adata.obs[SAMPLE_KEY].nunique())
     assert adata.uns["wasserstein_covariance_weight"] == 0.3
+
+
+# ---------------------------------------------------------------------------
+# _check_fitted — all SampleRepresentationMethod subclasses
+# ---------------------------------------------------------------------------
+
+
+class TestCheckFitted:
+    """Verify _fitted flag and _check_fitted() guard for every SR method.
+
+    No prepare_anndata is called, so no external package is required.
+    """
+
+    @pytest.mark.parametrize("cls, extra_kwargs", _ALL_SR_METHODS)
+    def test_fitted_false_before_prepare_anndata(self, cls, extra_kwargs):
+        model = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **extra_kwargs)
+        assert model._fitted is False
+
+    @pytest.mark.parametrize("cls, extra_kwargs", _ALL_SR_METHODS)
+    def test_check_fitted_raises_before_prepare_anndata(self, cls, extra_kwargs):
+        model = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **extra_kwargs)
+        with pytest.raises(RuntimeError, match="prepare_anndata"):
+            model._check_fitted()
+
+    @pytest.mark.parametrize("cls, extra_kwargs", _ALL_SR_METHODS)
+    def test_calculate_distance_matrix_raises_before_prepare_anndata(self, cls, extra_kwargs):
+        model = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **extra_kwargs)
+        with pytest.raises(RuntimeError, match="prepare_anndata"):
+            model.calculate_distance_matrix()
+
+    # Lightweight methods only: prepare_anndata needs no external packages.
+    @pytest.mark.parametrize("cls, extra_kwargs", LIGHTWEIGHT_METHODS)
+    def test_fitted_true_after_prepare_anndata(self, cls, extra_kwargs, synthetic_adata):
+        model = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **extra_kwargs)
+        model.prepare_anndata(synthetic_adata.copy())
+        assert model._fitted is True
+
+    @pytest.mark.parametrize("cls, extra_kwargs", LIGHTWEIGHT_METHODS)
+    def test_check_fitted_passes_after_prepare_anndata(self, cls, extra_kwargs, synthetic_adata):
+        model = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **extra_kwargs)
+        model.prepare_anndata(synthetic_adata.copy())
+        model._check_fitted()  # must not raise
+
+    # ------------------------------------------------------------------
+    # Heavy-weight methods: verify _fitted=True after prepare_anndata
+    # ------------------------------------------------------------------
+
+    def test_fitted_true_after_prepare_anndata_mrvi(self, synthetic_adata):
+        pytest.importorskip("scvi")
+        method = MrVI(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, max_epochs=1)
+        method.prepare_anndata(synthetic_adata.copy())
+        assert method._fitted is True
+        method._check_fitted()
+
+    def test_fitted_true_after_prepare_anndata_wasserstein_tsne(self, pbmc3k_adata):
+        pytest.importorskip("WassersteinTSNE")
+        method = WassersteinTSNE(
+            sample_key=SAMPLE_KEY,
+            cell_group_key=PBMC_CELL_KEY,
+            replicate_key=PBMC_CELL_KEY,
+            layer="X_pca",
+        )
+        method.prepare_anndata(pbmc3k_adata.copy())
+        assert method._fitted is True
+        method._check_fitted()
+
+    def test_fitted_true_after_prepare_anndata_pilot(self, pbmc3k_adata):
+        pytest.importorskip("pilotpy", exc_type=Exception)
+        adata = pbmc3k_adata.copy()
+        adata.obs["state"] = "control"
+        method = PILOT(
+            sample_key=SAMPLE_KEY,
+            cell_group_key=PBMC_CELL_KEY,
+            sample_state_col="state",
+            layer="X_pca",
+        )
+        method.prepare_anndata(adata)
+        assert method._fitted is True
+        method._check_fitted()
+
+    def test_fitted_true_after_prepare_anndata_scpoli(self, synthetic_adata):
+        pytest.importorskip("scarches")
+        method = SCPoli(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, n_epochs=1, pretraining_epochs=1)
+        method.prepare_anndata(synthetic_adata.copy())
+        assert method._fitted is True
+        method._check_fitted()
+
+    def test_fitted_true_after_prepare_anndata_phemd(self, pbmc3k_adata):
+        pytest.importorskip("ot")
+        pytest.importorskip("phate", exc_type=ImportError)
+        method = PhEMD(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, n_clusters=3)
+        method.prepare_anndata(pbmc3k_adata.copy())
+        assert method._fitted is True
+        method._check_fitted()
+
+    def test_fitted_true_after_prepare_anndata_diffusion_emd(self, pbmc3k_adata):
+        pytest.importorskip("DiffusionEMD")
+        method = DiffusionEarthMoverDistance(
+            sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca"
+        )
+        method.prepare_anndata(pbmc3k_adata.copy())
+        assert method._fitted is True
+        method._check_fitted()
+
+    def test_fitted_true_after_prepare_anndata_mofa(self, pbmc3k_adata):
+        pytest.importorskip("mofapy2")
+        method = MOFA(
+            sample_key=SAMPLE_KEY,
+            cell_group_key=PBMC_CELL_KEY,
+            n_factors=3,
+            iterations=10,
+            quiet=True,
+        )
+        method.prepare_anndata(pbmc3k_adata.copy())
+        assert method._fitted is True
+        method._check_fitted()
+
+    def test_fitted_true_after_prepare_anndata_gloscope_r(self, pbmc3k_adata):
+        _skip_if_gloscope_r_unavailable()
+        method = GloScope(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca")
+        method.prepare_anndata(pbmc3k_adata.copy())
+        assert method._fitted is True
+        method._check_fitted()
+
+    def test_fitted_true_after_prepare_anndata_gloscope_py(self, pbmc3k_adata):
+        pytest.importorskip("pynndescent")
+        method = GloScope_py(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca")
+        method.prepare_anndata(pbmc3k_adata.copy())
+        assert method._fitted is True
+        method._check_fitted()
