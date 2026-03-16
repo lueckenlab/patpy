@@ -225,27 +225,6 @@ class SupervisedSampleMethod(BaseSampleMethod):
         distances = scipy.spatial.distance.pdist(representations.values, metric=dist)
         return scipy.spatial.distance.squareform(distances)
 
-    def embed(self, method: str = "UMAP", n_jobs: int = -1, verbose: bool = False) -> np.ndarray:
-        """Compute a 2-D embedding from the donor distance matrix.
-
-        Calls :meth:`calculate_distance_matrix` internally.
-
-        Parameters
-        ----------
-        method
-            One of ``"MDS"``, ``"TSNE"``, ``"UMAP"``.
-        n_jobs
-            Number of parallel threads.
-        verbose
-            Print progress information.
-
-        Returns
-        -------
-        np.ndarray of shape ``(n_donors, 2)``
-        """
-        distances = self.calculate_distance_matrix()
-        return super().embed(distances, method=method, n_jobs=n_jobs, verbose=verbose)
-
     def _donor_col(self, col: str) -> np.ndarray:
         """Return a per-donor array for *col*, aligned to :attr:`samples`."""
         return (
