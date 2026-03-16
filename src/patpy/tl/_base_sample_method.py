@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Literal
 import warnings
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -133,7 +133,7 @@ class BaseSampleMethod:
         """Raise :class:`RuntimeError` if :meth:`prepare_anndata` has not been called."""
         if self.adata is None:
             raise RuntimeError(f"{type(self).__name__} is not fitted. Call prepare_anndata() first.")
-        
+
     def calculate_distance_matrix(self):
         raise NotImplementedError
 
@@ -321,7 +321,7 @@ class BaseSampleMethod:
             )
 
         return axes
-    
+
     def fit_linear_probe(
         self,
         target: str | None = None,
@@ -428,4 +428,3 @@ class BaseSampleMethod:
             }
 
         raise ValueError(f"task must be 'classification' or 'regression', got '{task}'.")
-
