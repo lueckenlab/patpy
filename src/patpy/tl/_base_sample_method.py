@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Literal
 import warnings
 
 import numpy as np
@@ -54,6 +55,7 @@ class BaseSampleMethod:
         self.embeddings: dict[str, np.ndarray] = {}
 
         self.sample_representation = None
+        self.test_sample_labels: list | None = None
 
     def prepare_anndata(self, adata: sc.AnnData) -> None:
         """Store *adata* and populate :attr:`samples` / :attr:`cell_groups`.
@@ -319,3 +321,111 @@ class BaseSampleMethod:
             )
 
         return axes
+    
+    def fit_linear_probe(
+        self,
+        target: str | None = None,
+        task: Literal["classification", "regression"] = "classification",
+        test_size: float = 0.2,
+        random_state: int = 42,
+        test_sample_labels: list | None = None,
+    ) -> dict:
+        """Fit a linear probe on top of sample embeddings.
+
+        Parameters
+        ----------
+        target
+            Column in ``adata.obs`` to predict. Defaults to
+            ``label_keys[0]``.
+        task
+            ``"classification"`` or ``"regression"``.
+        test_size
+            Fraction of donors held out for evaluation when
+            ``test_sample_labels`` is not provided.
+        random_state
+            Random seed for the train/test split (used only when
+            ``test_sample_labels`` is not provided).
+        test_sample_labels
+            Explicit list of sample labels (index values of
+            :attr:`sample_representation`) to use as the test set.
+            When provided, ``test_size`` and ``random_state`` are ignored.
+            When ``None``, a random split is performed and the chosen test
+            labels are stored in :attr:`test_sample_labels` for
+            reproducibility.
+
+        Returns
+        -------
+        dict
+            Keys: ``"model"``, ``"test_sample_labels"``, ``"y_test"``,
+            ``"y_pred"``.
+
+            For classification: additionally ``"accuracy"`` and ``"f1"``.
+            For regression: additionally ``"r2"`` and ``"pearson"``.
+
+        Examples
+        --------
+        >>> result = model.fit_linear_probe(task="regression")
+        >>> print(f"Pearson r = {result['pearson']:.3f}")
+        """
+        self._check_fitted()
+
+        target = target or self.label_keys[0]
+        rep = self.sample_representation
+        all_labels = rep.index
+
+        if test_sample_labels is not None:
+            test_idx = list(test_sample_labels)
+            train_idx = [lbl for lbl in all_labels if lbl not in set(test_idx)]
+        else:
+            from sklearn.model_selection import train_test_split
+
+            y_all = self.labels.loc[all_labels, target].values
+            train_idx, test_idx = train_test_split(
+                list(all_labels),
+                test_size=test_size,
+                random_state=random_state,
+                stratify=(y_all if task == "classification" else None),
+            )
+
+        self.test_sample_labels = test_idx
+        X_train = rep.loc[train_idx].values
+        X_test = rep.loc[test_idx].values
+        y_train = self.labels.loc[train_idx, target].values
+        y_test = self.labels.loc[test_idx, target].values
+
+        if task == "classification":
+            from sklearn.linear_model import LogisticRegression
+            from sklearn.metrics import accuracy_score, f1_score
+
+            clf = LogisticRegression(max_iter=1000, random_state=random_state, class_weight="balanced")
+            clf.fit(X_train, y_train)
+            y_pred = clf.predict(X_test)
+            return {
+                "model": clf,
+                "test_sample_labels": test_idx,
+                "y_test": y_test,
+                "y_pred": y_pred,
+                "accuracy": accuracy_score(y_test, y_pred),
+                "f1": f1_score(y_test, y_pred, average="weighted", zero_division=0),
+            }
+
+        elif task == "regression":
+            from scipy.stats import pearsonr
+            from sklearn.linear_model import Ridge
+            from sklearn.metrics import r2_score
+
+            reg = Ridge(alpha=0.1)
+            reg.fit(X_train, y_train)
+            y_pred = reg.predict(X_test)
+            pearson_r, _ = pearsonr(y_test, y_pred)
+            return {
+                "model": reg,
+                "test_sample_labels": test_idx,
+                "y_test": y_test,
+                "y_pred": y_pred,
+                "r2": r2_score(y_test, y_pred),
+                "pearson": pearson_r,
+            }
+
+        raise ValueError(f"task must be 'classification' or 'regression', got '{task}'.")
+

@@ -85,7 +85,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
         Sets
         ----
         self.labels : pd.DataFrame
-            Shape ``(n_donors,)``, indexed by donor ID.  One column per
+            Shape ``(n_donors, n_label_keys)``, indexed by donor ID.  One column per
             label key.
         """
         super().prepare_anndata(adata)
@@ -94,27 +94,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
         if missing:
             raise ValueError(f"label_keys {missing} not found in adata.obs.")
 
-        # Build a per-donor label DataFrame — one row per donor
-        label_frames = []
-        for key in self.label_keys:
-            donor_labels = (
-                adata.obs[[self.sample_key, key]]
-                .drop_duplicates(self.sample_key)
-                .set_index(self.sample_key)
-                .loc[self.samples, key]
-            )
-            # Warn if any donor has more than one label value
-            n_per_donor = adata.obs.groupby(self.sample_key, observed=True)[key].nunique()
-            ambiguous = n_per_donor[n_per_donor > 1]
-            if len(ambiguous):
-                warnings.warn(
-                    f"label_key='{key}' has multiple values for donors: "
-                    f"{ambiguous.index.tolist()}.  Using the first occurrence per donor.",
-                    stacklevel=2,
-                )
-            label_frames.append(donor_labels)
-
-        self.labels = pd.concat(label_frames, axis=1)
+        self.labels = self._extract_metadata()[self.label_keys]
 
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
         """Return per-donor prediction importances / posterior means.
@@ -893,94 +873,3 @@ class PULSAR(SupervisedSampleMethod):
         )
         self.adata.obs[importance_col] = scores
         return cell_importances
-
-    def fit_linear_probe(
-        self,
-        target: str | None = None,
-        task: Literal["classification", "regression"] = "classification",
-        test_size: float = 0.2,
-        random_state: int = 42,
-    ) -> dict:
-        """Fit a linear probe on top of PULSAR embeddings.
-
-        Parameters
-        ----------
-        target
-            Column in ``adata.obs`` to predict. Defaults to
-            ``label_keys[0]``.
-        task
-            ``"classification"`` or ``"regression"``.
-        test_size
-            Fraction of donors held out for evaluation.
-        random_state
-            Random seed for the train/test split.
-
-        Returns
-        -------
-        dict
-            Keys: ``"model"``, ``"X_train"``, ``"X_test"``, ``"y_train"``,
-            ``"y_test"``, ``"y_pred"``.
-
-            For classification: additionally ``"accuracy"`` and ``"f1"``.
-            For regression: additionally ``"r2"`` and ``"pearson"``.
-
-        Examples
-        --------
-        >>> result = model.fit_linear_probe(task="regression")
-        >>> print(f"Pearson r = {result['pearson']:.3f}")
-        """
-        from sklearn.model_selection import train_test_split
-
-        self._check_fitted()
-
-        target = target or self.label_keys[0]
-        X = self.sample_representation.values
-        y = self.labels.loc[self.sample_representation.index, target].values
-
-        X_train, X_test, y_train, y_test = train_test_split(
-            X,
-            y,
-            test_size=test_size,
-            random_state=random_state,
-            stratify=(y if task == "classification" else None),
-        )
-
-        if task == "classification":
-            from sklearn.linear_model import LogisticRegression
-            from sklearn.metrics import accuracy_score, f1_score
-
-            clf = LogisticRegression(max_iter=1000, random_state=random_state, class_weight="balanced")
-            clf.fit(X_train, y_train)
-            y_pred = clf.predict(X_test)
-            return {
-                "model": clf,
-                "X_train": X_train,
-                "X_test": X_test,
-                "y_train": y_train,
-                "y_test": y_test,
-                "y_pred": y_pred,
-                "accuracy": accuracy_score(y_test, y_pred),
-                "f1": f1_score(y_test, y_pred, average="weighted", zero_division=0),
-            }
-
-        elif task == "regression":
-            from scipy.stats import pearsonr
-            from sklearn.linear_model import Ridge
-            from sklearn.metrics import r2_score
-
-            reg = Ridge(alpha=0.1)
-            reg.fit(X_train, y_train)
-            y_pred = reg.predict(X_test)
-            pearson_r, _ = pearsonr(y_test, y_pred)
-            return {
-                "model": reg,
-                "X_train": X_train,
-                "X_test": X_test,
-                "y_train": y_train,
-                "y_test": y_test,
-                "y_pred": y_pred,
-                "r2": r2_score(y_test, y_pred),
-                "pearson": pearson_r,
-            }
-
-        raise ValueError(f"task must be 'classification' or 'regression', got '{task}'.")
