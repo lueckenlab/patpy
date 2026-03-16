@@ -467,28 +467,6 @@ class SampleRepresentationMethod(BaseSampleMethod):
         if self.DISTANCES_UNS_KEY in self.adata.uns and not force:
             return self.adata.uns[self.DISTANCES_UNS_KEY]
 
-    def embed(self, method="UMAP", n_jobs: int = -1, verbose: bool = False):
-        """Compute a 2-D embedding from the donor distance matrix.
-
-        Calls :meth:`calculate_distance_matrix` internally, then delegates
-        to :meth:`BaseSampleMethod.embed`.
-
-        Parameters
-        ----------
-        method : str
-            One of ``"MDS"``, ``"TSNE"``, ``"UMAP"``.
-        n_jobs : int
-            Number of parallel threads.
-        verbose : bool
-
-        Returns
-        -------
-        np.ndarray of shape ``(n_donors, 2)``
-        """
-        distances = self.calculate_distance_matrix()
-        distances = fill_nan_distances(distances)
-        return super().embed(distances, method=method, n_jobs=n_jobs, verbose=verbose)
-
     def plot_clustermap(self, metadata_cols=None, figsize=(10, 12), *args, **kwargs):
         """Plot a hierarchically-clustered heat-map of the distance matrix.
 
