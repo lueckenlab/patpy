@@ -100,21 +100,45 @@ def pulsar_adata(basic_adata):
 
 
 @pytest.fixture
-def pulsar_model(pulsar_adata):
+def _patch_pulsar(monkeypatch):
+    """Replace PULSAR.from_pretrained with a small random-weight model.
+
+    This avoids downloading the ~500 MB pretrained checkpoint and works
+    around a transformers 5.x incompatibility, while still running the
+    real PULSAR forward pass and the real extract_donor_embeddings_from_h5ad
+    code path.  hidden_size=512 matches the (N_DONORS, 512) shape expectation.
+    """
+    from pulsar.model import PULSAR as _PulsarModel, PULSARConfig
+
+    small_config = PULSARConfig(
+        input_size=1280,                  # must match X_uce embedding dim
+        hidden_size=512,                  # output dim expected by the tests
+        encoder_num_hidden_layers=1,      # lightweight
+        encoder_num_attention_heads=8,    # 512 / 8 = 64 head_dim
+        encoder_intermediate_size=256,
+        use_decoder=False,
+        use_cell_state=False,
+        cls_transform=False,
+    )
+    small_model = _PulsarModel(small_config)
+    monkeypatch.setattr(_PulsarModel, "from_pretrained", lambda *args, **kwargs: small_model)
+
+
+@pytest.fixture
+def pulsar_model(pulsar_adata, _patch_pulsar):
     from patpy.tl.supervised import PULSAR
 
-    # tests can look up "disease" from self.labels without a KeyError.
+    # sample_cell_num=4 keeps the forward pass fast with 20 cells/donor.
     model = PULSAR(
         sample_key="donor_id",
         label_keys=["age", "disease"],
         tasks=["regression", "classification"],
         layer="X_uce",
         device="cpu",
+        sample_cell_num=4,
+        batch_size=10,
     )
-    try:
-        model.prepare_anndata(pulsar_adata)
-    except (RuntimeError, ImportError) as e:
-        pytest.skip(str(e))
+    model.prepare_anndata(pulsar_adata)
     return model
 
 
@@ -510,7 +534,7 @@ class TestPULSAR:
         with pytest.raises(ValueError, match="not found in adata.obsm"):
             model.prepare_anndata(basic_adata)
 
-    def test_prepare_anndata_low_dim_embedding_warns(self, basic_adata):
+    def test_prepare_anndata_low_dim_embedding_warns(self, basic_adata, _patch_pulsar):
         from patpy.tl.supervised import PULSAR
 
         basic_adata.obsm["X_low"] = np.zeros((N_CELLS, 10), dtype="float32")
@@ -520,12 +544,15 @@ class TestPULSAR:
             tasks=["regression"],
             layer="X_low",
             device="cpu",
+            sample_cell_num=4,
         )
+        # Warning is emitted before forward pass; dim mismatch in projection
+        # layer (small model expects 1280-dim input, gets 10) is expected.
         with pytest.warns(UserWarning, match="dimensions"):
             try:
                 model.prepare_anndata(basic_adata)
-            except (RuntimeError, ImportError):
-                pass  # warning was already emitted; model loading failure is environment-specific
+            except Exception:
+                pass
 
     def test_prepare_anndata_samples_match_adata(self, pulsar_model):
         assert set(pulsar_model.samples) == {f"donor_{i:02d}" for i in range(N_DONORS)}
