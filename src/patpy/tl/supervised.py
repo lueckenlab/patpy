@@ -94,7 +94,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
         if missing:
             raise ValueError(f"label_keys {missing} not found in adata.obs.")
 
-        self.labels = self._extract_metadata()[self.label_keys]
+        self.labels = self._extract_metadata(self.label_keys)
 
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
         """Return per-donor prediction importances / posterior means.
