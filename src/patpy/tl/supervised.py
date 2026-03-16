@@ -685,6 +685,7 @@ class PULSAR(SupervisedSampleMethod):
             ``.obsm``.
         """
         import torch
+
         try:
             from pulsar.model import PULSAR as _PulsarModel
             from pulsar.utils import extract_donor_embeddings_from_h5ad
