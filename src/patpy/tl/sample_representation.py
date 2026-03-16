@@ -461,7 +461,7 @@ class SampleRepresentationMethod(BaseSampleMethod):
 
     def calculate_distance_matrix(self, force: bool = False):
         """Transform-like method: returns samples distances matrix"""
-        self._check_fitted()
+        self._check_adata_loaded()
         if self.DISTANCES_UNS_KEY in self.adata.uns and not force:
             return self.adata.uns[self.DISTANCES_UNS_KEY]
 
