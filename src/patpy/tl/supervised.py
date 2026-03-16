@@ -684,6 +684,7 @@ class PULSAR(SupervisedSampleMethod):
             ``.obs``, and per-cell embeddings under :attr:`layer` in
             ``.obsm``.
         """
+        import torch
         try:
             from pulsar.model import PULSAR as _PulsarModel
             from pulsar.utils import extract_donor_embeddings_from_h5ad
@@ -723,15 +724,12 @@ class PULSAR(SupervisedSampleMethod):
         self._pulsar_model.eval()
 
         try:
-            import torch
-
             self._pulsar_model = self._pulsar_model.to(self.device).to(torch.bfloat16)
-        except Exception as e:
+        except RuntimeError as e:
             warnings.warn(
                 f"Could not move model to device='{self.device}': {e}. Falling back to CPU.",
                 stacklevel=2,
             )
-            import torch
 
             self.device = "cpu"
             self._pulsar_model = self._pulsar_model.to("cpu").to(torch.bfloat16)
