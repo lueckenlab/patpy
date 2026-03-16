@@ -842,6 +842,7 @@ class MrVI(SampleRepresentationMethod):
         self.model.train(max_epochs=self.max_epochs)
 
         self.samples = self.model.sample_order
+        self._fitted = True
 
     def calculate_distance_matrix(
         self,
@@ -975,6 +976,7 @@ class WassersteinTSNE(SampleRepresentationMethod):
 
         self.model = WT.Dataset2Gaussians(data)
         self.distances_model = WT.GaussianWassersteinDistance(self.model)
+        self._fitted = True
 
     def calculate_distance_matrix(self, covariance_weight=0.5, force: bool = False):
         r"""Return sample by sample distances matrix
@@ -992,6 +994,7 @@ class WassersteinTSNE(SampleRepresentationMethod):
         -------
         Matrix of distances between samples
         """
+        super().calculate_distance_matrix()
         is_correct_key_in_uns = (
             "wasserstein_covariance_weight" in self.adata.uns
             and self.adata.uns["wasserstein_covariance_weight"] == covariance_weight
@@ -1316,6 +1319,7 @@ class SCPoli(SampleRepresentationMethod):
         )
 
         self.sample_representation = self.model.get_conditional_embeddings().X
+        self._fitted = True
 
     def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between scPoli sample embeddings"""
@@ -1395,6 +1399,7 @@ class PhEMD(SampleRepresentationMethod):
         self.samples = sc_labels_df.columns
         self.encoded_labels = sc_labels_df.to_numpy()
         self.encoded_labels = self.encoded_labels / self.encoded_labels.sum(axis=0)
+        self._fitted = True
 
     def calculate_distance_matrix(self, force: bool = False, n_jobs=-1):
         """Calculate distances between samples"""
@@ -1450,6 +1455,7 @@ class DiffusionEarthMoverDistance(SampleRepresentationMethod):
         self.adata.obsp["connectivities"] = make_matrix_symmetric(self.adata.obsp["connectivities"])
 
         self.model = DiffusionCheb(n_scales=self.n_scales)
+        self._fitted = True
 
     def calculate_distance_matrix(self, force: bool = False):
         """Calculate distances between samples"""
@@ -1651,6 +1657,7 @@ class MOFA(SampleRepresentationMethod):
         ent.run()
 
         self.model = ent.model
+        self._fitted = True
 
     def calculate_distance_matrix(self, force=False, store_weights=False, dist="euclidean"):
         """
@@ -1731,6 +1738,7 @@ class GloScope(SampleRepresentationMethod):
         # Load the R packages
         robjects.r("library(GloScope)")
         importr("BiocParallel")
+        self._fitted = True
 
     def calculate_distance_matrix(self, force: bool = False):
         """Calculate distances between samples represented as GloScope embeddings"""

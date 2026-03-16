@@ -56,6 +56,7 @@ class BaseSampleMethod:
 
         self.sample_representation = None
         self.test_sample_labels: list | None = None
+        self._fitted: bool = False
 
     def prepare_anndata(self, adata: sc.AnnData) -> None:
         """Store *adata* and populate :attr:`samples` / :attr:`cell_groups`.
@@ -76,6 +77,8 @@ class BaseSampleMethod:
 
         if self.cell_group_key is not None and self.cell_group_key in adata.obs.columns:
             self.cell_groups = adata.obs[self.cell_group_key].unique()
+
+        self._fitted = True
 
     def _get_data(self) -> np.ndarray:
         """Return the feature matrix from the slot specified by :attr:`layer`."""
@@ -134,8 +137,13 @@ class BaseSampleMethod:
         if self.adata is None:
             raise RuntimeError(f"{type(self).__name__} is not fitted. Call prepare_anndata() first.")
 
+    def _check_fitted(self) -> None:
+        """Raise :class:`RuntimeError` if :meth:`prepare_anndata` has not completed successfully."""
+        if not self._fitted:
+            raise RuntimeError(f"{type(self).__name__} is not fitted. Call prepare_anndata() first.")
+
     def calculate_distance_matrix(self):
-        raise NotImplementedError
+        self._check_fitted()
 
     def embed(
         self,
@@ -368,6 +376,7 @@ class BaseSampleMethod:
         >>> print(f"Pearson r = {result['pearson']:.3f}")
         """
         self._check_adata_loaded()
+        self._check_fitted()
 
         target = target or self.label_keys[0]
         rep = self.sample_representation

@@ -744,3 +744,62 @@ class TestPULSAR:
         result = pulsar_model.fit_linear_probe(task="regression")
         # age values are 20, 23, ... — all above 1 — distinguishable from binary disease
         assert np.unique(result["y_test"]).max() > 1
+
+
+def _make_unfitted_supervised_models():
+    """Return (model_id, unfitted_model) pairs without triggering any external imports."""
+    from patpy.tl.supervised import MixMIL, PULSAR
+
+    return [
+        pytest.param(
+            MixMIL(sample_key="donor_id", label_keys=["disease"], tasks=["classification"], layer="X_pca"),
+            id="MixMIL",
+        ),
+        pytest.param(
+            PULSAR(sample_key="donor_id", label_keys=["age"], tasks=["regression"], layer="X_uce", device="cpu"),
+            id="PULSAR",
+        ),
+    ]
+
+
+class TestCheckFitted:
+    """Tests for BaseSampleMethod._fitted flag and _check_fitted() guard."""
+
+    # ------------------------------------------------------------------
+    # Unfitted state — no prepare_anndata called, no mocks needed
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize("model", _make_unfitted_supervised_models())
+    def test_fitted_false_before_prepare_anndata(self, model):
+        assert model._fitted is False
+
+    @pytest.mark.parametrize("model", _make_unfitted_supervised_models())
+    def test_check_fitted_raises_before_prepare_anndata(self, model):
+        with pytest.raises(RuntimeError, match="prepare_anndata"):
+            model._check_fitted()
+
+    @pytest.mark.parametrize("model", _make_unfitted_supervised_models())
+    def test_calculate_distance_matrix_raises_before_prepare_anndata(self, model):
+        with pytest.raises(RuntimeError, match="prepare_anndata"):
+            model.calculate_distance_matrix()
+
+    @pytest.mark.parametrize("model", _make_unfitted_supervised_models())
+    def test_fit_linear_probe_raises_before_prepare_anndata(self, model):
+        with pytest.raises(RuntimeError, match="prepare_anndata"):
+            model.fit_linear_probe()
+
+    # ------------------------------------------------------------------
+    # Fitted state — requires mocked prepare_anndata fixtures
+    # ------------------------------------------------------------------
+
+    def test_fitted_true_after_prepare_anndata_mixmil(self, mixmil_model):
+        assert mixmil_model._fitted is True
+
+    def test_check_fitted_passes_after_prepare_anndata_mixmil(self, mixmil_model):
+        mixmil_model._check_fitted()  # must not raise
+
+    def test_fitted_true_after_prepare_anndata_pulsar(self, pulsar_model):
+        assert pulsar_model._fitted is True
+
+    def test_check_fitted_passes_after_prepare_anndata_pulsar(self, pulsar_model):
+        pulsar_model._check_fitted()  # must not raise

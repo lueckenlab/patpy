@@ -355,6 +355,7 @@ class MixMIL(SupervisedSampleMethod):
             lr=self.lr,
         )
         self._model = model
+        self._fitted = True
 
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
         """Per-donor posterior predictions from MixMIL.
@@ -757,6 +758,7 @@ class PULSAR(SupervisedSampleMethod):
         cols = [f"dim_{i}" for i in range(embeddings_arr.shape[1])]
         self.sample_representation = pd.DataFrame(embeddings_arr, index=donor_ids, columns=cols)
         self.samples = np.array(donor_ids)
+        self._fitted = True
 
     def get_sample_representations(self) -> pd.DataFrame:
         """Per-donor CLS embeddings from PULSAR.
