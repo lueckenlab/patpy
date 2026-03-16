@@ -53,6 +53,8 @@ class BaseSampleMethod:
         self.cell_groups: np.ndarray | None = None
         self.embeddings: dict[str, np.ndarray] = {}
 
+        self.sample_representation = None
+
     def prepare_anndata(self, adata: sc.AnnData) -> None:
         """Store *adata* and populate :attr:`samples` / :attr:`cell_groups`.
 
