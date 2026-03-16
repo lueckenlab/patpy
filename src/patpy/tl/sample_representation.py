@@ -12,7 +12,6 @@ from scipy.stats import pearsonr, spearmanr
 from statsmodels.stats.multitest import multipletests
 
 from patpy.pp import (
-    fill_nan_distances,
     filter_small_samples,
     is_count_data,
     subsample,
