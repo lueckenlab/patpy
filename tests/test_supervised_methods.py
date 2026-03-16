@@ -207,7 +207,7 @@ class TestBaseSampleMethod:
     def test_prepare_anndata_donor_ids_match_adata(self, basic_adata):
         base = _make_base()
         base.prepare_anndata(basic_adata)
-        expected = set(f"donor_{i:02d}" for i in range(N_DONORS))
+        expected = {f"donor_{i:02d}" for i in range(N_DONORS)}
         assert set(base.samples) == expected
 
     def test_prepare_anndata_missing_sample_key_raises(self, basic_adata):
@@ -305,7 +305,7 @@ class TestSupervisedSampleMethod:
     def test_prepare_anndata_labels_indexed_by_donor(self, basic_adata):
         model = _make_supervised()
         model.prepare_anndata(basic_adata)
-        assert set(model.labels.index) == set(f"donor_{i:02d}" for i in range(N_DONORS))
+        assert set(model.labels.index) == {f"donor_{i:02d}" for i in range(N_DONORS)}
 
     def test_prepare_anndata_label_values_correct(self, basic_adata):
         """model.labels must reflect the per-donor ground truth, not cell-level noise."""
@@ -389,7 +389,7 @@ class TestMixMIL:
         assert mixmil_model._model is not None
 
     def test_prepare_anndata_samples_match_adata(self, mixmil_model):
-        assert set(mixmil_model.samples) == set(f"donor_{i:02d}" for i in range(N_DONORS))
+        assert set(mixmil_model.samples) == {f"donor_{i:02d}" for i in range(N_DONORS)}
 
     def test_additional_covariate_from_obs_accepted(self, basic_adata, _mock_mixmil):
         from patpy.tl.supervised import MixMIL
@@ -425,7 +425,7 @@ class TestMixMIL:
 
     def test_get_sample_importance_indexed_by_donor(self, mixmil_model):
         scores = mixmil_model.get_sample_importance()
-        assert set(scores.index) == set(f"donor_{i:02d}" for i in range(N_DONORS))
+        assert set(scores.index) == {f"donor_{i:02d}" for i in range(N_DONORS)}
 
     def test_get_sample_importance_column_named_after_label(self, mixmil_model):
         assert "disease_importance" in mixmil_model.get_sample_importance().columns
@@ -502,7 +502,7 @@ class TestMixMIL:
 
     def test_get_sample_representations_indexed_by_donor(self, mixmil_model):
         reps = mixmil_model.get_sample_representations()
-        assert set(reps.index) == set(f"donor_{i:02d}" for i in range(N_DONORS))
+        assert set(reps.index) == {f"donor_{i:02d}" for i in range(N_DONORS)}
 
     def test_get_sample_representations_no_nans(self, mixmil_model):
         reps = mixmil_model.get_sample_representations()
@@ -587,7 +587,7 @@ class TestPULSAR:
             model.prepare_anndata(basic_adata)
 
     def test_prepare_anndata_samples_match_adata(self, pulsar_model):
-        assert set(pulsar_model.samples) == set(f"donor_{i:02d}" for i in range(N_DONORS))
+        assert set(pulsar_model.samples) == {f"donor_{i:02d}" for i in range(N_DONORS)}
 
     def test_get_sample_representations_shape(self, pulsar_model):
         assert pulsar_model.get_sample_representations().shape == (N_DONORS, 512)
@@ -710,36 +710,27 @@ class TestPULSAR:
     def test_fit_linear_probe_explicit_test_sample_labels(self, pulsar_model):
         """When test_sample_labels is provided, exactly those samples appear in the test set."""
         held_out = ["donor_00", "donor_01", "donor_02"]
-        result = pulsar_model.fit_linear_probe(
-            target="age", task="regression", test_sample_labels=held_out
-        )
+        result = pulsar_model.fit_linear_probe(target="age", task="regression", test_sample_labels=held_out)
         assert sorted(result["test_sample_labels"]) == sorted(held_out)
         assert len(result["y_test"]) == len(held_out)
 
     def test_fit_linear_probe_explicit_labels_overwrite_the_field(self, pulsar_model):
         """When caller supplies test_sample_labels, model.test_sample_labels is not overwritten."""
         held_out = ["donor_00", "donor_01"]
-        pulsar_model.fit_linear_probe(
-            target="age", task="regression", test_sample_labels=held_out
-        )
+        pulsar_model.fit_linear_probe(target="age", task="regression", test_sample_labels=held_out)
         # field should still be None — the caller owns the split
         assert pulsar_model.test_sample_labels == held_out
 
         new_held_out = ["donor_00", "donor_02"]
 
-        pulsar_model.fit_linear_probe(
-            target="age", task="regression", test_sample_labels=new_held_out
-        )
+        pulsar_model.fit_linear_probe(target="age", task="regression", test_sample_labels=new_held_out)
         # field should still be None — the caller owns the split
         assert pulsar_model.test_sample_labels == new_held_out
-
 
     def test_fit_linear_probe_explicit_labels_train_is_complement(self, pulsar_model):
         """Training set must be exactly the complement of the provided test labels."""
         held_out = {"donor_00", "donor_01", "donor_02"}
-        result = pulsar_model.fit_linear_probe(
-            target="age", task="regression", test_sample_labels=list(held_out)
-        )
+        result = pulsar_model.fit_linear_probe(target="age", task="regression", test_sample_labels=list(held_out))
         all_donors = set(pulsar_model.sample_representation.index)
         expected_train = all_donors - held_out
         assert len(result["y_test"]) + len(expected_train) == len(all_donors)
