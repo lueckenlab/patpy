@@ -344,7 +344,8 @@ class MixMIL(SupervisedSampleMethod):
         else:
             Q = Xs[0].shape[1]
             K = F.shape[1]
-            model = _MixMIL(Q=Q, K=K)
+            P = Y.shape[1] if Y.ndim == 2 else 1
+            model = _MixMIL(Q=Q, K=K, P=P)
 
         self._history = model.train(
             Xs,
