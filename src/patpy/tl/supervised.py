@@ -564,7 +564,9 @@ class MixMIL(SupervisedSampleMethod):
 
         embeddings_arr = np.stack(embeddings)
         cols = [f"dim_{i}" for i in range(embeddings_arr.shape[1])]
-        return pd.DataFrame(embeddings_arr, index=self.samples, columns=cols)
+        self.sample_representation = pd.DataFrame(embeddings_arr, index=self.samples, columns=cols)
+
+        return self.sample_representation
 
     @property
     def training_history(self) -> list | None:
@@ -711,7 +713,7 @@ class PULSAR(SupervisedSampleMethod):
         self.resample_num = resample_num
 
         self._pulsar_model = None
-        self._donor_embeddings: pd.DataFrame | None = None
+        self.sample_representation: pd.DataFrame | None = None
 
     def prepare_anndata(self, adata: sc.AnnData) -> None:
         """Load PULSAR model and extract donor-level CLS embeddings.
@@ -795,7 +797,7 @@ class PULSAR(SupervisedSampleMethod):
 
         embeddings_arr = np.stack(embeddings)
         cols = [f"dim_{i}" for i in range(embeddings_arr.shape[1])]
-        self._donor_embeddings = pd.DataFrame(embeddings_arr, index=donor_ids, columns=cols)
+        self.sample_representation = pd.DataFrame(embeddings_arr, index=donor_ids, columns=cols)
         self.samples = np.array(donor_ids)
 
     def get_sample_representations(self) -> pd.DataFrame:
@@ -814,7 +816,7 @@ class PULSAR(SupervisedSampleMethod):
         >>> distances = model.calculate_distance_matrix()
         """
         self._check_fitted()
-        return self._donor_embeddings
+        return self.sample_representation
 
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
         """Per-donor scores derived from the L2 norm of CLS embeddings.
@@ -845,11 +847,11 @@ class PULSAR(SupervisedSampleMethod):
         if not force and cache_key in self.adata.uns:
             return pd.DataFrame(self.adata.uns[cache_key], index=self.samples)
 
-        norms = np.linalg.norm(self._donor_embeddings.values, axis=1)
+        norms = np.linalg.norm(self.sample_representation.values, axis=1)
         label = self.label_keys[0]
         sample_importance = pd.DataFrame(
             {f"{label}_importance": norms},
-            index=self._donor_embeddings.index,
+            index=self.sample_representation.index,
         )
 
         self.adata.uns[cache_key] = sample_importance.to_dict()
@@ -894,10 +896,10 @@ class PULSAR(SupervisedSampleMethod):
 
         for donor_id in self.samples:
             mask = donor_col == donor_id
-            if not mask.any() or donor_id not in self._donor_embeddings.index:
+            if not mask.any() or donor_id not in self.sample_representation.index:
                 continue
 
-            cls_vec = self._donor_embeddings.loc[donor_id].values
+            cls_vec = self.sample_representation.loc[donor_id].values
             cells = cell_embeddings[mask]
             d = min(cells.shape[1], cls_vec.shape[0])
 
@@ -953,8 +955,8 @@ class PULSAR(SupervisedSampleMethod):
         self._check_fitted()
 
         target = target or self.label_keys[0]
-        X = self._donor_embeddings.values
-        y = self.labels.loc[self._donor_embeddings.index, target].values
+        X = self.sample_representation.values
+        y = self.labels.loc[self.sample_representation.index, target].values
 
         X_train, X_test, y_train, y_test = train_test_split(
             X,
