@@ -121,7 +121,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
         RuntimeError
             If called before :meth:`prepare_anndata`.
         """
-        self._check_fitted()
+        self._check_adata_loaded()
 
         cache_key = "supervised_sample_importance"
         if not force and self.adata is not None and cache_key in self.adata.uns:
@@ -156,7 +156,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
         RuntimeError
             If called before :meth:`prepare_anndata`.
         """
-        self._check_fitted()
+        self._check_adata_loaded()
 
         importance_cols = [f"{k}_importance" for k in self.label_keys]
         if not force and all(c in self.adata.obs.columns for c in importance_cols):
@@ -375,7 +375,7 @@ class MixMIL(SupervisedSampleMethod):
         --------
         >>> scores = model.get_sample_importance()
         """
-        self._check_fitted()
+        self._check_adata_loaded()
 
         cache_key = "supervised_sample_importance"
         if not force and cache_key in self.adata.uns:
@@ -433,7 +433,7 @@ class MixMIL(SupervisedSampleMethod):
         >>> adata.obs["importance"] = importance["disease_importance"].values
         >>> sc.pl.umap(adata, color="importance")
         """
-        self._check_fitted()
+        self._check_adata_loaded()
 
         if label is None:
             label = self.label_keys[0]
@@ -498,7 +498,7 @@ class MixMIL(SupervisedSampleMethod):
         >>> representations = model.get_sample_representations()
         >>> distances = model.calculate_distance_matrix()
         """
-        self._check_fitted()
+        self._check_adata_loaded()
         import torch
 
         # Sort cells by donor (same ordering as in training)
@@ -773,7 +773,7 @@ class PULSAR(SupervisedSampleMethod):
         >>> embeddings = model.get_sample_representations()
         >>> distances = model.calculate_distance_matrix()
         """
-        self._check_fitted()
+        self._check_adata_loaded()
         return self.sample_representation
 
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
@@ -799,7 +799,7 @@ class PULSAR(SupervisedSampleMethod):
         --------
         >>> scores = model.get_sample_importance()
         """
-        self._check_fitted()
+        self._check_adata_loaded()
 
         cache_key = "supervised_sample_importance"
         if not force and cache_key in self.adata.uns:
@@ -840,7 +840,7 @@ class PULSAR(SupervisedSampleMethod):
         >>> adata.obs["importance"] = importance.values
         >>> sc.pl.umap(adata, color="importance")
         """
-        self._check_fitted()
+        self._check_adata_loaded()
 
         label = self.label_keys[0]
         importance_col = f"{label}_importance"

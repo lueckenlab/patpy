@@ -79,7 +79,7 @@ class BaseSampleMethod:
 
     def _get_data(self) -> np.ndarray:
         """Return the feature matrix from the slot specified by :attr:`layer`."""
-        self._check_fitted()
+        self._check_adata_loaded()
 
         if self.layer is None or self.layer == "X":
             warnings.warn("Using data from adata.X", stacklevel=2)
@@ -129,7 +129,7 @@ class BaseSampleMethod:
         """Return a DataFrame with *columns* aligned to :attr:`samples`."""
         return extract_metadata(self.adata, self.sample_key, columns, samples=self.samples)
 
-    def _check_fitted(self) -> None:
+    def _check_adata_loaded(self) -> None:
         """Raise :class:`RuntimeError` if :meth:`prepare_anndata` has not been called."""
         if self.adata is None:
             raise RuntimeError(f"{type(self).__name__} is not fitted. Call prepare_anndata() first.")
@@ -367,7 +367,7 @@ class BaseSampleMethod:
         >>> result = model.fit_linear_probe(task="regression")
         >>> print(f"Pearson r = {result['pearson']:.3f}")
         """
-        self._check_fitted()
+        self._check_adata_loaded()
 
         target = target or self.label_keys[0]
         rep = self.sample_representation

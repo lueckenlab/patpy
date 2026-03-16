@@ -188,16 +188,16 @@ def _make_base(sample_key="donor_id", cell_group_key="cell_type", layer="X_pca")
 
 
 class TestBaseSampleMethod:
-    def test_check_fitted_raises_before_prepare(self):
-        """_check_fitted must raise before prepare_anndata is called."""
+    def test_check_adata_loaded_raises_before_prepare(self):
+        """_check_adata_loaded must raise before prepare_anndata is called."""
         base = _make_base()
         with pytest.raises(RuntimeError, match="not fitted"):
-            base._check_fitted()
+            base._check_adata_loaded()
 
-    def test_check_fitted_passes_after_prepare(self, basic_adata):
+    def test_check_adata_loaded_passes_after_prepare(self, basic_adata):
         base = _make_base()
         base.prepare_anndata(basic_adata)
-        base._check_fitted()
+        base._check_adata_loaded()
 
     def test_prepare_anndata_finds_correct_number_of_donors(self, basic_adata):
         base = _make_base()
