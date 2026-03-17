@@ -8,6 +8,70 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.11.4
+
+### Added
+
+- Tests for all sample representation methods
+- Tests for preprocessing functions in `pp/basic.py`
+- Tests for evaluation utilities in `tl/evaluation.py`
+- `conftest.py` with reusable fixtures
+
+### Fixed
+
+- `prepare_data_for_phemd` now handles dense matrices in addition to sparse ones
+
+## 0.11.3
+
+### Added
+
+- An utils function `_remove_negative_distances`
+
+### Changed
+
+- In Python implementations of GloScope, remove negative distances
+
+## 0.11.2
+
+### Added
+
+- GloScope tutorial
+
+### Changed
+
+- Update the rpy2 interface for R implementation of GloScope
+
+## 0.11.1
+
+### Fixed
+
+- Fix bug in `tl/sample_representation/GloScope_py` with always accessing layer in obsm instead of a general slot
+
+## 0.11.0
+
+### Added
+- Function `tl/evaluation/trajectory_correlation` to compute a corresponding SPARE metric
+- Function `tl/evaluation/knn_prediction_score` to compute a corresponding SPARE metric
+- Function `tl/evaluation/replicate_robustness` to compute a corresponding SPARE metric
+- Utils function `tl/evaluation/_get_col_from_adata`
+- Utils funciton `tl/evaluation/_identity_up_to_suffix`
+
+## 0.10.0
+
+### Added
+
+- `GloScope_py` sample representation method (reimplementation of the original GloScope in Python for CPU and GPU)
+
+### Changed
+
+- `GloScope.calculate_distance_matrix` now returns a NumPy array instead of a pandas DataFrame
+
+## 0.9.3
+
+### Changed
+
+-   Update rpy2 conversion in `Gloscope.prepare_anndata()`
+
 ## 0.9.2
 
 ### Changed

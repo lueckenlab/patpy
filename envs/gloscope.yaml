@@ -8,3 +8,4 @@ dependencies:
   - r-reticulate
   - r-anndata
   - bioconductor-gloscope
+  - anndata2ri
