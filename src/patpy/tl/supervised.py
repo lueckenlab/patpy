@@ -713,16 +713,12 @@ class PULSAR(SupervisedSampleMethod):
                 stacklevel=2,
             )
 
-        try:
-            self._pulsar_model = _PulsarModel.from_pretrained(self.pretrained_model)
-        except AttributeError as e:
-            if "all_tied_weights_keys" in str(e) or "_tied_weights_keys" in str(e):
-                raise RuntimeError(
-                    "PULSAR failed to load due to a transformers version mismatch. "
-                    "Install PULSAR from source:\n"
-                    "    pip install git+https://github.com/snap-stanford/PULSAR"
-                ) from e
-            raise
+        # transformers >=5.x requires `all_tied_weights_keys` on PreTrainedModel subclasses;
+        # PULSAR predates this requirement and has no tied weights, so patch if missing.
+        if not hasattr(_PulsarModel, "all_tied_weights_keys"):
+            _PulsarModel.all_tied_weights_keys = {}
+
+        self._pulsar_model = _PulsarModel.from_pretrained(self.pretrained_model)
 
         self._pulsar_model.eval()
 
