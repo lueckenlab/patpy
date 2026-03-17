@@ -1,7 +1,10 @@
 import numpy as np
 import pandas as pd
+import pytest
+from unittest.mock import MagicMock, patch
 
 from patpy.pp.basic import (
+    _to_numpy,
     calculate_cell_qc_metrics,
     calculate_compositional_metrics,
     calculate_n_cells_per_sample,
@@ -10,6 +13,7 @@ from patpy.pp.basic import (
     fill_nan_distances,
     filter_small_cell_groups,
     filter_small_samples,
+    get_helical_embedding,
     is_count_data,
     prepare_data_for_phemd,
     subsample,
@@ -164,6 +168,121 @@ def test_is_count_data(integer_matrix):
 
     non_count_matrix = np.array([[1.1, 2.2], [3.3, 4.4]])
     assert not is_count_data(non_count_matrix)
+
+
+# ── get_helical_embedding ──────────────────────────────────────────────────────
+
+def _make_mock_model(embedding_dim: int, n_cells: int):
+    """Return a mock helical model that produces a fixed numpy embedding array."""
+    mock_model = MagicMock()
+    mock_model.process_data.return_value = MagicMock()
+    mock_model.get_embeddings.return_value = np.ones((n_cells, embedding_dim), dtype="float32")
+    return mock_model
+
+
+@pytest.mark.parametrize(
+    "model_name, obsm_key, config_cls_path, model_cls_path",
+    [
+        (
+            "scgpt",
+            "X_scgpt",
+            "helical.models.scgpt.scGPTConfig",
+            "helical.models.scgpt.scGPT",
+        ),
+        (
+            "geneformer",
+            "X_geneformer",
+            "helical.models.geneformer.GeneformerConfig",
+            "helical.models.geneformer.Geneformer",
+        ),
+        (
+            "uce",
+            "X_uce",
+            "helical.models.uce.UCEConfig",
+            "helical.models.uce.UCE",
+        ),
+    ],
+)
+def test_get_helical_embedding_stores_obsm(
+    synthetic_adata, model_name, obsm_key, config_cls_path, model_cls_path
+):
+    """Each supported model stores embeddings under the correct adata.obsm key."""
+    adata = synthetic_adata.copy()
+    embedding_dim = 16
+
+    mock_model = _make_mock_model(embedding_dim, adata.n_obs)
+    mock_config_cls = MagicMock(return_value=MagicMock())
+    mock_model_cls = MagicMock(return_value=mock_model)
+
+    with patch(config_cls_path, mock_config_cls), patch(model_cls_path, mock_model_cls):
+        result = get_helical_embedding(adata, model=model_name, batch_size=4, device="cpu")
+
+    assert obsm_key in result.obsm
+    assert result.obsm[obsm_key].shape == (adata.n_obs, embedding_dim)
+
+
+def test_get_helical_embedding_transcriptformer(synthetic_adata):
+    """TranscriptFormer embeddings are converted to float32 numpy arrays."""
+    import torch
+
+    adata = synthetic_adata.copy()
+    embedding_dim = 32
+    torch_embeddings = torch.ones((adata.n_obs, embedding_dim))
+
+    mock_model = MagicMock()
+    mock_model.process_data.return_value = MagicMock()
+    mock_model.get_embeddings.return_value = torch_embeddings
+
+    with (
+        patch("helical.models.transcriptformer.model.TranscriptFormer", return_value=mock_model),
+        patch(
+            "helical.models.transcriptformer.transcriptformer_config.TranscriptFormerConfig",
+            return_value=MagicMock(),
+        ),
+    ):
+        result = get_helical_embedding(adata, model="transcriptformer", batch_size=4)
+
+    assert "X_transcriptformer" in result.obsm
+    emb = result.obsm["X_transcriptformer"]
+    assert emb.shape == (adata.n_obs, embedding_dim)
+    assert emb.dtype == np.float32
+
+
+def test_get_helical_embedding_invalid_model(synthetic_adata):
+    """An unrecognized model name raises ValueError."""
+    with pytest.raises(ValueError, match="Unrecognized model"):
+        get_helical_embedding(synthetic_adata, model="unknown_model")
+
+
+def test_get_helical_embedding_case_insensitive(synthetic_adata):
+    """Model name matching is case-insensitive."""
+    adata = synthetic_adata.copy()
+    embedding_dim = 8
+
+    mock_model = _make_mock_model(embedding_dim, adata.n_obs)
+
+    with (
+        patch("helical.models.scgpt.scGPTConfig", return_value=MagicMock()),
+        patch("helical.models.scgpt.scGPT", return_value=mock_model),
+    ):
+        result = get_helical_embedding(adata, model="ScGPT", batch_size=4, device="cpu")
+
+    assert "X_scgpt" in result.obsm
+
+
+def test_to_numpy_converts_tensor():
+    """_to_numpy converts a torch.Tensor to a numpy array."""
+    torch = pytest.importorskip("torch")
+    t = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    arr = _to_numpy(t)
+    assert isinstance(arr, np.ndarray)
+    np.testing.assert_array_equal(arr, t.numpy())
+
+
+def test_to_numpy_passthrough_list():
+    """_to_numpy wraps plain lists in a numpy array."""
+    arr = _to_numpy([[1, 2], [3, 4]])
+    assert isinstance(arr, np.ndarray)
 
 
 # Confirm NaN distances are filled symmetrically with max-distance scaling.
