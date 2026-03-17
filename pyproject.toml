@@ -88,6 +88,9 @@ optional-dependencies.pulsar = [
 optional-dependencies.scpoli = [
   "scarches>=0.5.1",
 ]
+optional-dependencies.helical = [
+  "helical>=1.8.3",
+]
 optional-dependencies.test = [
   "coverage",
   "pytest",
@@ -187,6 +190,9 @@ testpaths = [ "tests" ]
 xfail_strict = true
 addopts = [
   "--import-mode=importlib", # allow using test files with same name
+]
+markers = [
+  "helical: integration tests that load real Helical foundation models (slow, requires helical extra)",
 ]
 
 [tool.coverage.run]
