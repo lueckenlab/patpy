@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "patpy"
-version = "0.12.0"
+version = "0.13.0"
 description = "A toolbox for patient or sample representation from single-cell data"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -34,8 +34,6 @@ dependencies = [
   "plottable",
   "scipy>=1.10",
   "seaborn>=0.12",
-  # for debug logging (referenced from the issue template)
-  "session-info2",
 ]
 optional-dependencies.dev = [
   # CLI for bumping the version number
