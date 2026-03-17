@@ -483,40 +483,6 @@ class SampleRepresentationMethod(BaseSampleMethod):
         distances = self.calculate_distance_matrix(*args, **kwargs)
         return super().plot_clustermap(distances, metadata_cols=metadata_cols, figsize=figsize)
 
-    def plot_embedding(
-        self,
-        method="UMAP",
-        metadata_cols=None,
-        continuous_palette="viridis",
-        categorical_palette="tab10",
-        na_color="lightgray",
-        axes=None,
-    ):
-        """Plot a 2-D embedding of the distance matrix.
-
-        Parameters
-        ----------
-        method : str
-        metadata_cols : list[str] or None
-        continuous_palette, categorical_palette : str
-        na_color : str
-        axes : matplotlib Axes or None
-
-        Returns
-        -------
-        matplotlib Axes or array of Axes
-        """
-        distances = self.calculate_distance_matrix()
-        return super().plot_embedding(
-            distances,
-            method=method,
-            metadata_cols=metadata_cols,
-            continuous_palette=continuous_palette,
-            categorical_palette=categorical_palette,
-            na_color=na_color,
-            axes=axes,
-        )
-
     def to_adata(self, metadata: pd.DataFrame = None, *args, **kwargs):
         """Convert samples data to AnnData object
 
