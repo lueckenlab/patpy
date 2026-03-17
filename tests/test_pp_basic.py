@@ -1,7 +1,8 @@
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pandas as pd
 import pytest
-from unittest.mock import MagicMock, patch
 
 from patpy.pp.basic import (
     _to_numpy,
@@ -172,6 +173,7 @@ def test_is_count_data(integer_matrix):
 
 # ── get_helical_embedding ──────────────────────────────────────────────────────
 
+
 def _make_mock_model(embedding_dim: int, n_cells: int):
     """Return a mock helical model that produces a fixed numpy embedding array."""
     mock_model = MagicMock()
@@ -203,9 +205,7 @@ def _make_mock_model(embedding_dim: int, n_cells: int):
         ),
     ],
 )
-def test_get_helical_embedding_stores_obsm(
-    synthetic_adata, model_name, obsm_key, config_cls_path, model_cls_path
-):
+def test_get_helical_embedding_stores_obsm(synthetic_adata, model_name, obsm_key, config_cls_path, model_cls_path):
     """Each supported model stores embeddings under the correct adata.obsm key."""
     adata = synthetic_adata.copy()
     embedding_dim = 16
