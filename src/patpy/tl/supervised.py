@@ -207,13 +207,8 @@ class SupervisedSampleMethod(BaseSampleMethod):
 
     def _donor_col(self, col: str) -> np.ndarray:
         """Return a per-donor array for *col*, aligned to :attr:`samples`."""
-        return (
-            self.adata.obs[[self.sample_key, col]]
-            .drop_duplicates(self.sample_key)
-            .set_index(self.sample_key)
-            .loc[self.samples, col]
-            .values
-        )
+        self._check_adata_loaded()
+        return self._extract_metadata(columns=[col]).loc[self.samples]
 
 
 class MixMIL(SupervisedSampleMethod):
