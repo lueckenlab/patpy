@@ -207,6 +207,7 @@ def _make_mock_model(embedding_dim: int, n_cells: int):
 )
 def test_get_helical_embedding_stores_obsm(synthetic_adata, model_name, obsm_key, config_cls_path, model_cls_path):
     """Each supported model stores embeddings under the correct adata.obsm key."""
+    pytest.importorskip("helical", reason="helical package not installed")
     adata = synthetic_adata.copy()
     embedding_dim = 16
 
@@ -223,6 +224,7 @@ def test_get_helical_embedding_stores_obsm(synthetic_adata, model_name, obsm_key
 
 def test_get_helical_embedding_transcriptformer(synthetic_adata):
     """TranscriptFormer embeddings are converted to float32 numpy arrays."""
+    pytest.importorskip("helical", reason="helical package not installed")
     import torch
 
     adata = synthetic_adata.copy()
@@ -250,12 +252,14 @@ def test_get_helical_embedding_transcriptformer(synthetic_adata):
 
 def test_get_helical_embedding_invalid_model(synthetic_adata):
     """An unrecognized model name raises ValueError."""
+    pytest.importorskip("helical", reason="helical package not installed")
     with pytest.raises(ValueError, match="Unrecognized model"):
         get_helical_embedding(synthetic_adata, model="unknown_model")
 
 
 def test_get_helical_embedding_case_insensitive(synthetic_adata):
     """Model name matching is case-insensitive."""
+    pytest.importorskip("helical", reason="helical package not installed")
     adata = synthetic_adata.copy()
     embedding_dim = 8
 
