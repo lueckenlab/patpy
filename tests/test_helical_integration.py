@@ -30,8 +30,16 @@ pytestmark = pytest.mark.helical
 # A handful of real human gene symbols / Ensembl IDs that sit in every
 # Helical model vocabulary.  Using a tiny set keeps memory and I/O low.
 _GENE_SYMBOLS = [
-    "GAPDH", "ACTB", "TP53", "MYC", "BRCA1",
-    "TNF", "IL6", "CD3E", "CD8A", "PTPRC",
+    "GAPDH",
+    "ACTB",
+    "TP53",
+    "MYC",
+    "BRCA1",
+    "TNF",
+    "IL6",
+    "CD3E",
+    "CD8A",
+    "PTPRC",
 ]
 _ENSEMBL_IDS = [
     "ENSG00000111640",  # GAPDH
@@ -75,6 +83,7 @@ def minimal_adata_ensembl():
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _assert_embedding(result: sc.AnnData, obsm_key: str, n_cells: int) -> None:
     assert obsm_key in result.obsm, f"{obsm_key!r} not found in adata.obsm"
     emb = result.obsm[obsm_key]
@@ -87,6 +96,7 @@ def _assert_embedding(result: sc.AnnData, obsm_key: str, n_cells: int) -> None:
 # ---------------------------------------------------------------------------
 # Per-model tests
 # ---------------------------------------------------------------------------
+
 
 def test_scgpt_real(minimal_adata_symbols):
     adata = minimal_adata_symbols.copy()
