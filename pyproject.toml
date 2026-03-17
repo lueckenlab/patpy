@@ -72,6 +72,9 @@ optional-dependencies.gloscope_py_gpu = [
   "cuml",
   "cupy",
 ]
+optional-dependencies.helical = [
+  "helical>=1.8.3",
+]
 optional-dependencies.mrvi = [
   "scvi-tools>=1.2",
   "torch>=1.13",
@@ -81,9 +84,6 @@ optional-dependencies.pilot = [
 ]
 optional-dependencies.scpoli = [
   "scarches>=0.5.1",
-]
-optional-dependencies.helical = [
-  "helical>=1.8.3",
 ]
 optional-dependencies.test = [
   "coverage",
