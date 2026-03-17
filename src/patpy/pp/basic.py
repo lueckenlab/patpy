@@ -476,6 +476,8 @@ def get_helical_embedding(
         from helical.models.uce import UCE, UCEConfig
 
         adata.var_names = adata.var_names.astype(str)
+        if not sp.issparse(adata.X):
+            adata.X = sp.csr_matrix(adata.X)
 
         config = UCEConfig(
             batch_size=batch_size,
