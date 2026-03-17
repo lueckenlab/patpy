@@ -285,6 +285,7 @@ def test_to_numpy_converts_tensor():
 
 def test_to_numpy_passthrough_list():
     """_to_numpy wraps plain lists in a numpy array."""
+    pytest.importorskip("helical", reason="helical package not installed")  # This test requires torch, so pass it if there is no helical
     arr = _to_numpy([[1, 2], [3, 4]])
     assert isinstance(arr, np.ndarray)
 
