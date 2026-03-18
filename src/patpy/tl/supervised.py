@@ -74,6 +74,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
         self.tasks = list(tasks)
         self.labels: pd.DataFrame | None = None
         self._probes: dict[str, object] = {}  # label → fitted sklearn probe model
+        self._label_mappings: dict[str, tuple[list, dict]] = {}  # label_key → (classes, encode_dict)
 
     def prepare_anndata(self, adata: sc.AnnData) -> None:
         """Validate *adata*, populate :attr:`samples` and :attr:`labels`.
@@ -102,7 +103,11 @@ class SupervisedSampleMethod(BaseSampleMethod):
         self.labels = self._extract_metadata(self.label_keys)
 
     def predict(self, label: str) -> pd.Series | pd.DataFrame:
-        """Predict `label` for every sample in `self.samples`.
+        """Predict `label` for every sample using sklearn probes.
+
+        This default implementation uses probes fitted by :meth:`fine_tune`.
+        Subclasses with native prediction heads (e.g. MixMIL) should override
+        both :meth:`predict` and :meth:`fine_tune`.
 
         Parameters
         ----------
@@ -145,11 +150,53 @@ class SupervisedSampleMethod(BaseSampleMethod):
         else:
             return pd.Series(probe.predict(X), index=self.samples, name=label)
 
+    def _prepare_fine_tune(
+        self,
+        labels: list[str] | str,
+        tasks: list[_PREDICTION_TASKS] | _PREDICTION_TASKS,
+    ) -> tuple[list[str], list[_PREDICTION_TASKS]]:
+        """Validate and register new labels/tasks for fine-tuning.
+
+        Performs string-to-list conversion, adata check, length validation,
+        label existence check, extending label_keys/tasks, re-extracting
+        metadata, and clearing stale caches.
+
+        Returns
+        -------
+        labels : list[str]
+            Normalised list of label names.
+        tasks : list[_PREDICTION_TASKS]
+            Normalised list of task types.
+        """
+        labels = [labels] if isinstance(labels, str) else labels
+        tasks = [tasks] if isinstance(tasks, str) else tasks
+
+        self._check_adata_loaded()
+
+        if len(labels) != len(tasks):
+            raise ValueError(f"labels (len={len(labels)}) and tasks (len={len(tasks)}) must have the same length.")
+
+        for label in labels:
+            if label not in self.adata.obs.columns:
+                raise ValueError(f"label '{label}' not found in adata.obs.columns.")
+
+        for label, task in zip(labels, tasks, strict=True):
+            if label not in self.label_keys:
+                self.label_keys.append(label)
+                self.tasks.append(task)
+
+        self.labels = self._extract_metadata(self.label_keys)
+        self.adata.uns.pop("supervised_sample_importance", None)
+
+        return labels, tasks
+
     def fine_tune(self, labels: list[str] | str, tasks: list[_PREDICTION_TASKS] | _PREDICTION_TASKS, **kwargs):
         """Fine-tune / continue training the model on new or existing labels.
 
-        The model is extended to predict the given labels (which may be a superset
-        of existing labels). Existing learned parameters are preserved via warm-start.
+        The default implementation fits sklearn linear probes on top of
+        :meth:`get_sample_representations`.  Subclasses with native training
+        (e.g. MixMIL) should override this method and call
+        :meth:`_prepare_fine_tune` for shared validation and bookkeeping.
 
         Parameters
         ----------
@@ -170,27 +217,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
         """
         from sklearn.linear_model import LogisticRegression, Ridge
 
-        # Convert strings to lists
-        labels = [labels] if isinstance(labels, str) else labels
-        tasks = [tasks] if isinstance(tasks, str) else tasks
-
-        self._check_adata_loaded()
-
-        if len(labels) != len(tasks):
-            raise ValueError(f"labels (len={len(labels)}) and tasks (len={len(tasks)}) must have the same length.")
-
-        for label in labels:
-            if label not in self.adata.obs.columns:
-                raise ValueError(f"label '{label}' not found in adata.obs.columns.")
-
-        # Extend label_keys / tasks
-        for label, task in zip(labels, tasks, strict=True):
-            if label not in self.label_keys:
-                self.label_keys.append(label)
-                self.tasks.append(task)
-
-        self.labels = self._extract_metadata(self.label_keys)
-        self.adata.uns.pop("supervised_sample_importance", None)
+        labels, tasks = self._prepare_fine_tune(labels, tasks)
 
         try:
             rep = self.get_sample_representations()  # requires subclass to implement
@@ -325,6 +352,23 @@ class SupervisedSampleMethod(BaseSampleMethod):
         self._check_adata_loaded()
         return self._extract_metadata(columns=[col]).loc[self.samples].values.ravel()
 
+    def _build_label_mappings(self) -> None:
+        """Build and store mappings for string labels.
+
+        For each label key whose donor-level column is non-numeric (strings,
+        objects), a mapping from unique sorted class names to integer indices is
+        stored in :attr:`_label_mappings`.  Already-mapped labels are skipped.
+        """
+        for label_key in self.label_keys:
+            if label_key in self._label_mappings:
+                continue
+
+            col = self._donor_col(label_key)
+            if col.dtype.kind not in ("f", "i", "u"):  # not float/int/uint
+                classes = sorted(np.unique(col))
+                encode_dict = {c: i for i, c in enumerate(classes)}
+                self._label_mappings[label_key] = (classes, encode_dict)
+
 
 class MixMIL(SupervisedSampleMethod):
     """Attention-based multi-instance mixed model for donor phenotype prediction by Engelmann et al. 2024 (https://arxiv.org/abs/2311.02455).
@@ -417,7 +461,7 @@ class MixMIL(SupervisedSampleMethod):
 
         self._model = None
         self._history: list | None = None
-        self._label_mappings: dict[str, tuple[list, dict]] = {}  # label_key → (classes, encode_dict)
+        self._label_dim_slices: dict[str, slice] = {}  # label_key → slice into Y/logits columns
 
     def prepare_anndata(self, adata: sc.AnnData, train: bool = True, **kwargs) -> None:
         """Train MixMIL on *adata*.
@@ -482,21 +526,8 @@ class MixMIL(SupervisedSampleMethod):
         except ImportError as e:
             raise ImportError("mixmil is required. Install with: pip install mixmil") from e
 
-        # Convert strings to lists
-        labels = [labels] if isinstance(labels, str) else labels
         tasks = [tasks] if isinstance(tasks, str) else tasks
-
-        self._check_adata_loaded()
-
-        if len(labels) != len(tasks):
-            raise ValueError(f"labels (len={len(labels)}) and tasks (len={len(tasks)}) must have the same length.")
-
-        for label in labels:
-            if label not in self.adata.obs.columns:
-                raise ValueError(f"label '{label}' not found in adata.obs.columns.")
-
-        # Validate task compatibility: all tasks should be the same (MixMIL limitation)
-        all_tasks = self.tasks + [t for l, t in zip(labels, tasks, strict=False) if l not in self.label_keys]
+        all_tasks = self.tasks + tasks
         if len(set(all_tasks)) > 1:
             raise ValueError(
                 f"MixMIL supports a single task type per model. "
@@ -508,20 +539,12 @@ class MixMIL(SupervisedSampleMethod):
         P_old = len(self.label_keys) if self._model is not None else None
         old_label_keys = self.label_keys.copy()
 
-        # Extend label_keys and tasks with new ones
-        for label, task in zip(labels, tasks, strict=True):
-            if label not in self.label_keys:
-                self.label_keys.append(label)
-                self.tasks.append(task)
+        labels, tasks = self._prepare_fine_tune(labels, tasks)
 
         # Build mappings for string labels
         self._build_label_mappings()
 
-        # Re-extract metadata
-        self.labels = self._extract_metadata(self.label_keys)
-
-        # Clear stale caches
-        self.adata.uns.pop("supervised_sample_importance", None)
+        # Clear stale cell-importance caches
         importance_cols = [f"{k}_importance" for k in self.label_keys]
         for col in importance_cols:
             if col in self.adata.obs.columns:
@@ -615,25 +638,8 @@ class MixMIL(SupervisedSampleMethod):
 
         logits_np = logits.numpy()
 
-        # Calculate the dimension range for this label based on multiclass info
-        if not hasattr(self, "_multiclass_info"):
-            # Fallback for models without multiclass info
-            label_idx = self.label_keys.index(label)
-            dim_start = label_idx
-            dim_end = label_idx + 1
-            n_classes = 2 if logits_np.shape[1] == 1 else 2  # binary
-        else:
-            # Calculate cumulative dimensions
-            dim_start = 0
-            for k in self.label_keys:
-                if k == label:
-                    break
-                dim_start += self._multiclass_info[k][0]
-            n_classes = self._multiclass_info[label][0]
-            dim_end = dim_start + n_classes
-
-        # Extract logits for this label
-        label_logits = logits_np[:, dim_start:dim_end]
+        # Extract logits for this label using precomputed dimension slices
+        label_logits = logits_np[:, self._label_dim_slices[label]]
 
         if task == "classification":
             # Apply softmax to get probabilities
@@ -668,7 +674,7 @@ class MixMIL(SupervisedSampleMethod):
             return result
         else:
             # Regression or ranking
-            raw = label_logits[:, 0].numpy() if label_logits.shape[1] > 0 else label_logits.ravel().numpy()
+            raw = label_logits[:, 0] if label_logits.shape[1] > 0 else label_logits.ravel()
             return pd.Series(raw, index=self.samples, name=label)
 
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
@@ -763,17 +769,7 @@ class MixMIL(SupervisedSampleMethod):
 
         import torch
 
-        # Sort cells by donor to build bags in the same order used during training.
-        # Sorting is required because MixMIL processes one contiguous tensor per donor.
-        sort_idx = np.argsort(self.adata.obs[self.sample_key].values)
-        unsort_idx = np.argsort(sort_idx)
-        X_sorted = self._get_data()[sort_idx].astype(self.dtype)
-        sorted_donors = self.adata.obs[self.sample_key].values[sort_idx]
-
-        iidx = pd.Categorical(sorted_donors).codes
-        indptr = np.concatenate([[0], np.bincount(iidx).cumsum()])
-
-        Xs = [torch.from_numpy(X_sorted[s:e]) for s, e in zip(indptr[:-1], indptr[1:], strict=True)]
+        Xs, _, unsort_idx = self._build_bags()
 
         with torch.no_grad():
             w, _ = self._model.get_weights(Xs)
@@ -816,15 +812,7 @@ class MixMIL(SupervisedSampleMethod):
         self._check_adata_loaded()
         import torch
 
-        # Sort cells by donor (same ordering as in training)
-        sort_idx = np.argsort(self.adata.obs[self.sample_key].values)
-        X_sorted = self._get_data()[sort_idx].astype(self.dtype)
-        sorted_donors = self.adata.obs[self.sample_key].values[sort_idx]
-
-        iidx = pd.Categorical(sorted_donors).codes
-        indptr = np.concatenate([[0], np.bincount(iidx).cumsum()])
-
-        Xs = [torch.from_numpy(X_sorted[s:e]) for s, e in zip(indptr[:-1], indptr[1:], strict=True)]
+        Xs, _, _ = self._build_bags()
 
         with torch.no_grad():
             w, _ = self._model.get_weights(Xs)
@@ -847,20 +835,30 @@ class MixMIL(SupervisedSampleMethod):
         """List of per-step loss dicts returned by MixMIL training."""
         return self._history
 
-    def _build_label_mappings(self) -> None:
-        """Build and store mappings for string labels. Called during fine_tune."""
-        for label_key in self.label_keys:
-            if label_key in self._label_mappings:
-                # Already mapped (from previous fine_tune call)
-                continue
+    def _build_bags(self):
+        """Sort cells by donor and return per-donor bag tensors.
 
-            col = self._donor_col(label_key)
-            # Check if column contains non-numeric data (strings, objects)
-            if col.dtype.kind not in ("f", "i", "u"):  # not float/int/uint
-                # Create mapping: unique values (sorted) → indices
-                classes = sorted(np.unique(col))
-                encode_dict = {c: i for i, c in enumerate(classes)}
-                self._label_mappings[label_key] = (classes, encode_dict)
+        Returns
+        -------
+        Xs : list[torch.Tensor]
+            One tensor per donor containing that donor's cell embeddings.
+        categories : np.ndarray
+            Donor IDs in sorted (alphabetical) order, aligned to *Xs*.
+        unsort_idx : np.ndarray
+            Index array to reverse the sort (restore original cell order).
+        """
+        import torch
+
+        sort_idx = np.argsort(self.adata.obs[self.sample_key].values)
+        unsort_idx = np.argsort(sort_idx)
+        X_sorted = self._get_data()[sort_idx].astype(self.dtype)
+        sorted_donors = self.adata.obs[self.sample_key].values[sort_idx]
+
+        cat = pd.Categorical(sorted_donors)
+        indptr = np.concatenate([[0], np.bincount(cat.codes).cumsum()])
+
+        Xs = [torch.from_numpy(X_sorted[s:e]) for s, e in zip(indptr[:-1], indptr[1:], strict=True)]
+        return Xs, np.array(cat.categories), unsort_idx
 
     def _build_tensors(self):
         """Build ``Xs``, ``F``, ``Y`` tensors aligned to :attr:`samples`.
@@ -878,19 +876,10 @@ class MixMIL(SupervisedSampleMethod):
 
         dtype_torch = getattr(torch, self.dtype)
 
-        # Sort cells by donor so bags are contiguous in memory
-        sort_idx = np.argsort(self.adata.obs[self.sample_key].values)
-        X_sorted = self._get_data()[sort_idx].astype(self.dtype)
-        sorted_donors = self.adata.obs[self.sample_key].values[sort_idx]
-
-        cat = pd.Categorical(sorted_donors)
-        indptr = np.concatenate([[0], np.bincount(cat.codes).cumsum()])
-
+        Xs, categories, _ = self._build_bags()
         # Preserve the donor order implied by pd.Categorical (alphabetical)
         # and align self.samples to it so scores/importances line up
-        self.samples = np.array(cat.categories)
-
-        Xs = [torch.from_numpy(X_sorted[s:e]) for s, e in zip(indptr[:-1], indptr[1:], strict=True)]
+        self.samples = categories
 
         n_donors = len(self.samples)
         covariate_list = [torch.ones((n_donors, 1), dtype=dtype_torch)]
@@ -912,6 +901,7 @@ class MixMIL(SupervisedSampleMethod):
         # Encode string labels to integers using mappings
         # For multiclass labels (classification task with >2 classes), use one-hot encoding
         y_cols_list = []
+        dim_offset = 0
         for key in self.label_keys:
             col = self._donor_col(key)
             task = self.tasks[self.label_keys.index(key)]
@@ -926,19 +916,15 @@ class MixMIL(SupervisedSampleMethod):
             # Check if multiclass classification (>2 unique values in classification task)
             n_classes = len(np.unique(col_encoded))
             if task == "classification" and n_classes > 2:
-                # Use one-hot encoding for multiclass
                 one_hot = np.eye(n_classes, dtype="float32")[col_encoded]
                 y_cols_list.extend([one_hot[:, i] for i in range(n_classes)])
-                # Store multiclass info: this label occupies n_classes dimensions
-                if not hasattr(self, "_multiclass_info"):
-                    self._multiclass_info = {}
-                self._multiclass_info[key] = (n_classes, key in self._label_mappings)
+                n_dims = n_classes
             else:
-                # Binary/regression: single dimension
                 y_cols_list.append(col_encoded.astype("float32"))
-                if not hasattr(self, "_multiclass_info"):
-                    self._multiclass_info = {}
-                self._multiclass_info[key] = (1, key in self._label_mappings)
+                n_dims = 1
+
+            self._label_dim_slices[key] = slice(dim_offset, dim_offset + n_dims)
+            dim_offset += n_dims
 
         y_cols = np.column_stack(y_cols_list)
         Y = torch.tensor(y_cols, dtype=torch.float32)  # (n_donors, P)
