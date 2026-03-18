@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import importlib.util
+
 import numpy as np
 import pandas as pd
 import pytest
 import scanpy as sc
+
+_has_torch = importlib.util.find_spec("torch") is not None
+_has_pulsar = importlib.util.find_spec("pulsar") is not None
+_skip_no_torch = pytest.mark.skipif(not _has_torch, reason="torch not installed")
+_skip_no_pulsar = pytest.mark.skipif(not _has_pulsar, reason="pulsar not installed")
 
 N_CELLS = 200
 N_GENES = 30
@@ -49,6 +56,7 @@ def basic_adata():
 
 @pytest.fixture
 def mixmil_model(basic_adata):
+    pytest.importorskip("torch")
     from patpy.tl.supervised import MixMIL
 
     model = MixMIL(
@@ -70,6 +78,7 @@ def mixmil_model_multilabel(basic_adata):
     without requiring a Gaussian head that the installed MixMIL does not
     support.
     """
+    pytest.importorskip("torch")
     from patpy.tl.supervised import MixMIL
 
     adata = basic_adata.copy()
@@ -110,6 +119,7 @@ def basic_adata_string_labels(basic_adata):
 @pytest.fixture
 def mixmil_model_string_labels(basic_adata_string_labels):
     """MixMIL trained on string labels (binary)."""
+    pytest.importorskip("torch")
     from patpy.tl.supervised import MixMIL
 
     model = MixMIL(
@@ -126,6 +136,7 @@ def mixmil_model_string_labels(basic_adata_string_labels):
 @pytest.fixture
 def mixmil_model_multiclass_strings(basic_adata_string_labels):
     """MixMIL trained on 3-class string labels."""
+    pytest.importorskip("torch")
     from patpy.tl.supervised import MixMIL
 
     model = MixMIL(
@@ -154,6 +165,7 @@ def _patch_pulsar(monkeypatch):
     real PULSAR forward pass and the real extract_donor_embeddings_from_h5ad
     code path.  hidden_size=512 matches the (N_DONORS, 512) shape expectation.
     """
+    pytest.importorskip("pulsar")
     from pulsar.model import PULSAR as _PulsarModel
     from pulsar.model import PULSARConfig
 
@@ -383,6 +395,7 @@ class TestSupervisedSampleMethod:
             assert disease_arr[i] == donor_idx % 2
 
 
+@_skip_no_torch
 class TestMixMIL:
     def test_prepare_anndata_missing_layer_raises(self, basic_adata):
         from patpy.tl.supervised import MixMIL
@@ -879,6 +892,7 @@ class TestMixMIL:
         assert pred.shape[0] == N_DONORS
 
 
+@_skip_no_pulsar
 class TestPULSAR:
     def test_prepare_anndata_missing_layer_raises(self, basic_adata):
         from patpy.tl.supervised import PULSAR
@@ -1227,9 +1241,9 @@ class TestPULSAR:
 
 
 @pytest.fixture(params=["mixmil", "pulsar"])
-def supervised_model(request, mixmil_model, pulsar_model):
+def supervised_model(request):
     """Parametrized fixture yielding each fitted supervised model in turn."""
-    return mixmil_model if request.param == "mixmil" else pulsar_model
+    return request.getfixturevalue(f"{request.param}_model")
 
 
 class TestSampleOrderingConsistency:
@@ -1288,18 +1302,26 @@ class TestSampleOrderingConsistency:
 
 def _make_unfitted_supervised_models():
     """Return (model_id, unfitted_model) pairs without triggering any external imports."""
-    from patpy.tl.supervised import PULSAR, MixMIL
+    from patpy.tl.supervised import MixMIL
 
-    return [
+    params = [
         pytest.param(
             MixMIL(sample_key="donor_id", label_keys=["disease"], tasks=["classification"], layer="X_pca"),
             id="MixMIL",
         ),
-        pytest.param(
-            PULSAR(sample_key="donor_id", label_keys=["age"], tasks=["regression"], layer="X_uce", device="cpu"),
-            id="PULSAR",
-        ),
     ]
+    try:
+        from patpy.tl.supervised import PULSAR
+
+        params.append(
+            pytest.param(
+                PULSAR(sample_key="donor_id", label_keys=["age"], tasks=["regression"], layer="X_uce", device="cpu"),
+                id="PULSAR",
+            ),
+        )
+    except ImportError:
+        pass
+    return params
 
 
 class TestCheckFitted:
@@ -1359,6 +1381,7 @@ def mixmil_model_regression(basic_adata):
     including the Phase-1 bug fix in ``predict()`` (which previously called
     ``.numpy()`` on an already-numpy array).
     """
+    pytest.importorskip("torch")
     from patpy.tl.supervised import MixMIL
 
     model = MixMIL(
@@ -1374,6 +1397,7 @@ def mixmil_model_regression(basic_adata):
     return model
 
 
+@_skip_no_torch
 class TestMixMILRegression:
     """Tests for MixMIL regression task — also covers Phase 1 bug fix."""
 
@@ -1428,6 +1452,7 @@ class TestEdgeCases:
             data = base._get_data()
         np.testing.assert_array_equal(data, basic_adata.X)
 
+    @_skip_no_torch
     def test_mixmil_additional_covariates_obsm(self, basic_adata):
         """MixMIL should accept additional covariates from adata.obsm."""
         from patpy.tl.supervised import MixMIL
