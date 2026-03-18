@@ -583,7 +583,7 @@ class TestMixMIL:
         pred = mixmil_model.predict("disease")
         assert "prob_0" in pred.columns
         assert "prob_1" in pred.columns
-        assert "y_pred" in pred.columns
+        assert "disease_pred" in pred.columns
 
     def test_predict_classification_shape(self, mixmil_model):
         pred = mixmil_model.predict("disease")
@@ -692,14 +692,14 @@ class TestMixMIL:
     def test_predict_binary_string_labels_returns_class_names(self, mixmil_model_string_labels):
         """Test that y_pred contains original string class names, not indices."""
         pred = mixmil_model_string_labels.predict("disease_str")
-        assert set(pred["y_pred"].unique()).issubset({"healthy", "diseased"})
+        assert set(pred["disease_str_pred"].unique()).issubset({"healthy", "diseased"})
         # Should not contain indices like 0 or 1
-        assert not pred["y_pred"].isin([0, 1]).all()
+        assert not pred["disease_str_pred"].isin([0, 1]).all()
 
     def test_predict_binary_string_labels_prob_columns(self, mixmil_model_string_labels):
         """Test that probability columns use class names."""
         pred = mixmil_model_string_labels.predict("disease_str")
-        expected_cols = {"prob_healthy", "prob_diseased", "y_pred"}
+        expected_cols = {"prob_healthy", "prob_diseased", "disease_str_pred"}
         assert set(pred.columns) == expected_cols
 
     def test_predict_multiclass_string_labels_creates_mappings(self, mixmil_model_multiclass_strings):
@@ -712,7 +712,7 @@ class TestMixMIL:
     def test_predict_multiclass_string_labels_returns_class_names(self, mixmil_model_multiclass_strings):
         """Test that y_pred contains original string class names for multiclass."""
         pred = mixmil_model_multiclass_strings.predict("disease_multi")
-        assert set(pred["y_pred"].unique()).issubset({"healthy", "diseased", "pre-disease"})
+        assert set(pred["disease_multi_pred"].unique()).issubset({"healthy", "diseased", "pre-disease"})
 
     def test_predict_multiclass_string_labels_prob_columns(self, mixmil_model_multiclass_strings):
         """Test that probability columns use class names for multiclass."""
@@ -977,7 +977,7 @@ class TestPULSAR:
 
     def test_fit_linear_probe_classification_keys(self, pulsar_model):
         result = pulsar_model.fit_linear_probe(target="disease", task="classification")
-        for key in ("model", "test_sample_labels", "y_test", "y_pred", "accuracy", "f1"):
+        for key in ("model", "test_sample_labels", "disease_test", "disease_pred", "accuracy", "f1"):
             assert key in result
 
     def test_fit_linear_probe_classification_no_data_matrices(self, pulsar_model):
@@ -992,7 +992,7 @@ class TestPULSAR:
 
     def test_fit_linear_probe_regression_keys(self, pulsar_model):
         result = pulsar_model.fit_linear_probe(target="age", task="regression")
-        for key in ("model", "test_sample_labels", "y_test", "y_pred", "r2", "pearson"):
+        for key in ("model", "test_sample_labels", "age_test", "age_pred", "r2", "pearson"):
             assert key in result
 
     def test_fit_linear_probe_regression_no_data_matrices(self, pulsar_model):
@@ -1004,7 +1004,7 @@ class TestPULSAR:
         """test_size=0.2 with 10 donors → 2 test, 8 train."""
         result = pulsar_model.fit_linear_probe(target="age", task="regression", test_size=0.2)
         assert len(result["test_sample_labels"]) == 2
-        assert len(result["y_test"]) == 2
+        assert len(result["age_test"]) == 2
 
     def test_fit_linear_probe_random_split_stores_test_sample_labels(self, pulsar_model):
         """After a random split, model.test_sample_labels must be populated."""
@@ -1018,7 +1018,7 @@ class TestPULSAR:
         held_out = ["donor_00", "donor_01", "donor_02"]
         result = pulsar_model.fit_linear_probe(target="age", task="regression", test_sample_labels=held_out)
         assert sorted(result["test_sample_labels"]) == sorted(held_out)
-        assert len(result["y_test"]) == len(held_out)
+        assert len(result["age_test"]) == len(held_out)
 
     def test_fit_linear_probe_explicit_labels_overwrite_the_field(self, pulsar_model):
         """When caller supplies test_sample_labels, model.test_sample_labels is not overwritten."""
@@ -1039,7 +1039,7 @@ class TestPULSAR:
         result = pulsar_model.fit_linear_probe(target="age", task="regression", test_sample_labels=list(held_out))
         all_donors = set(pulsar_model.sample_representation.index)
         expected_train = all_donors - held_out
-        assert len(result["y_test"]) + len(expected_train) == len(all_donors)
+        assert len(result["age_test"]) + len(expected_train) == len(all_donors)
 
     def test_fit_linear_probe_invalid_task_raises(self, pulsar_model):
         with pytest.raises(ValueError, match="task must be"):
@@ -1049,7 +1049,344 @@ class TestPULSAR:
         """target=None must use label_keys[0], which is 'age' (continuous, > 1)."""
         result = pulsar_model.fit_linear_probe(task="regression")
         # age values are 20, 23, ... — all above 1 — distinguishable from binary disease
-        assert np.unique(result["y_test"]).max() > 1
+        assert np.unique(result["age_test"]).max() > 1
+
+    # ===== fine_tune and predict tests =====
+
+    @pytest.fixture
+    def pulsar_model_finetuned(self, pulsar_model):
+        """PULSAR model after fine_tune."""
+        pulsar_model.fine_tune(["age", "disease"], ["regression", "classification"])
+        return pulsar_model
+
+    def test_fine_tune_accepts_valid_labels(self, pulsar_model):
+        """fine_tune with valid labels should succeed."""
+        pulsar_model.fine_tune("age", "regression")
+        assert "age" in pulsar_model.label_keys
+        assert "age" in pulsar_model._probes
+
+    def test_fine_tune_extends_label_keys_with_new_label(self, pulsar_model):
+        """fine_tune should add new labels to label_keys."""
+        initial_len = len(pulsar_model.label_keys)
+        assert "age" in pulsar_model.label_keys  # initialized with
+        # Add a new binary label column to adata (alternating 0/1)
+        donor_ids = pulsar_model.adata.obs[pulsar_model.sample_key].values
+        unique_donors = np.unique(donor_ids)
+        sex_map = {d: int(i % 2) for i, d in enumerate(unique_donors)}
+        pulsar_model.adata.obs["sex"] = np.array([sex_map[d] for d in donor_ids])
+        pulsar_model.fine_tune("sex", "classification")
+        assert "sex" in pulsar_model.label_keys
+        assert len(pulsar_model.label_keys) == initial_len + 1
+
+    def test_fine_tune_skips_duplicate_labels(self, pulsar_model):
+        """fine_tune with label already in label_keys should not duplicate."""
+        initial_len = len(pulsar_model.label_keys)
+        pulsar_model.fine_tune("age", "regression")  # age is already in label_keys
+        assert len(pulsar_model.label_keys) == initial_len
+
+    def test_fine_tune_raises_on_missing_adata_column(self, pulsar_model):
+        """fine_tune should raise ValueError if label not in adata.obs."""
+        with pytest.raises(ValueError, match="not found in adata.obs.columns"):
+            pulsar_model.fine_tune("nonexistent_label", "regression")
+
+    def test_fine_tune_raises_on_length_mismatch(self, pulsar_model):
+        """fine_tune should raise ValueError if len(labels) != len(tasks)."""
+        with pytest.raises(ValueError, match="must have the same length"):
+            pulsar_model.fine_tune(["age", "disease"], ["regression"])
+
+    def test_fine_tune_accepts_single_string_input(self, pulsar_model):
+        """fine_tune should accept single string for label and task."""
+        pulsar_model.fine_tune("disease", "classification")
+        assert "disease" in pulsar_model.label_keys
+        assert "disease" in pulsar_model._probes
+
+    def test_fine_tune_before_prepare_anndata_raises(self):
+        """fine_tune should raise RuntimeError if called before prepare_anndata."""
+        from patpy.tl.supervised import PULSAR
+
+        model = PULSAR(
+            sample_key="donor_id",
+            label_keys=["age"],
+            tasks=["regression"],
+            layer="X_uce",
+            device="cpu",
+        )
+        with pytest.raises(RuntimeError, match="prepare_anndata"):
+            model.fine_tune("disease", "classification")
+
+    def test_fine_tune_stores_probes(self, pulsar_model):
+        """fine_tune should store fitted sklearn probes in _probes."""
+        pulsar_model.fine_tune(["age", "disease"], ["regression", "classification"])
+        assert "age" in pulsar_model._probes
+        assert "disease" in pulsar_model._probes
+        assert "greatness" not in pulsar_model._probes
+        
+        # Check that probes are fitted sklearn models
+        assert hasattr(pulsar_model._probes["age"], "predict")
+        assert hasattr(pulsar_model._probes["disease"], "predict_proba")
+
+    def test_fine_tune_clears_sample_importance_cache(self, pulsar_model):
+        """fine_tune should clear adata.uns cache for sample importance."""
+        pulsar_model.adata.uns["supervised_sample_importance"] = {"test": "data"}
+        pulsar_model.fine_tune("age", "regression")
+        assert "supervised_sample_importance" not in pulsar_model.adata.uns
+
+    def test_predict_classification_returns_dataframe(self, pulsar_model_finetuned):
+        """predict for classification task should return DataFrame."""
+        result = pulsar_model_finetuned.predict("disease")
+        assert isinstance(result, pd.DataFrame)
+
+    def test_predict_classification_prob_columns_named_after_classes(self, pulsar_model_finetuned):
+        """predict for classification should have prob_{class} columns."""
+        result = pulsar_model_finetuned.predict("disease")
+        prob_cols = [col for col in result.columns if col.startswith("prob_")]
+        assert len(prob_cols) == 2  # binary classification: 0, 1
+        assert any("prob_0" in col or f"prob_{result['disease_pred'].iloc[0]}" in col for col in prob_cols)
+
+    def test_predict_classification_probabilities_sum_to_one(self, pulsar_model_finetuned):
+        """predict probabilities should sum to 1 per row."""
+        result = pulsar_model_finetuned.predict("disease")
+        prob_cols = [col for col in result.columns if col.startswith("prob_")]
+        prob_sums = result[prob_cols].sum(axis=1)
+        np.testing.assert_array_almost_equal(prob_sums, np.ones(len(result)))
+
+    def test_predict_classification_y_pred_column_present(self, pulsar_model_finetuned):
+        """predict for classification should have {label}_pred column."""
+        result = pulsar_model_finetuned.predict("disease")
+        assert "disease_pred" in result.columns
+
+    def test_predict_regression_returns_series(self, pulsar_model_finetuned):
+        """predict for regression task should return Series."""
+        result = pulsar_model_finetuned.predict("age")
+        assert isinstance(result, pd.Series)
+        assert result.name == "age"
+
+    def test_predict_indexed_by_sample_ids(self, pulsar_model_finetuned):
+        """predict should be indexed by sample IDs."""
+        for label in ["age", "disease"]:
+            result = pulsar_model_finetuned.predict(label)
+            assert set(result.index) == set(pulsar_model_finetuned.samples)
+
+    def test_predict_before_fine_tune_raises_runtime_error(self, pulsar_model):
+        """predict should raise RuntimeError if called before fine_tune."""
+        with pytest.raises(RuntimeError, match="No probe fitted"):
+            pulsar_model.predict("age")
+
+    def test_predict_unknown_label_raises_value_error(self, pulsar_model_finetuned):
+        """predict should raise ValueError for unlisted label."""
+        with pytest.raises(ValueError, match="not found in model label keys"):
+            pulsar_model_finetuned.predict("nonexistent_label")
+
+    # ===== multiclass classification tests =====
+
+    def test_fine_tune_multiclass_classification(self, pulsar_model):
+        """fine_tune should handle multiclass (>2 classes) classification."""
+        # Add multiclass label with 3 classes
+        donor_ids = pulsar_model.adata.obs[pulsar_model.sample_key].values
+        unique_donors = np.unique(donor_ids)
+        status_map = {d: i % 3 for i, d in enumerate(unique_donors)}  # 0, 1, 2
+        pulsar_model.adata.obs["status"] = np.array([status_map[d] for d in donor_ids])
+
+        pulsar_model.fine_tune("status", "classification")
+        assert "status" in pulsar_model._probes
+        assert pulsar_model._probes["status"].classes_.shape[0] == 3
+
+    def test_predict_multiclass_returns_correct_prob_columns(self, pulsar_model):
+        """predict for multiclass should have prob column for each class."""
+        # Add 3-class label
+        donor_ids = pulsar_model.adata.obs[pulsar_model.sample_key].values
+        unique_donors = np.unique(donor_ids)
+        status_map = {d: i % 3 for i, d in enumerate(unique_donors)}
+        pulsar_model.adata.obs["status"] = np.array([status_map[d] for d in donor_ids])
+
+        pulsar_model.fine_tune("status", "classification")
+        result = pulsar_model.predict("status")
+
+        # Should have prob columns for classes 0, 1, 2
+        prob_cols = [col for col in result.columns if col.startswith("prob_")]
+        assert len(prob_cols) == 3
+        assert all(f"prob_{i}" in result.columns for i in range(3))
+
+    def test_predict_multiclass_y_pred_in_valid_range(self, pulsar_model):
+        """predict y_pred should be in [0, n_classes) for multiclass."""
+        # Add 3-class label
+        donor_ids = pulsar_model.adata.obs[pulsar_model.sample_key].values
+        unique_donors = np.unique(donor_ids)
+        status_map = {d: i % 3 for i, d in enumerate(unique_donors)}
+        pulsar_model.adata.obs["status"] = np.array([status_map[d] for d in donor_ids])
+
+        pulsar_model.fine_tune("status", "classification")
+        result = pulsar_model.predict("status")
+
+        # Predictions should be in {0, 1, 2}
+        assert result["status_pred"].min() >= 0
+        assert result["status_pred"].max() <= 2
+
+    def test_predict_multiclass_probabilities_sum_to_one(self, pulsar_model):
+        """predict probabilities should sum to 1 per row for multiclass."""
+        # Add 3-class label
+        donor_ids = pulsar_model.adata.obs[pulsar_model.sample_key].values
+        unique_donors = np.unique(donor_ids)
+        status_map = {d: i % 3 for i, d in enumerate(unique_donors)}
+        pulsar_model.adata.obs["status"] = np.array([status_map[d] for d in donor_ids])
+
+        pulsar_model.fine_tune("status", "classification")
+        result = pulsar_model.predict("status")
+
+        prob_cols = [col for col in result.columns if col.startswith("prob_")]
+        prob_sums = result[prob_cols].sum(axis=1)
+        np.testing.assert_array_almost_equal(prob_sums, np.ones(len(result)))
+
+    def test_fine_tune_multiple_multiclass_labels(self, pulsar_model):
+        """fine_tune should handle multiple multiclass labels."""
+        # Add two multiclass labels
+        donor_ids = pulsar_model.adata.obs[pulsar_model.sample_key].values
+        unique_donors = np.unique(donor_ids)
+
+        # 3-class label
+        status_map = {d: i % 3 for i, d in enumerate(unique_donors)}
+        pulsar_model.adata.obs["status"] = np.array([status_map[d] for d in donor_ids])
+
+        # 4-class label
+        grade_map = {d: i % 4 for i, d in enumerate(unique_donors)}
+        pulsar_model.adata.obs["grade"] = np.array([grade_map[d] for d in donor_ids])
+
+        pulsar_model.fine_tune(["status", "grade"], ["classification", "classification"])
+        assert "status" in pulsar_model._probes
+        assert "grade" in pulsar_model._probes
+        assert pulsar_model._probes["status"].classes_.shape[0] == 3
+        assert pulsar_model._probes["grade"].classes_.shape[0] == 4
+
+
+class TestSampleOrderingConsistency:
+    """Generic tests for sample ordering consistency across all SupervisedSampleMethod subclasses.
+
+    These tests work with any fitted SupervisedSampleMethod model and automatically skip
+    methods that aren't implemented for a particular subclass.
+    """
+
+    def _get_first_label_key(self, model):
+        """Get the first label key that the model can predict on."""
+        return model.label_keys[0]
+
+    def test_samples_matches_representations_index(self, mixmil_model, pulsar_model):
+        """self.samples should match get_sample_representations() index order."""
+        for model in [mixmil_model, pulsar_model]:
+            reps = model.get_sample_representations()
+            assert list(model.samples) == list(reps.index), \
+                f"{type(model).__name__}: samples order doesn't match representations"
+
+    def test_samples_matches_importance_index(self, mixmil_model, pulsar_model):
+        """self.samples should match get_sample_importance() index order."""
+        for model in [mixmil_model, pulsar_model]:
+            importance = model.get_sample_importance()
+            assert list(model.samples) == list(importance.index), \
+                f"{type(model).__name__}: samples order doesn't match importance"
+
+    def test_samples_matches_distance_matrix_shape(self, mixmil_model, pulsar_model):
+        """calculate_distance_matrix should have rows/cols matching self.samples."""
+        for model in [mixmil_model, pulsar_model]:
+            dist = model.calculate_distance_matrix()
+            assert dist.shape[0] == len(model.samples), \
+                f"{type(model).__name__}: distance matrix rows != samples"
+            assert dist.shape[1] == len(model.samples), \
+                f"{type(model).__name__}: distance matrix cols != samples"
+
+    def test_predict_indexed_by_samples(self, mixmil_model, pulsar_model):
+        """predict() results should be indexed by self.samples."""
+        for model in [mixmil_model, pulsar_model]:
+            label = self._get_first_label_key(model)
+            try:
+                # For models that need fine_tune before predict (PULSAR)
+                if not hasattr(model, '_fitted') or not model._fitted:
+                    continue
+                if hasattr(model, '_probes') and label not in model._probes:
+                    model.fine_tune(label, model.tasks[model.label_keys.index(label)])
+
+                pred = model.predict(label)
+                assert list(pred.index) == list(model.samples), \
+                    f"{type(model).__name__}: predict not indexed by samples"
+            except (NotImplementedError, RuntimeError):
+                # Skip if predict not implemented or probe not available
+                pass
+
+    def test_extracted_metadata_matches_labels(self, mixmil_model, pulsar_model):
+        """_extract_metadata when indexed by self.samples should match labels."""
+        for model in [mixmil_model, pulsar_model]:
+            label_key = self._get_first_label_key(model)
+            meta = model._extract_metadata([label_key])
+            meta_at_samples = meta.loc[model.samples]
+
+            # Check values match
+            np.testing.assert_array_almost_equal(
+                meta_at_samples[label_key].values,
+                model.labels.loc[model.samples, label_key].values,
+                err_msg=f"{type(model).__name__}: metadata doesn't match labels"
+            )
+
+    def test_fine_tune_predict_ordering(self, mixmil_model, pulsar_model):
+        """fine_tune and predict should maintain sample ordering."""
+        for model in [mixmil_model, pulsar_model]:
+            label = self._get_first_label_key(model)
+            try:
+                # For MixMIL, predict is already available
+                # For PULSAR, need to fine_tune first
+                if hasattr(model, '_probes') and label not in model._probes:
+                    model.fine_tune(label, model.tasks[0])
+
+                pred = model.predict(label)
+                assert list(pred.index) == list(model.samples), \
+                    f"{type(model).__name__}: predict not indexed by samples"
+            except (NotImplementedError, ValueError):
+                # Skip if model doesn't support this operation
+                pass
+
+    def test_sample_importance_alignment_with_samples(self, mixmil_model, pulsar_model):
+        """Sample importance should align with self.samples when indexed."""
+        for model in [mixmil_model, pulsar_model]:
+            importance = model.get_sample_importance()
+            labels = model.labels
+
+            # Check that first sample in importance matches first in self.samples
+            assert importance.index[0] == model.samples[0], \
+                f"{type(model).__name__}: first importance sample doesn't match"
+            assert labels.index[0] == model.samples[0], \
+                f"{type(model).__name__}: first label sample doesn't match"
+
+    def test_distance_matrix_diagonal_is_zero(self, mixmil_model, pulsar_model):
+        """Distance matrix diagonal should be zero (distance to self)."""
+        for model in [mixmil_model, pulsar_model]:
+            dist = model.calculate_distance_matrix()
+            np.testing.assert_array_almost_equal(
+                np.diag(dist),
+                np.zeros(len(model.samples)),
+                err_msg=f"{type(model).__name__}: distance matrix diagonal not zero"
+            )
+
+    def test_multiple_calls_preserve_order(self, mixmil_model, pulsar_model):
+        """Multiple calls to methods should return same sample order."""
+        for model in [mixmil_model, pulsar_model]:
+            reps1 = model.get_sample_representations()
+            reps2 = model.get_sample_representations()
+
+            assert list(reps1.index) == list(reps2.index), \
+                f"{type(model).__name__}: sample order not preserved across calls"
+            assert list(model.samples) == list(reps1.index), \
+                f"{type(model).__name__}: sample order doesn't match self.samples"
+
+    def test_representations_shape_matches_samples(self, mixmil_model, pulsar_model):
+        """get_sample_representations shape[0] should match sample count."""
+        for model in [mixmil_model, pulsar_model]:
+            reps = model.get_sample_representations()
+            assert reps.shape[0] == len(model.samples), \
+                f"{type(model).__name__}: representation rows != sample count"
+
+    def test_importance_shape_matches_samples(self, mixmil_model, pulsar_model):
+        """get_sample_importance shape[0] should match sample count."""
+        for model in [mixmil_model, pulsar_model]:
+            importance = model.get_sample_importance()
+            assert importance.shape[0] == len(model.samples), \
+                f"{type(model).__name__}: importance rows != sample count"
 
 
 def _make_unfitted_supervised_models():
