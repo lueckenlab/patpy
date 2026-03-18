@@ -5,6 +5,7 @@ from .evaluation import (
     predict_knn,
     test_distances_significance,
     test_proportions,
+    associate_pcs_with_covariates,
 )
 from .sample_representation import (
     MOFA,
@@ -24,11 +25,9 @@ from .sample_representation import (
     correlate_composition,
     describe_metadata,
 )
-from .condition_utils import (
+from .condition_comparison import (
     ConditionComparison,
-    add_combined_condition_column,
     build_all_pairwise_contrasts,
     build_condition_combinations,
     filter_adata_to_conditions,
-    run_condition_combinations,
 )

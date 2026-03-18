@@ -3,11 +3,11 @@ import warnings
 import numpy as np
 import pandas as pd
 import scanpy as sc
+import anndata as ad
 from scipy import stats
 from scipy.stats import trim_mean
 
 from patpy.tl._types import _EVALUATION_METHODS, _NORMALIZATION_TYPES, _PREDICTION_TASKS
-
 
 def _upper_diagonal(matrix):
     """Return upper diagonal of the matrix excluding the diagonal itself"""
@@ -735,3 +735,102 @@ def replicate_robustness(distances_df: pd.DataFrame, replicate_identity_function
         replicate_indexes[i] = replicate_idx
 
     return 1 - np.mean(replicate_indexes)
+
+
+def associate_pcs_with_covariates(
+    adata: ad.AnnData,
+    covariates: list[str],
+    *,
+    obsm_key: str = "X_pca",
+    n_pcs: int = 10,
+    test: str = "anova",
+) -> pd.DataFrame:
+    """Test association between principal components and categorical covariates.
+
+    For each (covariate, PC) pair, runs a one-way ANOVA (or Kruskal-Wallis)
+    across the groups defined by that covariate and returns a tidy DataFrame of
+    association statistics. This is useful for understanding which sources of
+    variation dominate the pseudobulk PCA before choosing a DE design formula.
+
+    Parameters
+    ----------
+    adata : AnnData
+        Annotated data object. Must contain ``adata.obsm[obsm_key]``.
+    covariates : list[str]
+        Categorical columns in ``adata.obs`` to test.
+    obsm_key : str, default ``"X_pca"``
+        Key in ``adata.obsm`` containing the embedding to test against.
+    n_pcs : int, default ``10``
+        Number of components to test.
+    test : {"anova", "kruskal"}
+        Statistical test to use. ``"anova"`` runs a one-way F-test;
+        ``"kruskal"`` runs a Kruskal-Wallis H-test (non-parametric alternative).
+
+    Returns
+    -------
+    pd.DataFrame
+        Tidy DataFrame with columns ``["covariate", "PC", "statistic",
+        "p_value", "-log10p"]``, one row per (covariate, PC) pair.
+
+    Raises
+    ------
+    ValueError
+        If ``obsm_key`` is not found in ``adata.obsm``, a covariate column is
+        missing from ``adata.obs``, or ``test`` is not a recognised value.
+
+    Examples
+    --------
+    >>> import patpy.tl as ptl
+    >>> assoc = ptl.associate_pcs_with_covariates(
+    ...     pdata, covariates=["Source", "Sex"], n_pcs=10
+    ... )
+    >>> assoc.head()
+      covariate   PC  statistic   p_value    -log10p
+    0    Source  PC1      18.32  0.000021   4.677509
+    1    Source  PC2       1.14  0.290000   0.537602
+    ...
+
+    Plot the result as a heatmap with :func:`patpy.pl.pc_covariate_heatmap`:
+
+    >>> import patpy.pl as ppl
+    >>> ppl.pc_covariate_heatmap(assoc)
+    """
+    if obsm_key not in adata.obsm:
+        raise ValueError(f"'{obsm_key}' not found in adata.obsm. Run PCA first.")
+
+    valid_tests = {"anova", "kruskal"}
+    if test not in valid_tests:
+        raise ValueError(f"test must be one of {valid_tests}, got '{test}'.")
+
+    for col in covariates:
+        if col not in adata.obs.columns:
+            raise ValueError(f"Covariate '{col}' not found in adata.obs.")
+
+    embedding = adata.obsm[obsm_key]
+    n_pcs = min(n_pcs, embedding.shape[1])
+    test_fn = stats.f_oneway if test == "anova" else stats.kruskal
+
+    rows = []
+    for covariate in covariates:
+        groups = adata.obs[covariate].astype(str)
+        for pc_idx in range(n_pcs):
+            scores = embedding[:, pc_idx]
+            group_vals = [
+                scores[groups == g]
+                for g in groups.unique()
+                if (groups == g).sum() > 1
+            ]
+            if len(group_vals) < 2:
+                continue
+            stat, p = test_fn(*group_vals)
+            rows.append(
+                {
+                    "covariate": covariate,
+                    "PC": f"PC{pc_idx + 1}",
+                    "statistic": stat,
+                    "p_value": p,
+                    "-log10p": -np.log10(p + 1e-300),
+                }
+            )
+
+    return pd.DataFrame(rows)

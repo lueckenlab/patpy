@@ -1,1 +1,1 @@
-from .basic import correlation_volcano
+from .basic import correlation_volcano, pc_covariate_heatmap
