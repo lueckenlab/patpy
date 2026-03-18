@@ -412,8 +412,8 @@ class BaseSampleMethod:
             return {
                 "model": clf,
                 "test_sample_labels": test_idx,
-                "y_test": y_test,
-                "y_pred": y_pred,
+                f"{target}_test": y_test,
+                f"{target}_pred": y_pred,
                 "accuracy": accuracy_score(y_test, y_pred),
                 "f1": f1_score(y_test, y_pred, average="weighted", zero_division=0),
             }
@@ -430,8 +430,8 @@ class BaseSampleMethod:
             return {
                 "model": reg,
                 "test_sample_labels": test_idx,
-                "y_test": y_test,
-                "y_pred": y_pred,
+                f"{target}_test": y_test,
+                f"{target}_pred": y_pred,
                 "r2": r2_score(y_test, y_pred),
                 "pearson": pearson_r,
             }

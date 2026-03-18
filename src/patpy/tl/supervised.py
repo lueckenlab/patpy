@@ -73,6 +73,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
         self.label_keys = list(label_keys)
         self.tasks = list(tasks)
         self.labels: pd.DataFrame | None = None
+        self._probes: dict[str, object] = {}  # label → fitted sklearn probe model
 
     def prepare_anndata(self, adata: sc.AnnData) -> None:
         """Validate *adata*, populate :attr:`samples` and :attr:`labels`.
@@ -114,15 +115,37 @@ class SupervisedSampleMethod(BaseSampleMethod):
         -------
         pd.Series or pd.DataFrame
             Predictions indexed by donor ID. Format depends on the task:
-            - classification: DataFrame with probability columns + "y_pred" (argmax)
+            - classification: DataFrame with probability columns + "{label}_pred" (argmax)
             - regression/ranking: Series of predicted values
         """
         self._check_fitted()
         if label not in self.label_keys:
             raise ValueError(f"`label='{label}'` is not found in model label keys. Please train the model to predict the label first")
-        raise NotImplementedError(f"{type(self).__name__} must implement predict().")
+
+        if label not in self._probes:
+            raise RuntimeError(
+                f"No probe fitted for label '{label}'. Call fine_tune() first."
+            )
+
+        task = self.tasks[self.label_keys.index(label)]
+        rep = self.get_sample_representations()
+        X = rep.values
+        probe = self._probes[label]
+
+        if task == "classification":
+            proba = probe.predict_proba(X)          # (n_donors, n_classes)
+            classes = probe.classes_
+            # Create probability columns for each class
+            prob_cols = {f"prob_{c}": proba[:, i] for i, c in enumerate(classes)}
+            result = pd.DataFrame(prob_cols, index=self.samples)
+            # Add predicted class column
+            y_pred = probe.predict(X)
+            result[f"{label}_pred"] = y_pred
+            return result
+        else:
+            return pd.Series(probe.predict(X), index=self.samples, name=label)
         
-    def fine_tune(self, labels: list[str], tasks: list[_PREDICTION_TASKS], **kwargs):
+    def fine_tune(self, labels: list[str] | str, tasks: list[_PREDICTION_TASKS] | _PREDICTION_TASKS, **kwargs):
         """Fine-tune / continue training the model on new or existing labels.
 
         The model is extended to predict the given labels (which may be a superset
@@ -130,9 +153,9 @@ class SupervisedSampleMethod(BaseSampleMethod):
 
         Parameters
         ----------
-        labels : list[str]
-            Labels to train/extend the model for, e.g., ["disease", "age"].
-        tasks : list[_PREDICTION_TASKS]
+        labels : list[str] or str
+            Labels to train/extend the model for, e.g., ["disease", "age"] or "disease".
+        tasks : list[_PREDICTION_TASKS] or _PREDICTION_TASKS
             Corresponding prediction task for each label. Must match the length
             of `labels`. One of ["classification", "regression", "ranking"].
         **kwargs
@@ -141,9 +164,54 @@ class SupervisedSampleMethod(BaseSampleMethod):
         Raises
         ------
         NotImplementedError
-            Subclasses must override this method.
+            Subclasses with non-embedding-based predictions must override this method.
+        RuntimeError
+            If called before :meth:`prepare_anndata`.
         """
-        raise NotImplementedError(f"{type(self).__name__} must implement fine_tune().")
+        from sklearn.linear_model import LogisticRegression, Ridge
+
+        # Convert strings to lists
+        labels = [labels] if isinstance(labels, str) else labels
+        tasks = [tasks] if isinstance(tasks, str) else tasks
+
+        self._check_adata_loaded()
+
+        if len(labels) != len(tasks):
+            raise ValueError(
+                f"labels (len={len(labels)}) and tasks (len={len(tasks)}) must have the same length."
+            )
+
+        for label in labels:
+            if label not in self.adata.obs.columns:
+                raise ValueError(f"label '{label}' not found in adata.obs.columns.")
+
+        # Extend label_keys / tasks
+        for label, task in zip(labels, tasks, strict=True):
+            if label not in self.label_keys:
+                self.label_keys.append(label)
+                self.tasks.append(task)
+
+        self.labels = self._extract_metadata(self.label_keys)
+        self.adata.uns.pop("supervised_sample_importance", None)
+
+        try:
+            rep = self.get_sample_representations()   # requires subclass to implement
+        except NotImplementedError:
+            raise NotImplementedError(
+                f"{type(self).__name__} does not provide sample representations. "
+                "fine_tune() requires get_sample_representations() to be implemented."
+            )
+
+        X = rep.values
+
+        for label, task in zip(labels, tasks, strict=True):
+            y = self.labels.loc[self.samples, label].values
+            if task == "classification":
+                probe = LogisticRegression(max_iter=1000, class_weight="balanced")
+            else:  # regression / ranking
+                probe = Ridge(alpha=0.1)
+            probe.fit(X, y)
+            self._probes[label] = probe
 
 
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
@@ -514,7 +582,7 @@ class MixMIL(SupervisedSampleMethod):
         -------
         pd.Series or pd.DataFrame
             Predictions indexed by donor ID. Format depends on the task:
-            - classification: DataFrame with probability columns (one per class) + "y_pred" (argmax)
+            - classification: DataFrame with probability columns (one per class) + "{label}_pred" (argmax)
             - regression/ranking: Series of predicted values
 
         Examples
@@ -583,9 +651,9 @@ class MixMIL(SupervisedSampleMethod):
             # Add predictions
             y_pred_indices = proba.argmax(axis=1)
             if label in self._label_mappings:
-                result["y_pred"] = [classes_list[idx] for idx in y_pred_indices]
+                result[f"{label}_pred"] = [classes_list[idx] for idx in y_pred_indices]
             else:
-                result["y_pred"] = y_pred_indices
+                result[f"{label}_pred"] = y_pred_indices
 
             return result
         else:
