@@ -673,6 +673,29 @@ class TestMixMIL:
         mixmil_model.fine_tune(["disease"], ["classification"], n_epochs=1)
         assert "supervised_sample_importance" not in mixmil_model.adata.uns
 
+    def test_fine_tune_same_labels_preserves_loss(self, mixmil_model):
+        """Fine-tuning with same labels should not reset loss to untrained level.
+
+        When fine-tuning with identical labels/tasks, the model should continue training
+        with learned weights, not reinitialize. Loss should remain reasonable.
+        """
+        # Get loss after initial training
+        history_before = mixmil_model._history.copy()
+        loss_before = history_before[-1]["loss"] if history_before else float('inf')
+
+        # Fine-tune with the same label
+        mixmil_model.fine_tune(["disease"], ["classification"], n_epochs=2)
+
+        # Get new loss
+        history_after = mixmil_model._history
+        loss_after = history_after[-1]["loss"] if history_after else float('inf')
+
+        # Loss should not jump back to untrained level (which is typically much higher)
+        # It might increase slightly due to random variation, but not dramatically
+        # We check that it's not > 2x the previous loss (arbitrary but reasonable threshold)
+        assert loss_after < loss_before * 2.0, \
+            f"Loss after fine_tune {loss_after} is too high compared to {loss_before}. Model was likely reinitialized."
+
     def test_fine_tune_raises_on_missing_label(self, mixmil_model):
         with pytest.raises(ValueError, match="not found in adata.obs.columns"):
             mixmil_model.fine_tune(["nonexistent_label"], ["classification"])
