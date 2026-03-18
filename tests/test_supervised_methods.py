@@ -8,8 +8,9 @@ import pytest
 import scanpy as sc
 
 _has_torch = importlib.util.find_spec("torch") is not None
+_has_mixmil = importlib.util.find_spec("mixmil") is not None
 _has_pulsar = importlib.util.find_spec("pulsar") is not None
-_skip_no_torch = pytest.mark.skipif(not _has_torch, reason="torch not installed")
+_skip_no_mixmil = pytest.mark.skipif(not _has_mixmil, reason="mixmil not installed")
 _skip_no_pulsar = pytest.mark.skipif(not _has_pulsar, reason="pulsar not installed")
 
 N_CELLS = 200
@@ -56,7 +57,7 @@ def basic_adata():
 
 @pytest.fixture
 def mixmil_model(basic_adata):
-    pytest.importorskip("torch")
+    pytest.importorskip("mixmil")
     from patpy.tl.supervised import MixMIL
 
     model = MixMIL(
@@ -78,7 +79,7 @@ def mixmil_model_multilabel(basic_adata):
     without requiring a Gaussian head that the installed MixMIL does not
     support.
     """
-    pytest.importorskip("torch")
+    pytest.importorskip("mixmil")
     from patpy.tl.supervised import MixMIL
 
     adata = basic_adata.copy()
@@ -119,7 +120,7 @@ def basic_adata_string_labels(basic_adata):
 @pytest.fixture
 def mixmil_model_string_labels(basic_adata_string_labels):
     """MixMIL trained on string labels (binary)."""
-    pytest.importorskip("torch")
+    pytest.importorskip("mixmil")
     from patpy.tl.supervised import MixMIL
 
     model = MixMIL(
@@ -136,7 +137,7 @@ def mixmil_model_string_labels(basic_adata_string_labels):
 @pytest.fixture
 def mixmil_model_multiclass_strings(basic_adata_string_labels):
     """MixMIL trained on 3-class string labels."""
-    pytest.importorskip("torch")
+    pytest.importorskip("mixmil")
     from patpy.tl.supervised import MixMIL
 
     model = MixMIL(
@@ -395,7 +396,7 @@ class TestSupervisedSampleMethod:
             assert disease_arr[i] == donor_idx % 2
 
 
-@_skip_no_torch
+@_skip_no_mixmil
 class TestMixMIL:
     def test_prepare_anndata_missing_layer_raises(self, basic_adata):
         from patpy.tl.supervised import MixMIL
@@ -1381,7 +1382,7 @@ def mixmil_model_regression(basic_adata):
     including the Phase-1 bug fix in ``predict()`` (which previously called
     ``.numpy()`` on an already-numpy array).
     """
-    pytest.importorskip("torch")
+    pytest.importorskip("mixmil")
     from patpy.tl.supervised import MixMIL
 
     model = MixMIL(
@@ -1397,7 +1398,7 @@ def mixmil_model_regression(basic_adata):
     return model
 
 
-@_skip_no_torch
+@_skip_no_mixmil
 class TestMixMILRegression:
     """Tests for MixMIL regression task — also covers Phase 1 bug fix."""
 
@@ -1452,7 +1453,7 @@ class TestEdgeCases:
             data = base._get_data()
         np.testing.assert_array_equal(data, basic_adata.X)
 
-    @_skip_no_torch
+    @_skip_no_mixmil
     def test_mixmil_additional_covariates_obsm(self, basic_adata):
         """MixMIL should accept additional covariates from adata.obsm."""
         from patpy.tl.supervised import MixMIL
