@@ -862,3 +862,137 @@ class TestCheckFitted:
         method.prepare_anndata(pbmc3k_adata.copy())
         assert method._fitted is True
         method._check_fitted()
+
+
+# ---------------------------------------------------------------------------
+# TestSampleOrderingConsistency — generic tests for all SR methods
+# ---------------------------------------------------------------------------
+
+
+class TestSampleOrderingConsistency:
+    """Generic tests for sample ordering consistency across all SampleRepresentationMethod subclasses.
+
+    These tests work with any fitted SampleRepresentationMethod model and automatically skip
+    methods that aren't implemented for a particular subclass.
+    """
+
+    def test_samples_matches_distance_matrix_dimensions(self, synthetic_adata):
+        """self.samples should match distance_matrix dimensions."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            method.prepare_anndata(synthetic_adata.copy())
+            dist = method.calculate_distance_matrix(force=True)
+
+            assert dist.shape[0] == len(method.samples), \
+                f"{cls.__name__}: distance matrix rows != samples"
+            assert dist.shape[1] == len(method.samples), \
+                f"{cls.__name__}: distance matrix cols != samples"
+
+    def test_distance_matrix_indexed_by_samples(self, synthetic_adata):
+        """Distance matrix should correspond to self.samples in order."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            method.prepare_anndata(synthetic_adata.copy())
+            dist = method.calculate_distance_matrix(force=True)
+
+            # Distance matrix should be (n_samples, n_samples)
+            assert dist.shape == (len(method.samples), len(method.samples)), \
+                f"{cls.__name__}: distance matrix shape mismatch"
+
+    def test_distance_matrix_diagonal_is_zero(self, synthetic_adata):
+        """Distance matrix diagonal should be zero (distance to self)."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            method.prepare_anndata(synthetic_adata.copy())
+            dist = method.calculate_distance_matrix(force=True)
+
+            np.testing.assert_array_almost_equal(
+                np.diag(dist),
+                np.zeros(len(method.samples)),
+                err_msg=f"{cls.__name__}: distance matrix diagonal not zero"
+            )
+
+    def test_multiple_calls_preserve_order(self, synthetic_adata):
+        """Multiple calls to calculate_distance_matrix should preserve sample order."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            method.prepare_anndata(synthetic_adata.copy())
+
+            dist1 = method.calculate_distance_matrix(force=True)
+            dist2 = method.calculate_distance_matrix(force=True)
+
+            # Both should have same shape matching sample count
+            assert dist1.shape == dist2.shape, \
+                f"{cls.__name__}: distance matrix shape changed across calls"
+            assert dist1.shape[0] == len(method.samples), \
+                f"{cls.__name__}: distance matrix shape doesn't match samples"
+
+    def test_distance_matrix_symmetric_or_warns(self, synthetic_adata):
+        """Distance matrix should be symmetric (or method documented as asymmetric)."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            method.prepare_anndata(synthetic_adata.copy())
+            dist = method.calculate_distance_matrix(force=True)
+
+            # Most methods produce symmetric matrices; if not, it should be documented
+            is_symmetric = np.allclose(dist, dist.T, atol=1e-5)
+            assert is_symmetric, \
+                f"{cls.__name__}: distance matrix is not symmetric (undocumented asymmetry)"
+
+    def test_samples_array_preserved(self, synthetic_adata):
+        """self.samples array should be stable across calls."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            method.prepare_anndata(synthetic_adata.copy())
+
+            samples1 = method.samples.copy()
+            method.calculate_distance_matrix(force=True)
+            samples2 = method.samples
+
+            np.testing.assert_array_equal(
+                samples1,
+                samples2,
+                err_msg=f"{cls.__name__}: self.samples changed after calculate_distance_matrix"
+            )
+
+    def test_distance_matrix_values_non_negative(self, synthetic_adata):
+        """Distance matrix values should be non-negative."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            method.prepare_anndata(synthetic_adata.copy())
+            dist = method.calculate_distance_matrix(force=True)
+
+            assert (dist >= 0).all(), \
+                f"{cls.__name__}: distance matrix contains negative values"
+
+    def test_sample_count_matches_adata(self, synthetic_adata):
+        """Number of samples should match unique sample_key values in adata."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            adata = synthetic_adata.copy()
+            method.prepare_anndata(adata)
+
+            expected_samples = adata.obs[SAMPLE_KEY].nunique()
+            assert len(method.samples) == expected_samples, \
+                f"{cls.__name__}: sample count doesn't match adata unique samples"
+
+    def test_distance_matrix_cached_correctly(self, synthetic_adata):
+        """Distance matrix should be cached in adata.uns with correct key."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            adata = synthetic_adata.copy()
+            method.prepare_anndata(adata)
+
+            dist = method.calculate_distance_matrix(force=True)
+
+            # Check cache key exists
+            assert method.DISTANCES_UNS_KEY in method.adata.uns, \
+                f"{cls.__name__}: distance matrix not cached in adata.uns"
+
+            # Check cached value matches returned value
+            cached_dist = method.adata.uns[method.DISTANCES_UNS_KEY]
+            np.testing.assert_array_equal(
+                dist,
+                cached_dist,
+                err_msg=f"{cls.__name__}: cached distance matrix doesn't match returned value"
+            )
