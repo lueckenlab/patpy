@@ -19,7 +19,6 @@ across all pairwise contrasts of a multi-dimensional condition space.
 - **`ConditionComparison(model_cls, **defaults)`** — thin class wrapper around the above; stores the model class and default kwargs so the same configuration can be reused across multiple datasets or condition axes via `.run()`.
 - **`build_condition_combinations(adata, condition_cols)`** — returns a DataFrame of all *observed* (not Cartesian) combinations of multiple condition columns, with a joined `"label"` column.
 - **`build_all_pairwise_contrasts(adata, condition_cols)`** — returns a list of `{group, baseline, label}` dicts for every pairwise contrast of observed condition combinations.
-- **`add_combined_condition_column(adata, condition_cols, new_col)`** — adds a concatenated condition label column to `adata.obs` in-place.
 - **`filter_adata_to_conditions(adata, condition_col, groups)`** — subsets an AnnData to cells belonging to specific condition groups.
 
 ## 0.11.4
