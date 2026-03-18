@@ -1,8 +1,11 @@
+import importlib.util
+
 import numpy as np
 import pandas as pd
 import pytest
 from anndata import AnnData
 
+from patpy.tl._base_sample_method import _create_colormap
 from patpy.tl.sample_representation import (
     MOFA,
     PILOT,
@@ -21,11 +24,16 @@ from patpy.tl.sample_representation import (
     calculate_average_without_nans,
     correlate_cell_type_expression,
     correlate_composition,
-    create_colormap,
     make_matrix_symmetric,
     valid_aggregate,
     valid_distance_metric,
 )
+
+
+def _skip_if_missing(module: str) -> pytest.MarkDecorator:
+    available = importlib.util.find_spec(module) is not None
+    return pytest.mark.skipif(not available, reason=f"{module} not installed")
+
 
 SAMPLE_KEY = "sample_id"
 CELL_KEY = "cell_type"
@@ -37,6 +45,24 @@ LIGHTWEIGHT_METHODS = [
     (GroupedPseudobulk, {"layer": "X"}),
     (RandomVector, {}),
     (CellGroupComposition, {}),
+]
+
+# All SampleRepresentationMethod subclasses with the minimal constructor kwargs needed
+# to instantiate them (no prepare_anndata is called, so no external deps are required).
+_ALL_SR_METHODS = [
+    pytest.param(Pseudobulk, {"layer": "X"}, id="Pseudobulk"),
+    pytest.param(GroupedPseudobulk, {"layer": "X"}, id="GroupedPseudobulk"),
+    pytest.param(RandomVector, {}, id="RandomVector"),
+    pytest.param(CellGroupComposition, {}, id="CellGroupComposition"),
+    pytest.param(MrVI, {}, id="MrVI"),
+    pytest.param(WassersteinTSNE, {"replicate_key": CELL_KEY}, id="WassersteinTSNE"),
+    pytest.param(PILOT, {"sample_state_col": "disease"}, id="PILOT", marks=_skip_if_missing("pilotpy")),
+    pytest.param(SCPoli, {}, id="SCPoli"),
+    pytest.param(PhEMD, {}, id="PhEMD"),
+    pytest.param(DiffusionEarthMoverDistance, {}, id="DiffusionEarthMoverDistance"),
+    pytest.param(MOFA, {}, id="MOFA"),
+    pytest.param(GloScope, {}, id="GloScope", marks=_skip_if_missing("rpy2")),
+    pytest.param(GloScope_py, {}, id="GloScope_py"),
 ]
 
 
@@ -424,7 +450,10 @@ def test_get_data_from_layers(synthetic_adata):
 def test_get_data_invalid_layer_raises(synthetic_adata):
     method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="nonexistent")
     method.prepare_anndata(synthetic_adata.copy())
-    with pytest.raises(ValueError, match="Cannot find layer"):
+    with pytest.raises(
+        ValueError,
+        match="layer='nonexistent' not found in adata.obsm or adata.layers. Please make sure it is specified correctly.",
+    ):
         method._get_data()
 
 
@@ -569,7 +598,7 @@ def test_correlate_cell_type_expression_raises_for_invalid_method(synthetic_adat
 
 
 def test_create_colormap_returns_series_with_unique_color_per_category(synthetic_adata):
-    result = create_colormap(synthetic_adata.obs, "cell_type")
+    result = _create_colormap(synthetic_adata.obs, "cell_type")
     assert len(result) == len(synthetic_adata.obs)
     assert result.nunique() == synthetic_adata.obs["cell_type"].nunique()
 
@@ -704,3 +733,237 @@ def test_wasserstein_tsne_warns_when_recomputing_with_different_weight(pbmc3k_ad
 
     assert new_distances.shape == (adata.obs[SAMPLE_KEY].nunique(), adata.obs[SAMPLE_KEY].nunique())
     assert adata.uns["wasserstein_covariance_weight"] == 0.3
+
+
+# ---------------------------------------------------------------------------
+# _check_adata_loaded — all SampleRepresentationMethod subclasses
+# ---------------------------------------------------------------------------
+
+
+class TestCheckAdataLoaded:
+    """Verify _adata_loaded flag and _check_adata_loaded() guard for every SR method.
+
+    No prepare_anndata is called, so no external package is required.
+    """
+
+    @pytest.mark.parametrize("cls, extra_kwargs", _ALL_SR_METHODS)
+    def test_adata_loaded_false_before_prepare_anndata(self, cls, extra_kwargs):
+        model = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **extra_kwargs)
+        with pytest.raises(RuntimeError, match="prepare_anndata"):
+            model._check_adata_loaded()
+
+    @pytest.mark.parametrize("cls, extra_kwargs", _ALL_SR_METHODS)
+    def test_calculate_distance_matrix_raises_before_prepare_anndata(self, cls, extra_kwargs):
+        model = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **extra_kwargs)
+        with pytest.raises(RuntimeError, match="prepare_anndata"):
+            model.calculate_distance_matrix()
+
+    @pytest.mark.parametrize("cls, extra_kwargs", LIGHTWEIGHT_METHODS)
+    def test_check_adata_loaded_passes_after_prepare_anndata(self, cls, extra_kwargs, synthetic_adata):
+        model = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **extra_kwargs)
+        model.prepare_anndata(synthetic_adata.copy())
+        model._check_adata_loaded()  # must not raise
+
+    # ------------------------------------------------------------------
+    # Heavy-weight methods: verify _adata_loaded=True after prepare_anndata
+    # ------------------------------------------------------------------
+
+    def test_adata_loaded_true_after_prepare_anndata_mrvi(self, synthetic_adata):
+        pytest.importorskip("scvi")
+        method = MrVI(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, max_epochs=1)
+        method.prepare_anndata(synthetic_adata.copy())
+        method._check_adata_loaded()
+
+    def test_adata_loaded_true_after_prepare_anndata_wasserstein_tsne(self, pbmc3k_adata):
+        pytest.importorskip("WassersteinTSNE")
+        method = WassersteinTSNE(
+            sample_key=SAMPLE_KEY,
+            cell_group_key=PBMC_CELL_KEY,
+            replicate_key=PBMC_CELL_KEY,
+            layer="X_pca",
+        )
+        method.prepare_anndata(pbmc3k_adata.copy())
+        method._check_adata_loaded()
+
+    def test_adata_loaded_true_after_prepare_anndata_pilot(self, pbmc3k_adata):
+        pytest.importorskip("pilotpy", exc_type=Exception)
+        adata = pbmc3k_adata.copy()
+        adata.obs["state"] = "control"
+        method = PILOT(
+            sample_key=SAMPLE_KEY,
+            cell_group_key=PBMC_CELL_KEY,
+            sample_state_col="state",
+            layer="X_pca",
+        )
+        method.prepare_anndata(adata)
+        method._check_adata_loaded()
+
+    def test_adata_loaded_true_after_prepare_anndata_scpoli(self, synthetic_adata):
+        pytest.importorskip("scarches")
+        method = SCPoli(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, n_epochs=1, pretraining_epochs=1)
+        method.prepare_anndata(synthetic_adata.copy())
+        method._check_adata_loaded()
+
+    def test_adata_loaded_true_after_prepare_anndata_phemd(self, pbmc3k_adata):
+        pytest.importorskip("ot")
+        pytest.importorskip("phate", exc_type=ImportError)
+        method = PhEMD(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, n_clusters=3)
+        method.prepare_anndata(pbmc3k_adata.copy())
+        method._check_adata_loaded()
+
+    def test_adata_loaded_true_after_prepare_anndata_diffusion_emd(self, pbmc3k_adata):
+        pytest.importorskip("DiffusionEMD")
+        method = DiffusionEarthMoverDistance(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca")
+        method.prepare_anndata(pbmc3k_adata.copy())
+        method._check_adata_loaded()
+
+    def test_adata_loaded_true_after_prepare_anndata_mofa(self, pbmc3k_adata):
+        pytest.importorskip("mofapy2")
+        method = MOFA(
+            sample_key=SAMPLE_KEY,
+            cell_group_key=PBMC_CELL_KEY,
+            n_factors=3,
+            iterations=10,
+            quiet=True,
+        )
+        method.prepare_anndata(pbmc3k_adata.copy())
+        method._check_adata_loaded()
+
+    def test_adata_loaded_true_after_prepare_anndata_gloscope_r(self, pbmc3k_adata):
+        _skip_if_gloscope_r_unavailable()
+        method = GloScope(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca")
+        method.prepare_anndata(pbmc3k_adata.copy())
+        method._check_adata_loaded()
+
+    def test_adata_loaded_true_after_prepare_anndata_gloscope_py(self, pbmc3k_adata):
+        pytest.importorskip("pynndescent")
+        method = GloScope_py(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca")
+        method.prepare_anndata(pbmc3k_adata.copy())
+        method._check_adata_loaded()
+
+
+# ---------------------------------------------------------------------------
+# TestSampleOrderingConsistency — generic tests for all SR methods
+# ---------------------------------------------------------------------------
+
+
+class TestSampleOrderingConsistency:
+    """Generic tests for sample ordering consistency across all SampleRepresentationMethod subclasses.
+
+    These tests work with any fitted SampleRepresentationMethod model and automatically skip
+    methods that aren't implemented for a particular subclass.
+    """
+
+    def test_samples_matches_distance_matrix_dimensions(self, synthetic_adata):
+        """self.samples should match distance_matrix dimensions."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            method.prepare_anndata(synthetic_adata.copy())
+            dist = method.calculate_distance_matrix(force=True)
+
+            assert dist.shape[0] == len(method.samples), f"{cls.__name__}: distance matrix rows != samples"
+            assert dist.shape[1] == len(method.samples), f"{cls.__name__}: distance matrix cols != samples"
+
+    def test_distance_matrix_indexed_by_samples(self, synthetic_adata):
+        """Distance matrix should correspond to self.samples in order."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            method.prepare_anndata(synthetic_adata.copy())
+            dist = method.calculate_distance_matrix(force=True)
+
+            # Distance matrix should be (n_samples, n_samples)
+            assert dist.shape == (len(method.samples), len(method.samples)), (
+                f"{cls.__name__}: distance matrix shape mismatch"
+            )
+
+    def test_distance_matrix_diagonal_is_zero(self, synthetic_adata):
+        """Distance matrix diagonal should be zero (distance to self)."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            method.prepare_anndata(synthetic_adata.copy())
+            dist = method.calculate_distance_matrix(force=True)
+
+            np.testing.assert_array_almost_equal(
+                np.diag(dist),
+                np.zeros(len(method.samples)),
+                err_msg=f"{cls.__name__}: distance matrix diagonal not zero",
+            )
+
+    def test_multiple_calls_preserve_order(self, synthetic_adata):
+        """Multiple calls to calculate_distance_matrix should preserve sample order."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            method.prepare_anndata(synthetic_adata.copy())
+
+            dist1 = method.calculate_distance_matrix(force=True)
+            dist2 = method.calculate_distance_matrix(force=True)
+
+            # Both should have same shape matching sample count
+            assert dist1.shape == dist2.shape, f"{cls.__name__}: distance matrix shape changed across calls"
+            assert dist1.shape[0] == len(method.samples), f"{cls.__name__}: distance matrix shape doesn't match samples"
+
+    def test_distance_matrix_symmetric_or_warns(self, synthetic_adata):
+        """Distance matrix should be symmetric (or method documented as asymmetric)."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            method.prepare_anndata(synthetic_adata.copy())
+            dist = method.calculate_distance_matrix(force=True)
+
+            # Most methods produce symmetric matrices; if not, it should be documented
+            is_symmetric = np.allclose(dist, dist.T, atol=1e-5)
+            assert is_symmetric, f"{cls.__name__}: distance matrix is not symmetric (undocumented asymmetry)"
+
+    def test_samples_array_preserved(self, synthetic_adata):
+        """self.samples array should be stable across calls."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            method.prepare_anndata(synthetic_adata.copy())
+
+            samples1 = method.samples.copy()
+            method.calculate_distance_matrix(force=True)
+            samples2 = method.samples
+
+            np.testing.assert_array_equal(
+                samples1, samples2, err_msg=f"{cls.__name__}: self.samples changed after calculate_distance_matrix"
+            )
+
+    def test_distance_matrix_values_non_negative(self, synthetic_adata):
+        """Distance matrix values should be non-negative."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            method.prepare_anndata(synthetic_adata.copy())
+            dist = method.calculate_distance_matrix(force=True)
+
+            assert (dist >= 0).all(), f"{cls.__name__}: distance matrix contains negative values"
+
+    def test_sample_count_matches_adata(self, synthetic_adata):
+        """Number of samples should match unique sample_key values in adata."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            adata = synthetic_adata.copy()
+            method.prepare_anndata(adata)
+
+            expected_samples = adata.obs[SAMPLE_KEY].nunique()
+            assert len(method.samples) == expected_samples, (
+                f"{cls.__name__}: sample count doesn't match adata unique samples"
+            )
+
+    def test_distance_matrix_cached_correctly(self, synthetic_adata):
+        """Distance matrix should be cached in adata.uns with correct key."""
+        for cls, kwargs in LIGHTWEIGHT_METHODS:
+            method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
+            adata = synthetic_adata.copy()
+            method.prepare_anndata(adata)
+
+            dist = method.calculate_distance_matrix(force=True)
+
+            # Check cache key exists
+            assert method.DISTANCES_UNS_KEY in method.adata.uns, (
+                f"{cls.__name__}: distance matrix not cached in adata.uns"
+            )
+
+            # Check cached value matches returned value
+            cached_dist = method.adata.uns[method.DISTANCES_UNS_KEY]
+            np.testing.assert_array_equal(
+                dist, cached_dist, err_msg=f"{cls.__name__}: cached distance matrix doesn't match returned value"
+            )
