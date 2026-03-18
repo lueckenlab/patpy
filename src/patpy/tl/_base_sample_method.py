@@ -78,8 +78,6 @@ class BaseSampleMethod:
         if self.cell_group_key is not None and self.cell_group_key in adata.obs.columns:
             self.cell_groups = adata.obs[self.cell_group_key].unique()
 
-        self._fitted = True
-
     def _get_data(self) -> np.ndarray:
         """Return the feature matrix from the slot specified by :attr:`layer`."""
         self._check_adata_loaded()
