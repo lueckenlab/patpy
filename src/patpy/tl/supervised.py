@@ -48,8 +48,8 @@ class SupervisedSampleMethod(BaseSampleMethod):
     def __init__(
         self,
         sample_key: str,
-        label_keys: list[str],
-        tasks: list[_PREDICTION_TASKS],
+        label_keys: list[str] | str,
+        tasks: list[_PREDICTION_TASKS] | _PREDICTION_TASKS,
         cell_group_key: str | None = None,
         layer: str = "X_pca",
         seed: int = 42,
@@ -60,6 +60,10 @@ class SupervisedSampleMethod(BaseSampleMethod):
             layer=layer,
             seed=seed,
         )
+
+        # Convert strings to lists
+        label_keys = [label_keys] if isinstance(label_keys, str) else label_keys
+        tasks = [tasks] if isinstance(tasks, str) else tasks
 
         if len(label_keys) != len(tasks):
             raise ValueError(
@@ -378,7 +382,7 @@ class MixMIL(SupervisedSampleMethod):
         if train:
             self.fine_tune(self.label_keys, self.tasks, **kwargs)
 
-    def fine_tune(self, labels: list[str], tasks: list[_PREDICTION_TASKS], n_epochs: int | None = None, lr: float | None = None, **kwargs) -> None:
+    def fine_tune(self, labels: list[str] | str, tasks: list[_PREDICTION_TASKS] | _PREDICTION_TASKS, n_epochs: int | None = None, lr: float | None = None, **kwargs) -> None:
         """Fine-tune or continue training MixMIL on new or existing labels.
 
         The model is extended to predict the given labels (which may be a superset of existing labels).
@@ -386,11 +390,11 @@ class MixMIL(SupervisedSampleMethod):
 
         Parameters
         ----------
-        labels : list[str]
-            Labels to train/extend the model for, e.g., ["disease", "age"].
-        tasks : list[_PREDICTION_TASKS]
+        labels : list[str] or str
+            Labels to train/extend the model for, e.g., ["disease", "age"] or "disease".
+        tasks : list[_PREDICTION_TASKS] or _PREDICTION_TASKS
             Corresponding prediction task for each label. Must match the length of `labels`.
-            One of ["classification", "regression", "ranking"].
+            One of ["classification", "regression", "ranking"] or a single task string.
         n_epochs : int, optional
             Number of training epochs. Defaults to `self.n_epochs` if not provided.
         lr : float, optional
@@ -406,6 +410,10 @@ class MixMIL(SupervisedSampleMethod):
         """
         from mixmil import MixMIL as _MixMIL
         import torch
+
+        # Convert strings to lists
+        labels = [labels] if isinstance(labels, str) else labels
+        tasks = [tasks] if isinstance(tasks, str) else tasks
 
         self._check_adata_loaded()
 

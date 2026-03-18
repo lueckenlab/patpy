@@ -790,6 +790,74 @@ class TestMixMIL:
         # Should have added 2 more epochs
         assert final_history_len == initial_history_len + 2
 
+    # ------------------------------------------------------------------
+    # String input support (single label/task as string)
+    # ------------------------------------------------------------------
+
+    def test_init_accepts_single_label_as_string(self, basic_adata):
+        """Test that MixMIL accepts single label as string instead of list."""
+        from patpy.tl.supervised import MixMIL
+
+        model = MixMIL(
+            sample_key="donor_id",
+            label_keys="disease",  # string instead of ["disease"]
+            tasks="classification",  # string instead of ["classification"]
+            layer="X_pca",
+            n_epochs=2,
+        )
+        # Internally should be converted to lists
+        assert model.label_keys == ["disease"]
+        assert model.tasks == ["classification"]
+
+    def test_init_still_accepts_lists(self, basic_adata):
+        """Test that MixMIL still accepts lists."""
+        from patpy.tl.supervised import MixMIL
+
+        model = MixMIL(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            layer="X_pca",
+            n_epochs=2,
+        )
+        assert model.label_keys == ["disease"]
+        assert model.tasks == ["classification"]
+
+    def test_fine_tune_accepts_single_label_as_string(self, mixmil_model, basic_adata):
+        """Test that fine_tune accepts single label as string."""
+        basic_adata.obs["disease2"] = (basic_adata.obs["disease"] == 0).astype(int)
+        # Should work with string instead of list
+        mixmil_model.fine_tune("disease2", "classification", n_epochs=1)
+
+        assert "disease" in mixmil_model.label_keys
+        assert "disease2" in mixmil_model.label_keys
+
+    def test_fine_tune_still_accepts_lists(self, mixmil_model, basic_adata):
+        """Test that fine_tune still accepts lists."""
+        basic_adata.obs["disease2"] = (basic_adata.obs["disease"] == 0).astype(int)
+        # Should work with lists
+        mixmil_model.fine_tune(["disease2"], ["classification"], n_epochs=1)
+
+        assert "disease" in mixmil_model.label_keys
+        assert "disease2" in mixmil_model.label_keys
+
+    def test_string_input_works_end_to_end(self, basic_adata):
+        """Test full workflow with string inputs."""
+        from patpy.tl.supervised import MixMIL
+
+        model = MixMIL(
+            sample_key="donor_id",
+            label_keys="disease",
+            tasks="classification",
+            layer="X_pca",
+            n_epochs=2,
+        )
+        model.prepare_anndata(basic_adata)
+
+        # Predictions should work
+        pred = model.predict("disease")
+        assert pred.shape[0] == N_DONORS
+
 
 class TestPULSAR:
     def test_prepare_anndata_missing_layer_raises(self, basic_adata):
