@@ -96,43 +96,50 @@ class SupervisedSampleMethod(BaseSampleMethod):
 
         self.labels = self._extract_metadata(self.label_keys)
 
-    def predict(self, label: str, task: _PREDICTION_TASKS):
-        """Predict `label` for every sample in `self.samples`
-        
+    def predict(self, label: str) -> pd.Series | pd.DataFrame:
+        """Predict `label` for every sample in `self.samples`.
+
         Parameters
         ----------
         label: str
             Sample label to predict, such as "disease" or "age".
             Must be in `self.label_keys` either from initialisation or by
-            calling a fine-tuning method in prior to running prediction
-        task: one of ["classification", "regression", "ranking"]
-            Prediction task:
-            - "classification": predict one of categorical labels
-            - "regression": predict a continuous number
-            - "ranking": predict a rank. Might not be supported by some methods
+            calling a fine-tuning method prior to running prediction.
 
         Returns
         -------
-        predictions: np.array
-            Array of predictions
+        pd.Series or pd.DataFrame
+            Predictions indexed by donor ID. Format depends on the task:
+            - classification: DataFrame with probability columns + "y_pred" (argmax)
+            - regression/ranking: Series of predicted values
         """
+        self._check_fitted()
         if label not in self.label_keys:
-            raise ValueError(f"`label=f{label}` is not found in model label keys. Please train the model to predict the label first")
+            raise ValueError(f"`label='{label}'` is not found in model label keys. Please train the model to predict the label first")
+        raise NotImplementedError(f"{type(self).__name__} must implement predict().")
         
     def fine_tune(self, labels: list[str], tasks: list[_PREDICTION_TASKS], **kwargs):
-        """Fine-tune base model to predict `labels`
-        
+        """Fine-tune / continue training the model on new or existing labels.
+
+        The model is extended to predict the given labels (which may be a superset
+        of existing labels). Existing learned parameters are preserved via warm-start.
+
         Parameters
         ----------
-        labels: list[str]
-            Sample labels to predict, for example ["disease", "age"].
-        task: list of ["classification", "regression", "ranking"]
-            Prediction task:
-            - "classification": predict one of categorical labels
-            - "regression": predict a continuous number
-            - "ranking": predict a rank. Might not be supported by some methods
+        labels : list[str]
+            Labels to train/extend the model for, e.g., ["disease", "age"].
+        tasks : list[_PREDICTION_TASKS]
+            Corresponding prediction task for each label. Must match the length
+            of `labels`. One of ["classification", "regression", "ranking"].
+        **kwargs
+            Additional training parameters (e.g., n_epochs, lr) passed to subclass.
+
+        Raises
+        ------
+        NotImplementedError
+            Subclasses must override this method.
         """
-        raise NotImplementedError()
+        raise NotImplementedError(f"{type(self).__name__} must implement fine_tune().")
 
 
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
@@ -247,7 +254,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
     def _donor_col(self, col: str) -> np.ndarray:
         """Return a per-donor array for *col*, aligned to :attr:`samples`."""
         self._check_adata_loaded()
-        return self._extract_metadata(columns=[col]).loc[self.samples]
+        return self._extract_metadata(columns=[col]).loc[self.samples].values.ravel()
 
 
 class MixMIL(SupervisedSampleMethod):
@@ -341,8 +348,9 @@ class MixMIL(SupervisedSampleMethod):
 
         self._model = None
         self._history: list | None = None
+        self._label_mappings: dict[str, tuple[list, dict]] = {}  # label_key → (classes, encode_dict)
 
-    def prepare_anndata(self, adata: sc.AnnData) -> None:
+    def prepare_anndata(self, adata: sc.AnnData, train: bool = True, **kwargs) -> None:
         """Train MixMIL on *adata*.
 
         Parameters
@@ -351,6 +359,8 @@ class MixMIL(SupervisedSampleMethod):
             Single-cell AnnData.  Must contain :attr:`sample_key` and
             :attr:`label_keys` in ``.obs``, and per-cell features under
             :attr:`layer` in ``.obsm``.
+        train: bool = True
+            If True, train the model on loaded data for tasks and labels set at initialisation
         """
         try:
             from mixmil import MixMIL as _MixMIL
@@ -365,10 +375,85 @@ class MixMIL(SupervisedSampleMethod):
                 "Please compute the required embedding before calling prepare_anndata()."
             )
 
-        Xs, F, Y = self._build_tensors()
+        if train:
+            self.fine_tune(self.label_keys, self.tasks, **kwargs)
 
+    def fine_tune(self, labels: list[str], tasks: list[_PREDICTION_TASKS], n_epochs: int | None = None, lr: float | None = None, **kwargs) -> None:
+        """Fine-tune or continue training MixMIL on new or existing labels.
+
+        The model is extended to predict the given labels (which may be a superset of existing labels).
+        Existing learned parameters are preserved via warm-start when the output dimension changes.
+
+        Parameters
+        ----------
+        labels : list[str]
+            Labels to train/extend the model for, e.g., ["disease", "age"].
+        tasks : list[_PREDICTION_TASKS]
+            Corresponding prediction task for each label. Must match the length of `labels`.
+            One of ["classification", "regression", "ranking"].
+        n_epochs : int, optional
+            Number of training epochs. Defaults to `self.n_epochs` if not provided.
+        lr : float, optional
+            Learning rate. Defaults to `self.lr` if not provided.
+        **kwargs
+            Additional arguments (unused; for API consistency).
+
+        Raises
+        ------
+        ValueError
+            If adding regression/ranking to a model trained only on classification
+            (MixMIL currently supports a single task type).
+        """
+        from mixmil import MixMIL as _MixMIL
+        import torch
+
+        self._check_adata_loaded()
+
+        if len(labels) != len(tasks):
+            raise ValueError(f"labels (len={len(labels)}) and tasks (len={len(tasks)}) must have the same length.")
+
+        for label in labels:
+            if label not in self.adata.obs.columns:
+                raise ValueError(f"label '{label}' not found in adata.obs.columns.")
+
+        # Validate task compatibility: all tasks should be the same (MixMIL limitation)
+        all_tasks = self.tasks + [t for l, t in zip(labels, tasks) if l not in self.label_keys]
+        if len(set(all_tasks)) > 1:
+            raise ValueError(
+                f"MixMIL supports a single task type per model. "
+                f"Cannot mix {set(all_tasks)}. "
+                f"Current tasks: {self.tasks}. New tasks: {tasks}."
+            )
+
+        # Store old P for weight transfer
+        P_old = len(self.label_keys) if self._model is not None else None
+
+        # Extend label_keys and tasks with new ones
+        for label, task in zip(labels, tasks, strict=True):
+            if label not in self.label_keys:
+                self.label_keys.append(label)
+                self.tasks.append(task)
+
+        # Build mappings for string labels
+        self._build_label_mappings()
+
+        # Re-extract metadata
+        self.labels = self._extract_metadata(self.label_keys)
+
+        # Clear stale caches
+        self.adata.uns.pop("supervised_sample_importance", None)
+        importance_cols = [f"{k}_importance" for k in self.label_keys]
+        for col in importance_cols:
+            if col in self.adata.obs.columns:
+                del self.adata.obs[col]
+
+        # Rebuild tensors with updated label_keys
+        Xs, F, Y = self._build_tensors()
+        P_new = Y.shape[1]
+
+        # Initialize new model
         if self.likelihood is not None:
-            model = _MixMIL.init_with_mean_model(
+            new_model = _MixMIL.init_with_mean_model(
                 Xs,
                 F,
                 Y,
@@ -378,19 +463,127 @@ class MixMIL(SupervisedSampleMethod):
         else:
             Q = Xs[0].shape[1]
             K = F.shape[1]
-            P = Y.shape[1] if Y.ndim == 2 else 1
-            model = _MixMIL(Q=Q, K=K, P=P)
+            new_model = _MixMIL(Q=Q, K=K, P=P_new)
 
-        self._history = model.train(
+        # Transfer weights from old model if it exists and P changed
+        if self._model is not None and P_old != P_new:
+            p = min(P_old, P_new)
+            with torch.no_grad():
+                new_model.posterior.q_mu[:, :p] = self._model.posterior.q_mu[:, :p]
+                new_model.alpha[:, :p] = self._model.alpha[:, :p]
+                new_model.log_sigma_u[:, :p] = self._model.log_sigma_u[:, :p]
+                new_model.log_sigma_z[:, :p] = self._model.log_sigma_z[:, :p]
+
+        # Train
+        n_epochs_use = n_epochs if n_epochs is not None else self.n_epochs
+        lr_use = lr if lr is not None else self.lr
+        new_history = new_model.train(
             Xs,
             F,
             Y,
-            n_epochs=self.n_epochs,
+            n_epochs=n_epochs_use,
             batch_size=self.batch_size,
-            lr=self.lr,
+            lr=lr_use,
         )
-        self._model = model
+        # Extend history instead of replacing it (for fine-tuning tracking)
+        if self._history is None:
+            self._history = new_history
+        else:
+            self._history.extend(new_history)
+
+        self._model = new_model
         self._fitted = True
+
+    def predict(self, label: str) -> pd.Series | pd.DataFrame:
+        """Predict the given label for all samples.
+
+        Parameters
+        ----------
+        label : str
+            The label to predict. Must be in `self.label_keys`.
+
+        Returns
+        -------
+        pd.Series or pd.DataFrame
+            Predictions indexed by donor ID. Format depends on the task:
+            - classification: DataFrame with probability columns (one per class) + "y_pred" (argmax)
+            - regression/ranking: Series of predicted values
+
+        Examples
+        --------
+        >>> preds = model.predict("disease")  # classification → DataFrame
+        >>> ages = model.predict("age")        # regression → Series
+        """
+        import torch
+
+        self._check_fitted()
+        if label not in self.label_keys:
+            raise ValueError(f"`label='{label}'` is not found in model label keys.")
+
+        task = self.tasks[self.label_keys.index(label)]
+
+        # Build tensors for inference
+        Xs, F, _ = self._build_tensors()
+
+        with torch.no_grad():
+            logits = self._model.predict(Xs)  # (n_donors, P)
+
+        logits_np = logits.numpy()
+
+        # Calculate the dimension range for this label based on multiclass info
+        if not hasattr(self, "_multiclass_info"):
+            # Fallback for models without multiclass info
+            label_idx = self.label_keys.index(label)
+            dim_start = label_idx
+            dim_end = label_idx + 1
+            n_classes = 2 if logits_np.shape[1] == 1 else 2  # binary
+        else:
+            # Calculate cumulative dimensions
+            dim_start = 0
+            for i, k in enumerate(self.label_keys):
+                if k == label:
+                    break
+                dim_start += self._multiclass_info[k][0]
+            n_classes = self._multiclass_info[label][0]
+            dim_end = dim_start + n_classes
+
+        # Extract logits for this label
+        label_logits = logits_np[:, dim_start:dim_end]
+
+        if task == "classification":
+            # Apply softmax to get probabilities
+            import scipy.special
+            if label_logits.shape[1] == 1:
+                # Binary: apply sigmoid to single logit
+                proba_positive = scipy.special.expit(label_logits.ravel())
+                proba = np.column_stack([1 - proba_positive, proba_positive])
+            else:
+                # Multiclass: apply softmax
+                proba = scipy.special.softmax(label_logits, axis=1)
+
+            # Get class labels
+            if label in self._label_mappings:
+                classes, _ = self._label_mappings[label]
+                classes_list = classes
+            else:
+                classes_list = list(range(proba.shape[1]))
+
+            # Create DataFrame with probability columns and predicted class
+            prob_cols = {f"prob_{c}": proba[:, i] for i, c in enumerate(classes_list)}
+            result = pd.DataFrame(prob_cols, index=self.samples)
+
+            # Add predictions
+            y_pred_indices = proba.argmax(axis=1)
+            if label in self._label_mappings:
+                result["y_pred"] = [classes_list[idx] for idx in y_pred_indices]
+            else:
+                result["y_pred"] = y_pred_indices
+
+            return result
+        else:
+            # Regression or ranking
+            raw = label_logits[:, 0].numpy() if label_logits.shape[1] > 0 else label_logits.ravel().numpy()
+            return pd.Series(raw, index=self.samples, name=label)
 
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
         """Per-donor posterior predictions from MixMIL.
@@ -568,6 +761,21 @@ class MixMIL(SupervisedSampleMethod):
         """List of per-step loss dicts returned by MixMIL training."""
         return self._history
 
+    def _build_label_mappings(self) -> None:
+        """Build and store mappings for string labels. Called during fine_tune."""
+        for label_key in self.label_keys:
+            if label_key in self._label_mappings:
+                # Already mapped (from previous fine_tune call)
+                continue
+
+            col = self._donor_col(label_key)
+            # Check if column contains non-numeric data (strings, objects)
+            if col.dtype.kind not in ("f", "i", "u"):  # not float/int/uint
+                # Create mapping: unique values (sorted) → indices
+                classes = sorted(np.unique(col))
+                encode_dict = {c: i for i, c in enumerate(classes)}
+                self._label_mappings[label_key] = (classes, encode_dict)
+
     def _build_tensors(self):
         """Build ``Xs``, ``F``, ``Y`` tensors aligned to :attr:`samples`.
 
@@ -615,11 +823,38 @@ class MixMIL(SupervisedSampleMethod):
         F = torch.cat(covariate_list, dim=1)
 
         # Stack all label columns into (n_donors, P)
-        y_cols = np.stack(
-            [self._donor_col(key).astype("float32") for key in self.label_keys],
-            axis=1,
-        )
+        # Encode string labels to integers using mappings
+        # For multiclass labels (classification task with >2 classes), use one-hot encoding
+        y_cols_list = []
+        for key in self.label_keys:
+            col = self._donor_col(key)
+            task = self.tasks[self.label_keys.index(key)]
 
+            # Recode strings to integers if needed
+            if key in self._label_mappings:
+                _, encode_dict = self._label_mappings[key]
+                col_encoded = np.array([encode_dict[val] for val in col], dtype="int32")
+            else:
+                col_encoded = col.astype("int32")
+
+            # Check if multiclass classification (>2 unique values in classification task)
+            n_classes = len(np.unique(col_encoded))
+            if task == "classification" and n_classes > 2:
+                # Use one-hot encoding for multiclass
+                one_hot = np.eye(n_classes, dtype="float32")[col_encoded]
+                y_cols_list.extend([one_hot[:, i] for i in range(n_classes)])
+                # Store multiclass info: this label occupies n_classes dimensions
+                if not hasattr(self, "_multiclass_info"):
+                    self._multiclass_info = {}
+                self._multiclass_info[key] = (n_classes, key in self._label_mappings)
+            else:
+                # Binary/regression: single dimension
+                y_cols_list.append(col_encoded.astype("float32"))
+                if not hasattr(self, "_multiclass_info"):
+                    self._multiclass_info = {}
+                self._multiclass_info[key] = (1, key in self._label_mappings)
+
+        y_cols = np.column_stack(y_cols_list)
         Y = torch.tensor(y_cols, dtype=torch.float32)  # (n_donors, P)
 
         return Xs, F, Y
