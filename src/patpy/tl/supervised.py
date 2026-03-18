@@ -501,8 +501,9 @@ class MixMIL(SupervisedSampleMethod):
                 f"Current tasks: {self.tasks}. New tasks: {tasks}."
             )
 
-        # Store old P for weight transfer
+        # Store old P and old labels/tasks for weight transfer
         P_old = len(self.label_keys) if self._model is not None else None
+        old_label_keys = self.label_keys.copy()
 
         # Extend label_keys and tasks with new ones
         for label, task in zip(labels, tasks, strict=True):
@@ -527,33 +528,40 @@ class MixMIL(SupervisedSampleMethod):
         Xs, F, Y = self._build_tensors()
         P_new = Y.shape[1]
 
-        # Initialize new model
-        if self.likelihood is not None:
-            new_model = _MixMIL.init_with_mean_model(
-                Xs,
-                F,
-                Y,
-                likelihood=self.likelihood,
-                n_trials=self.n_trials,
-            )
-        else:
-            Q = Xs[0].shape[1]
-            K = F.shape[1]
-            new_model = _MixMIL(Q=Q, K=K, P=P_new)
+        # Check if we're fine-tuning with the exact same labels/tasks (no new labels added)
+        new_labels_added = (set(labels) > set(old_label_keys)) or (P_old != P_new)
 
-        # Transfer weights from old model if it exists and P changed
-        if self._model is not None and P_old != P_new:
-            p = min(P_old, P_new)
-            with torch.no_grad():
-                new_model.posterior.q_mu[:, :p] = self._model.posterior.q_mu[:, :p]
-                new_model.alpha[:, :p] = self._model.alpha[:, :p]
-                new_model.log_sigma_u[:, :p] = self._model.log_sigma_u[:, :p]
-                new_model.log_sigma_z[:, :p] = self._model.log_sigma_z[:, :p]
+        # If fine-tuning with same labels/tasks, continue training existing model
+        if new_labels_added or self._model is None:
+            # Initialize new model (either first time or adding new labels)
+            if self.likelihood is not None:
+                new_model = _MixMIL.init_with_mean_model(
+                    Xs,
+                    F,
+                    Y,
+                    likelihood=self.likelihood,
+                    n_trials=self.n_trials,
+                )
+            else:
+                Q = Xs[0].shape[1]
+                K = F.shape[1]
+                new_model = _MixMIL(Q=Q, K=K, P=P_new)
 
-        # Train
+            # Transfer weights from old model if it exists and P changed
+            if self._model is not None and P_old != P_new:
+                p = min(P_old, P_new)
+                with torch.no_grad():
+                    new_model.posterior.q_mu[:, :p] = self._model.posterior.q_mu[:, :p]
+                    new_model.alpha[:, :p] = self._model.alpha[:, :p]
+                    new_model.log_sigma_u[:, :p] = self._model.log_sigma_u[:, :p]
+                    new_model.log_sigma_z[:, :p] = self._model.log_sigma_z[:, :p]
+
+            self._model = new_model
+
         n_epochs_use = n_epochs if n_epochs is not None else self.n_epochs
         lr_use = lr if lr is not None else self.lr
-        new_history = new_model.train(
+        
+        new_history = self._model.train(
             Xs,
             F,
             Y,
@@ -561,13 +569,11 @@ class MixMIL(SupervisedSampleMethod):
             batch_size=self.batch_size,
             lr=lr_use,
         )
-        # Extend history instead of replacing it (for fine-tuning tracking)
+
         if self._history is None:
             self._history = new_history
         else:
             self._history.extend(new_history)
-
-        self._model = new_model
         self._fitted = True
 
     def predict(self, label: str) -> pd.Series | pd.DataFrame:
