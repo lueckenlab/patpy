@@ -5,11 +5,6 @@ import pandas as pd
 import pytest
 from anndata import AnnData
 
-
-def _skip_if_missing(module: str) -> pytest.MarkDecorator:
-    available = importlib.util.find_spec(module) is not None
-    return pytest.mark.skipif(not available, reason=f"{module} not installed")
-
 from patpy.tl._base_sample_method import _create_colormap
 from patpy.tl.sample_representation import (
     MOFA,
@@ -33,6 +28,12 @@ from patpy.tl.sample_representation import (
     valid_aggregate,
     valid_distance_metric,
 )
+
+
+def _skip_if_missing(module: str) -> pytest.MarkDecorator:
+    available = importlib.util.find_spec(module) is not None
+    return pytest.mark.skipif(not available, reason=f"{module} not installed")
+
 
 SAMPLE_KEY = "sample_id"
 CELL_KEY = "cell_type"
@@ -829,9 +830,7 @@ class TestCheckFitted:
 
     def test_fitted_true_after_prepare_anndata_diffusion_emd(self, pbmc3k_adata):
         pytest.importorskip("DiffusionEMD")
-        method = DiffusionEarthMoverDistance(
-            sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca"
-        )
+        method = DiffusionEarthMoverDistance(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca")
         method.prepare_anndata(pbmc3k_adata.copy())
         assert method._fitted is True
         method._check_fitted()
@@ -883,10 +882,8 @@ class TestSampleOrderingConsistency:
             method.prepare_anndata(synthetic_adata.copy())
             dist = method.calculate_distance_matrix(force=True)
 
-            assert dist.shape[0] == len(method.samples), \
-                f"{cls.__name__}: distance matrix rows != samples"
-            assert dist.shape[1] == len(method.samples), \
-                f"{cls.__name__}: distance matrix cols != samples"
+            assert dist.shape[0] == len(method.samples), f"{cls.__name__}: distance matrix rows != samples"
+            assert dist.shape[1] == len(method.samples), f"{cls.__name__}: distance matrix cols != samples"
 
     def test_distance_matrix_indexed_by_samples(self, synthetic_adata):
         """Distance matrix should correspond to self.samples in order."""
@@ -896,8 +893,9 @@ class TestSampleOrderingConsistency:
             dist = method.calculate_distance_matrix(force=True)
 
             # Distance matrix should be (n_samples, n_samples)
-            assert dist.shape == (len(method.samples), len(method.samples)), \
+            assert dist.shape == (len(method.samples), len(method.samples)), (
                 f"{cls.__name__}: distance matrix shape mismatch"
+            )
 
     def test_distance_matrix_diagonal_is_zero(self, synthetic_adata):
         """Distance matrix diagonal should be zero (distance to self)."""
@@ -909,7 +907,7 @@ class TestSampleOrderingConsistency:
             np.testing.assert_array_almost_equal(
                 np.diag(dist),
                 np.zeros(len(method.samples)),
-                err_msg=f"{cls.__name__}: distance matrix diagonal not zero"
+                err_msg=f"{cls.__name__}: distance matrix diagonal not zero",
             )
 
     def test_multiple_calls_preserve_order(self, synthetic_adata):
@@ -922,10 +920,8 @@ class TestSampleOrderingConsistency:
             dist2 = method.calculate_distance_matrix(force=True)
 
             # Both should have same shape matching sample count
-            assert dist1.shape == dist2.shape, \
-                f"{cls.__name__}: distance matrix shape changed across calls"
-            assert dist1.shape[0] == len(method.samples), \
-                f"{cls.__name__}: distance matrix shape doesn't match samples"
+            assert dist1.shape == dist2.shape, f"{cls.__name__}: distance matrix shape changed across calls"
+            assert dist1.shape[0] == len(method.samples), f"{cls.__name__}: distance matrix shape doesn't match samples"
 
     def test_distance_matrix_symmetric_or_warns(self, synthetic_adata):
         """Distance matrix should be symmetric (or method documented as asymmetric)."""
@@ -936,8 +932,7 @@ class TestSampleOrderingConsistency:
 
             # Most methods produce symmetric matrices; if not, it should be documented
             is_symmetric = np.allclose(dist, dist.T, atol=1e-5)
-            assert is_symmetric, \
-                f"{cls.__name__}: distance matrix is not symmetric (undocumented asymmetry)"
+            assert is_symmetric, f"{cls.__name__}: distance matrix is not symmetric (undocumented asymmetry)"
 
     def test_samples_array_preserved(self, synthetic_adata):
         """self.samples array should be stable across calls."""
@@ -950,9 +945,7 @@ class TestSampleOrderingConsistency:
             samples2 = method.samples
 
             np.testing.assert_array_equal(
-                samples1,
-                samples2,
-                err_msg=f"{cls.__name__}: self.samples changed after calculate_distance_matrix"
+                samples1, samples2, err_msg=f"{cls.__name__}: self.samples changed after calculate_distance_matrix"
             )
 
     def test_distance_matrix_values_non_negative(self, synthetic_adata):
@@ -962,8 +955,7 @@ class TestSampleOrderingConsistency:
             method.prepare_anndata(synthetic_adata.copy())
             dist = method.calculate_distance_matrix(force=True)
 
-            assert (dist >= 0).all(), \
-                f"{cls.__name__}: distance matrix contains negative values"
+            assert (dist >= 0).all(), f"{cls.__name__}: distance matrix contains negative values"
 
     def test_sample_count_matches_adata(self, synthetic_adata):
         """Number of samples should match unique sample_key values in adata."""
@@ -973,8 +965,9 @@ class TestSampleOrderingConsistency:
             method.prepare_anndata(adata)
 
             expected_samples = adata.obs[SAMPLE_KEY].nunique()
-            assert len(method.samples) == expected_samples, \
+            assert len(method.samples) == expected_samples, (
                 f"{cls.__name__}: sample count doesn't match adata unique samples"
+            )
 
     def test_distance_matrix_cached_correctly(self, synthetic_adata):
         """Distance matrix should be cached in adata.uns with correct key."""
@@ -986,13 +979,12 @@ class TestSampleOrderingConsistency:
             dist = method.calculate_distance_matrix(force=True)
 
             # Check cache key exists
-            assert method.DISTANCES_UNS_KEY in method.adata.uns, \
+            assert method.DISTANCES_UNS_KEY in method.adata.uns, (
                 f"{cls.__name__}: distance matrix not cached in adata.uns"
+            )
 
             # Check cached value matches returned value
             cached_dist = method.adata.uns[method.DISTANCES_UNS_KEY]
             np.testing.assert_array_equal(
-                dist,
-                cached_dist,
-                err_msg=f"{cls.__name__}: cached distance matrix doesn't match returned value"
+                dist, cached_dist, err_msg=f"{cls.__name__}: cached distance matrix doesn't match returned value"
             )

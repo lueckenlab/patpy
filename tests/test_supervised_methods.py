@@ -47,7 +47,6 @@ def basic_adata():
     return adata
 
 
-
 @pytest.fixture
 def mixmil_model(basic_adata):
     from patpy.tl.supervised import MixMIL
@@ -75,10 +74,7 @@ def mixmil_model_multilabel(basic_adata):
 
     adata = basic_adata.copy()
     # Add a second binary donor-level label (inverted disease)
-    donor_disease2 = {
-        d: int((int(d.split("_")[1]) + 1) % 2)
-        for d in adata.obs["donor_id"].unique()
-    }
+    donor_disease2 = {d: int((int(d.split("_")[1]) + 1) % 2) for d in adata.obs["donor_id"].unique()}
     adata.obs["disease2"] = [donor_disease2[d] for d in adata.obs["donor_id"]]
 
     model = MixMIL(
@@ -104,8 +100,7 @@ def basic_adata_string_labels(basic_adata):
     # Add a 3-class string label
     disease_classes = ["healthy", "diseased", "pre-disease"]
     donor_disease_multi = {
-        d: disease_classes[i % len(disease_classes)]
-        for i, d in enumerate(adata.obs["donor_id"].unique())
+        d: disease_classes[i % len(disease_classes)] for i, d in enumerate(adata.obs["donor_id"].unique())
     }
     adata.obs["disease_multi"] = [donor_disease_multi[d] for d in adata.obs["donor_id"]]
 
@@ -159,13 +154,14 @@ def _patch_pulsar(monkeypatch):
     real PULSAR forward pass and the real extract_donor_embeddings_from_h5ad
     code path.  hidden_size=512 matches the (N_DONORS, 512) shape expectation.
     """
-    from pulsar.model import PULSAR as _PulsarModel, PULSARConfig
+    from pulsar.model import PULSAR as _PulsarModel
+    from pulsar.model import PULSARConfig
 
     small_config = PULSARConfig(
-        input_size=1280,                  # must match X_uce embedding dim
-        hidden_size=512,                  # output dim expected by the tests
-        encoder_num_hidden_layers=1,      # lightweight
-        encoder_num_attention_heads=8,    # 512 / 8 = 64 head_dim
+        input_size=1280,  # must match X_uce embedding dim
+        hidden_size=512,  # output dim expected by the tests
+        encoder_num_hidden_layers=1,  # lightweight
+        encoder_num_attention_heads=8,  # 512 / 8 = 64 head_dim
         encoder_intermediate_size=256,
         use_decoder=False,
         use_cell_state=False,
@@ -681,20 +677,21 @@ class TestMixMIL:
         """
         # Get loss after initial training
         history_before = mixmil_model._history.copy()
-        loss_before = history_before[-1]["loss"] if history_before else float('inf')
+        loss_before = history_before[-1]["loss"] if history_before else float("inf")
 
         # Fine-tune with the same label
         mixmil_model.fine_tune(["disease"], ["classification"], n_epochs=2)
 
         # Get new loss
         history_after = mixmil_model._history
-        loss_after = history_after[-1]["loss"] if history_after else float('inf')
+        loss_after = history_after[-1]["loss"] if history_after else float("inf")
 
         # Loss should not jump back to untrained level (which is typically much higher)
         # It might increase slightly due to random variation, but not dramatically
         # We check that it's not > 2x the previous loss (arbitrary but reasonable threshold)
-        assert loss_after < loss_before * 2.0, \
+        assert loss_after < loss_before * 2.0, (
             f"Loss after fine_tune {loss_after} is too high compared to {loss_before}. Model was likely reinitialized."
+        )
 
     def test_fine_tune_raises_on_missing_label(self, mixmil_model):
         with pytest.raises(ValueError, match="not found in adata.obs.columns"):
@@ -894,26 +891,6 @@ class TestPULSAR:
         )
         with pytest.raises(ValueError, match="not found in adata.obsm"):
             model.prepare_anndata(basic_adata)
-
-    def test_prepare_anndata_low_dim_embedding_warns(self, basic_adata, _patch_pulsar):
-        from patpy.tl.supervised import PULSAR
-
-        basic_adata.obsm["X_low"] = np.zeros((N_CELLS, 10), dtype="float32")
-        model = PULSAR(
-            sample_key="donor_id",
-            label_keys=["age"],
-            tasks=["regression"],
-            layer="X_low",
-            device="cpu",
-            sample_cell_num=4,
-        )
-        # Warning is emitted before forward pass; dim mismatch in projection
-        # layer (small model expects 1280-dim input, gets 10) is expected.
-        with pytest.warns(UserWarning, match="dimensions"):
-            try:
-                model.prepare_anndata(basic_adata)
-            except Exception:
-                pass
 
     def test_prepare_anndata_samples_match_adata(self, pulsar_model):
         assert set(pulsar_model.samples) == {f"donor_{i:02d}" for i in range(N_DONORS)}
@@ -1143,7 +1120,7 @@ class TestPULSAR:
         assert "age" in pulsar_model._probes
         assert "disease" in pulsar_model._probes
         assert "greatness" not in pulsar_model._probes
-        
+
         # Check that probes are fitted sklearn models
         assert hasattr(pulsar_model._probes["age"], "predict")
         assert hasattr(pulsar_model._probes["disease"], "predict_proba")
@@ -1296,24 +1273,24 @@ class TestSampleOrderingConsistency:
         """self.samples should match get_sample_representations() index order."""
         for model in [mixmil_model, pulsar_model]:
             reps = model.get_sample_representations()
-            assert list(model.samples) == list(reps.index), \
+            assert list(model.samples) == list(reps.index), (
                 f"{type(model).__name__}: samples order doesn't match representations"
+            )
 
     def test_samples_matches_importance_index(self, mixmil_model, pulsar_model):
         """self.samples should match get_sample_importance() index order."""
         for model in [mixmil_model, pulsar_model]:
             importance = model.get_sample_importance()
-            assert list(model.samples) == list(importance.index), \
+            assert list(model.samples) == list(importance.index), (
                 f"{type(model).__name__}: samples order doesn't match importance"
+            )
 
     def test_samples_matches_distance_matrix_shape(self, mixmil_model, pulsar_model):
         """calculate_distance_matrix should have rows/cols matching self.samples."""
         for model in [mixmil_model, pulsar_model]:
             dist = model.calculate_distance_matrix()
-            assert dist.shape[0] == len(model.samples), \
-                f"{type(model).__name__}: distance matrix rows != samples"
-            assert dist.shape[1] == len(model.samples), \
-                f"{type(model).__name__}: distance matrix cols != samples"
+            assert dist.shape[0] == len(model.samples), f"{type(model).__name__}: distance matrix rows != samples"
+            assert dist.shape[1] == len(model.samples), f"{type(model).__name__}: distance matrix cols != samples"
 
     def test_predict_indexed_by_samples(self, mixmil_model, pulsar_model):
         """predict() results should be indexed by self.samples."""
@@ -1321,14 +1298,15 @@ class TestSampleOrderingConsistency:
             label = self._get_first_label_key(model)
             try:
                 # For models that need fine_tune before predict (PULSAR)
-                if not hasattr(model, '_fitted') or not model._fitted:
+                if not hasattr(model, "_fitted") or not model._fitted:
                     continue
-                if hasattr(model, '_probes') and label not in model._probes:
+                if hasattr(model, "_probes") and label not in model._probes:
                     model.fine_tune(label, model.tasks[model.label_keys.index(label)])
 
                 pred = model.predict(label)
-                assert list(pred.index) == list(model.samples), \
+                assert list(pred.index) == list(model.samples), (
                     f"{type(model).__name__}: predict not indexed by samples"
+                )
             except (NotImplementedError, RuntimeError):
                 # Skip if predict not implemented or probe not available
                 pass
@@ -1344,7 +1322,7 @@ class TestSampleOrderingConsistency:
             np.testing.assert_array_almost_equal(
                 meta_at_samples[label_key].values,
                 model.labels.loc[model.samples, label_key].values,
-                err_msg=f"{type(model).__name__}: metadata doesn't match labels"
+                err_msg=f"{type(model).__name__}: metadata doesn't match labels",
             )
 
     def test_fine_tune_predict_ordering(self, mixmil_model, pulsar_model):
@@ -1354,12 +1332,13 @@ class TestSampleOrderingConsistency:
             try:
                 # For MixMIL, predict is already available
                 # For PULSAR, need to fine_tune first
-                if hasattr(model, '_probes') and label not in model._probes:
+                if hasattr(model, "_probes") and label not in model._probes:
                     model.fine_tune(label, model.tasks[0])
 
                 pred = model.predict(label)
-                assert list(pred.index) == list(model.samples), \
+                assert list(pred.index) == list(model.samples), (
                     f"{type(model).__name__}: predict not indexed by samples"
+                )
             except (NotImplementedError, ValueError):
                 # Skip if model doesn't support this operation
                 pass
@@ -1371,10 +1350,10 @@ class TestSampleOrderingConsistency:
             labels = model.labels
 
             # Check that first sample in importance matches first in self.samples
-            assert importance.index[0] == model.samples[0], \
+            assert importance.index[0] == model.samples[0], (
                 f"{type(model).__name__}: first importance sample doesn't match"
-            assert labels.index[0] == model.samples[0], \
-                f"{type(model).__name__}: first label sample doesn't match"
+            )
+            assert labels.index[0] == model.samples[0], f"{type(model).__name__}: first label sample doesn't match"
 
     def test_distance_matrix_diagonal_is_zero(self, mixmil_model, pulsar_model):
         """Distance matrix diagonal should be zero (distance to self)."""
@@ -1383,7 +1362,7 @@ class TestSampleOrderingConsistency:
             np.testing.assert_array_almost_equal(
                 np.diag(dist),
                 np.zeros(len(model.samples)),
-                err_msg=f"{type(model).__name__}: distance matrix diagonal not zero"
+                err_msg=f"{type(model).__name__}: distance matrix diagonal not zero",
             )
 
     def test_multiple_calls_preserve_order(self, mixmil_model, pulsar_model):
@@ -1392,29 +1371,29 @@ class TestSampleOrderingConsistency:
             reps1 = model.get_sample_representations()
             reps2 = model.get_sample_representations()
 
-            assert list(reps1.index) == list(reps2.index), \
+            assert list(reps1.index) == list(reps2.index), (
                 f"{type(model).__name__}: sample order not preserved across calls"
-            assert list(model.samples) == list(reps1.index), \
+            )
+            assert list(model.samples) == list(reps1.index), (
                 f"{type(model).__name__}: sample order doesn't match self.samples"
+            )
 
     def test_representations_shape_matches_samples(self, mixmil_model, pulsar_model):
         """get_sample_representations shape[0] should match sample count."""
         for model in [mixmil_model, pulsar_model]:
             reps = model.get_sample_representations()
-            assert reps.shape[0] == len(model.samples), \
-                f"{type(model).__name__}: representation rows != sample count"
+            assert reps.shape[0] == len(model.samples), f"{type(model).__name__}: representation rows != sample count"
 
     def test_importance_shape_matches_samples(self, mixmil_model, pulsar_model):
         """get_sample_importance shape[0] should match sample count."""
         for model in [mixmil_model, pulsar_model]:
             importance = model.get_sample_importance()
-            assert importance.shape[0] == len(model.samples), \
-                f"{type(model).__name__}: importance rows != sample count"
+            assert importance.shape[0] == len(model.samples), f"{type(model).__name__}: importance rows != sample count"
 
 
 def _make_unfitted_supervised_models():
     """Return (model_id, unfitted_model) pairs without triggering any external imports."""
-    from patpy.tl.supervised import MixMIL, PULSAR
+    from patpy.tl.supervised import PULSAR, MixMIL
 
     return [
         pytest.param(

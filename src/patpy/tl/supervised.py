@@ -120,12 +120,12 @@ class SupervisedSampleMethod(BaseSampleMethod):
         """
         self._check_fitted()
         if label not in self.label_keys:
-            raise ValueError(f"`label='{label}'` is not found in model label keys. Please train the model to predict the label first")
+            raise ValueError(
+                f"`label='{label}'` is not found in model label keys. Please train the model to predict the label first"
+            )
 
         if label not in self._probes:
-            raise RuntimeError(
-                f"No probe fitted for label '{label}'. Call fine_tune() first."
-            )
+            raise RuntimeError(f"No probe fitted for label '{label}'. Call fine_tune() first.")
 
         task = self.tasks[self.label_keys.index(label)]
         rep = self.get_sample_representations()
@@ -133,7 +133,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
         probe = self._probes[label]
 
         if task == "classification":
-            proba = probe.predict_proba(X)          # (n_donors, n_classes)
+            proba = probe.predict_proba(X)  # (n_donors, n_classes)
             classes = probe.classes_
             # Create probability columns for each class
             prob_cols = {f"prob_{c}": proba[:, i] for i, c in enumerate(classes)}
@@ -144,7 +144,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
             return result
         else:
             return pd.Series(probe.predict(X), index=self.samples, name=label)
-        
+
     def fine_tune(self, labels: list[str] | str, tasks: list[_PREDICTION_TASKS] | _PREDICTION_TASKS, **kwargs):
         """Fine-tune / continue training the model on new or existing labels.
 
@@ -177,9 +177,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
         self._check_adata_loaded()
 
         if len(labels) != len(tasks):
-            raise ValueError(
-                f"labels (len={len(labels)}) and tasks (len={len(tasks)}) must have the same length."
-            )
+            raise ValueError(f"labels (len={len(labels)}) and tasks (len={len(tasks)}) must have the same length.")
 
         for label in labels:
             if label not in self.adata.obs.columns:
@@ -195,12 +193,12 @@ class SupervisedSampleMethod(BaseSampleMethod):
         self.adata.uns.pop("supervised_sample_importance", None)
 
         try:
-            rep = self.get_sample_representations()   # requires subclass to implement
-        except NotImplementedError:
+            rep = self.get_sample_representations()  # requires subclass to implement
+        except NotImplementedError as e:
             raise NotImplementedError(
                 f"{type(self).__name__} does not provide sample representations. "
                 "fine_tune() requires get_sample_representations() to be implemented."
-            )
+            ) from e
 
         X = rep.values
 
@@ -212,7 +210,6 @@ class SupervisedSampleMethod(BaseSampleMethod):
                 probe = Ridge(alpha=0.1)
             probe.fit(X, y)
             self._probes[label] = probe
-
 
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
         """Return per-donor prediction importances / posterior means.
@@ -434,11 +431,6 @@ class MixMIL(SupervisedSampleMethod):
         train: bool = True
             If True, train the model on loaded data for tasks and labels set at initialisation
         """
-        try:
-            from mixmil import MixMIL as _MixMIL
-        except ImportError as e:
-            raise ImportError("mixmil is required. Install with: pip install mixmil") from e
-
         super().prepare_anndata(adata)
 
         if self.layer not in adata.obsm and self.layer not in adata.layers and self.layer not in ("X", None):
@@ -450,7 +442,14 @@ class MixMIL(SupervisedSampleMethod):
         if train:
             self.fine_tune(self.label_keys, self.tasks, **kwargs)
 
-    def fine_tune(self, labels: list[str] | str, tasks: list[_PREDICTION_TASKS] | _PREDICTION_TASKS, n_epochs: int | None = None, lr: float | None = None, **kwargs) -> None:
+    def fine_tune(
+        self,
+        labels: list[str] | str,
+        tasks: list[_PREDICTION_TASKS] | _PREDICTION_TASKS,
+        n_epochs: int | None = None,
+        lr: float | None = None,
+        **kwargs,
+    ) -> None:
         """Fine-tune or continue training MixMIL on new or existing labels.
 
         The model is extended to predict the given labels (which may be a superset of existing labels).
@@ -476,8 +475,12 @@ class MixMIL(SupervisedSampleMethod):
             If adding regression/ranking to a model trained only on classification
             (MixMIL currently supports a single task type).
         """
-        from mixmil import MixMIL as _MixMIL
         import torch
+
+        try:
+            from mixmil import MixMIL as _MixMIL
+        except ImportError as e:
+            raise ImportError("mixmil is required. Install with: pip install mixmil") from e
 
         # Convert strings to lists
         labels = [labels] if isinstance(labels, str) else labels
@@ -493,7 +496,7 @@ class MixMIL(SupervisedSampleMethod):
                 raise ValueError(f"label '{label}' not found in adata.obs.columns.")
 
         # Validate task compatibility: all tasks should be the same (MixMIL limitation)
-        all_tasks = self.tasks + [t for l, t in zip(labels, tasks) if l not in self.label_keys]
+        all_tasks = self.tasks + [t for l, t in zip(labels, tasks, strict=False) if l not in self.label_keys]
         if len(set(all_tasks)) > 1:
             raise ValueError(
                 f"MixMIL supports a single task type per model. "
@@ -560,7 +563,7 @@ class MixMIL(SupervisedSampleMethod):
 
         n_epochs_use = n_epochs if n_epochs is not None else self.n_epochs
         lr_use = lr if lr is not None else self.lr
-        
+
         new_history = self._model.train(
             Xs,
             F,
@@ -594,7 +597,7 @@ class MixMIL(SupervisedSampleMethod):
         Examples
         --------
         >>> preds = model.predict("disease")  # classification → DataFrame
-        >>> ages = model.predict("age")        # regression → Series
+        >>> ages = model.predict("age")  # regression → Series
         """
         import torch
 
@@ -622,7 +625,7 @@ class MixMIL(SupervisedSampleMethod):
         else:
             # Calculate cumulative dimensions
             dim_start = 0
-            for i, k in enumerate(self.label_keys):
+            for k in self.label_keys:
                 if k == label:
                     break
                 dim_start += self._multiclass_info[k][0]
@@ -635,6 +638,7 @@ class MixMIL(SupervisedSampleMethod):
         if task == "classification":
             # Apply softmax to get probabilities
             import scipy.special
+
             if label_logits.shape[1] == 1:
                 # Binary: apply sigmoid to single logit
                 proba_positive = scipy.special.expit(label_logits.ravel())
