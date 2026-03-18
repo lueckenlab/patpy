@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import warnings
 from collections.abc import Callable
 
@@ -5,17 +7,16 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import scipy
-import seaborn as sns
+from pandas.api.types import is_numeric_dtype
 from scipy.stats import pearsonr, spearmanr
 from statsmodels.stats.multitest import multipletests
 
 from patpy.pp import (
-    extract_metadata,
-    fill_nan_distances,
     filter_small_samples,
     is_count_data,
     subsample,
 )
+from patpy.tl._base_sample_method import BaseSampleMethod
 from patpy.tl._types import _EVALUATION_METHODS
 
 VALID_AGGREGATES = {"mean": np.mean, "median": np.median, "sum": np.sum}
@@ -108,15 +109,6 @@ def _remove_negative_distances(distances: np.ndarray) -> np.ndarray:
     return np.maximum(distances, 0)
 
 
-def create_colormap(df, col, palette="Spectral"):
-    """Create a color map for the unique values of the column `col` of data frame `df`"""
-    unique_values = df[col].unique()
-
-    colors = sns.color_palette(palette, n_colors=len(unique_values))
-    color_map = dict(zip(unique_values, colors, strict=False))
-    return df[col].map(color_map)
-
-
 def describe_metadata(metadata: pd.DataFrame) -> None:
     """Prints the basic information about the metadata and tries to guess column types
 
@@ -125,8 +117,6 @@ def describe_metadata(metadata: pd.DataFrame) -> None:
     metadata : pd.DataFrame
         File with metadata for the samples. Or any pandas data frame you want to describe
     """
-    from pandas.api.types import is_numeric_dtype
-
     n = metadata.shape[0]
 
     numeric_cols = []
@@ -446,178 +436,52 @@ def correlate_cell_type_expression(
     return expression_correlation_df
 
 
-class SampleRepresentationMethod:
+class SampleRepresentationMethod(BaseSampleMethod):
     """Base class for sample representation methods"""
 
     DISTANCES_UNS_KEY = "X_method-name_distances"
 
-    def _get_data(self):
-        """Extract data from correct layer specified by `self.layer`"""
-        if self.adata is None:
-            raise RuntimeError("adata is not yet set. Please, run prepare_anndata() method first")
-
-        if self.layer is None or self.layer == "X":
-            # Assuming, data is stored in .X
-            warnings.warn("Using data from adata.X", stacklevel=1)
-            return self.adata.X
-
-        elif self.adata.obsm and self.layer in self.adata.obsm:
-            warnings.warn(f"Using data from key {self.layer} of adata.obsm", stacklevel=1)
-            return self.adata.obsm[self.layer]
-
-        elif self.adata.layers and self.layer in self.adata.layers:
-            warnings.warn(f"Using data from key {self.layer} of adata.layers", stacklevel=1)
-            return self.adata.layers[self.layer]
-
-        else:
-            raise ValueError(f"Cannot find layer {self.layer} in adata. Please make sure it is specified correctly")
-
-    def _move_layer_to_X(self) -> sc.AnnData:
-        """Some models require data to be stored in `adata.X`. This method moves `self.layer` to `.X`"""
-        if self.layer == "X" or self.layer is None:
-            # The data is already in correct slot
-            return self.adata
-
-        # getting only those layers with the same shape of the new X matrix from adata.layers[self.layer] to be copied in the new anndata below
-        filtered_layers = {
-            key: np.copy(layer)
-            for key, layer in self.adata.layers.items()
-            if key != self.layer and layer.shape == self.adata.layers[self.layer].shape
-        }
-        # Copy everything except from .var* to new adata, with correct layer in X
-        new_adata = sc.AnnData(
-            X=self._get_data(),
-            obs=self.adata.obs,
-            obsm=self.adata.obsm,
-            layers=filtered_layers,
-            uns=self.adata.uns,
-            obsp=self.adata.obsp,
-        )
-        new_adata.obsm["X_old"] = self.adata.X
-
-        return new_adata
-
-    def _extract_metadata(self, columns) -> pd.DataFrame:
-        """Return dataframe with requested `columns` in the correct rows order"""
-        return extract_metadata(self.adata, self.sample_key, columns, samples=self.samples)
-
     def __init__(self, sample_key, cell_group_key, layer=None, seed=67):
-        """Initialize the model
-
-        Parameters
-        ----------
-        sample_key : str
-            Column in .obs containing sample IDs
-        cell_group_key : str
-            Column in .obs containing cell group key (for example, cell type)
-        layer : Optional[str] = None
-            What to use as data in a model. If None or "X", `adata.X` is used. Otherwise, the corresponding key from `adata.obsm` will be used
-        seed : int = 67
-            Number to initialize pseudorandom generator
-        """
-        self.sample_key = sample_key
-        self.cell_group_key = cell_group_key
-        self.layer = layer
-        self.seed = seed
-
-        self.adata = None
-        self.samples = None
-        self.cell_groups = None
-        self.embeddings = {}
+        super().__init__(
+            sample_key=sample_key,
+            cell_group_key=cell_group_key,
+            layer=layer,
+            seed=seed,
+        )
         self.samples_adata = None
 
-    # fit-like method: save data and process it
     def prepare_anndata(self, adata):
-        """fit-like method: prepare adata for the analysis"""
-        self.adata = adata
+        """Prepare *adata* for analysis.
 
-        self.samples = self.adata.obs[self.sample_key].unique()
-
-        if self.cell_group_key is not None and self.cell_group_key in self.adata.obs:
-            self.cell_groups = self.adata.obs[self.cell_group_key].unique()
+        Calls :meth:`BaseSampleMethod.prepare_anndata` and checks that the
+        model is not already fitted (to avoid silent re-use of stale state).
+        Subclasses must call ``super().prepare_anndata(adata)`` first.
+        """
+        super().prepare_anndata(adata)
 
     def calculate_distance_matrix(self, force: bool = False):
         """Transform-like method: returns samples distances matrix"""
+        self._check_adata_loaded()
         if self.DISTANCES_UNS_KEY in self.adata.uns and not force:
             return self.adata.uns[self.DISTANCES_UNS_KEY]
 
     def plot_clustermap(self, metadata_cols=None, figsize=(10, 12), *args, **kwargs):
-        """Plot a clusterized heatmap of distances"""
-        import scipy.cluster.hierarchy as hc
-        import scipy.spatial as sp
-
-        distances = self.calculate_distance_matrix(*args, **kwargs)
-        linkage = hc.linkage(sp.distance.squareform(distances), method="average")
-
-        if not metadata_cols:
-            return sns.clustermap(distances, row_linkage=linkage, col_linkage=linkage)
-
-        metadata = self._extract_metadata(columns=metadata_cols)
-
-        annotation_colors = {}
-
-        for col in metadata_cols:
-            annotation_colors[col] = create_colormap(metadata, col)
-
-        annotation_colors = pd.DataFrame(annotation_colors)
-
-        return sns.clustermap(
-            pd.DataFrame(distances, index=annotation_colors.index, columns=annotation_colors.index),
-            col_colors=annotation_colors,
-            figsize=figsize,
-        )
-
-    def embed(self, method="UMAP", n_jobs: int = -1, verbose: bool = False):
-        """Convert distances to embedding of the samples
+        """Plot a hierarchically-clustered heat-map of the distance matrix.
 
         Parameters
         ----------
-        method : str = "TSNE
-            Method to use for embedding. Currently, "TSNE" and "MDS" are supported
-        n_jobs : int = 1
-            Number of threads to use for computation. Use -1 to run on all processors
-        verbose : bool = False
-            If True, print logging information during the computation
+        metadata_cols : list[str] or None
+            ``.obs`` columns to annotate the heat-map.
+        figsize : tuple
+        *args, **kwargs
+            Passed to :meth:`calculate_distance_matrix`.
 
         Returns
         -------
-        coordinates : array-like
-            Coordinates of samples in the embedding space. 2D for TSNE and MDS
+        seaborn.matrix.ClusterGrid
         """
-        distances = self.adata.uns[self.DISTANCES_UNS_KEY]
-        distances = fill_nan_distances(distances)
-
-        if method == "MDS":
-            from sklearn.manifold import MDS
-
-            mds = MDS(
-                n_components=2, dissimilarity="precomputed", verbose=verbose, n_jobs=n_jobs, random_state=self.seed
-            )
-            coordinates = mds.fit_transform(distances)
-        elif method == "TSNE":
-            from openTSNE import TSNE
-
-            tsne = TSNE(
-                n_components=2,
-                metric="precomputed",
-                neighbors="exact",
-                n_jobs=n_jobs,
-                random_state=self.seed,
-                verbose=verbose,
-                initialization="spectral",  # pca doesn't work with precomputed distances
-            )
-            coordinates = tsne.fit(distances)
-        elif method == "UMAP":
-            from umap import UMAP
-
-            umap = UMAP(n_components=2, metric="precomputed", random_state=self.seed, verbose=verbose, n_jobs=n_jobs)
-            coordinates = umap.fit_transform(distances)
-
-        else:
-            raise ValueError(f'Method {method} is not supported, please use one of ["MDS", "TSNE", "UMAP"]')
-
-        self.embeddings[method] = coordinates
-        return coordinates
+        distances = self.calculate_distance_matrix(*args, **kwargs)
+        return super().plot_clustermap(distances, metadata_cols=metadata_cols, figsize=figsize)
 
     def to_adata(self, metadata: pd.DataFrame = None, *args, **kwargs):
         """Convert samples data to AnnData object
@@ -654,64 +518,6 @@ class SampleRepresentationMethod:
             self.samples_adata.obsm["X_" + method.lower()] = embedding
 
         return self.samples_adata
-
-    def plot_embedding(
-        self,
-        method="UMAP",
-        metadata_cols=None,
-        continuous_palette="viridis",
-        categorical_palette="tab10",
-        na_color="lightgray",
-        axes=None,
-    ):
-        """Plot embedding of samples colored by `metadata_cols`"""
-        import matplotlib.pyplot as plt
-
-        if method not in self.embeddings:
-            self.embed(method=method)
-
-        embedding_df = pd.DataFrame(self.embeddings[method], columns=[f"{method}_0", f"{method}_1"], index=self.samples)
-
-        if metadata_cols is None:
-            # Simply plot the embedding
-            if axes is None:
-                axes = sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1")
-            else:
-                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", ax=axes)
-        else:
-            # Colorize samples by metadata
-            metadata_df = self._extract_metadata(columns=metadata_cols)
-            embedding_df = pd.concat([embedding_df, metadata_df], axis=1)
-
-            if axes is None:
-                _, axes = plt.subplots(
-                    nrows=1, ncols=len(metadata_cols), sharey=True, figsize=(len(metadata_cols) * 5, 5)
-                )
-            else:
-                axes = axes.flatten() if isinstance(axes, np.ndarray) else axes
-
-            for i, col in enumerate(metadata_cols):
-                n_unique_values = len(np.unique(metadata_df[col]))
-                if n_unique_values > 5:
-                    palette = continuous_palette
-                else:
-                    palette = categorical_palette
-
-                # If there is only 1 metadata column, axes is not subscriptable
-                ax = axes[i] if len(metadata_cols) > 1 else axes
-
-                # Plot points with missing values in metadata
-                sns.scatterplot(
-                    embedding_df[metadata_df[col].isna()],
-                    x=f"{method}_0",
-                    y=f"{method}_1",
-                    ax=ax,
-                    color=na_color,
-                )
-                # Plot points with known metadata
-                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", hue=col, ax=ax, palette=palette)
-
-        return axes
 
     def evaluate_representation(
         self,
@@ -1002,6 +808,7 @@ class MrVI(SampleRepresentationMethod):
         self.model.train(max_epochs=self.max_epochs)
 
         self.samples = self.model.sample_order
+        self._fitted = True
 
     def calculate_distance_matrix(
         self,
@@ -1135,6 +942,7 @@ class WassersteinTSNE(SampleRepresentationMethod):
 
         self.model = WT.Dataset2Gaussians(data)
         self.distances_model = WT.GaussianWassersteinDistance(self.model)
+        self._fitted = True
 
     def calculate_distance_matrix(self, covariance_weight=0.5, force: bool = False):
         r"""Return sample by sample distances matrix
@@ -1152,6 +960,7 @@ class WassersteinTSNE(SampleRepresentationMethod):
         -------
         Matrix of distances between samples
         """
+        super().calculate_distance_matrix()
         is_correct_key_in_uns = (
             "wasserstein_covariance_weight" in self.adata.uns
             and self.adata.uns["wasserstein_covariance_weight"] == covariance_weight
@@ -1476,6 +1285,7 @@ class SCPoli(SampleRepresentationMethod):
         )
 
         self.sample_representation = self.model.get_conditional_embeddings().X
+        self._fitted = True
 
     def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between scPoli sample embeddings"""
@@ -1555,6 +1365,7 @@ class PhEMD(SampleRepresentationMethod):
         self.samples = sc_labels_df.columns
         self.encoded_labels = sc_labels_df.to_numpy()
         self.encoded_labels = self.encoded_labels / self.encoded_labels.sum(axis=0)
+        self._fitted = True
 
     def calculate_distance_matrix(self, force: bool = False, n_jobs=-1):
         """Calculate distances between samples"""
@@ -1610,6 +1421,7 @@ class DiffusionEarthMoverDistance(SampleRepresentationMethod):
         self.adata.obsp["connectivities"] = make_matrix_symmetric(self.adata.obsp["connectivities"])
 
         self.model = DiffusionCheb(n_scales=self.n_scales)
+        self._fitted = True
 
     def calculate_distance_matrix(self, force: bool = False):
         """Calculate distances between samples"""
@@ -1811,6 +1623,7 @@ class MOFA(SampleRepresentationMethod):
         ent.run()
 
         self.model = ent.model
+        self._fitted = True
 
     def calculate_distance_matrix(self, force=False, store_weights=False, dist="euclidean"):
         """
@@ -1891,6 +1704,7 @@ class GloScope(SampleRepresentationMethod):
         # Load the R packages
         robjects.r("library(GloScope)")
         importr("BiocParallel")
+        self._fitted = True
 
     def calculate_distance_matrix(self, force: bool = False):
         """Calculate distances between samples represented as GloScope embeddings"""
