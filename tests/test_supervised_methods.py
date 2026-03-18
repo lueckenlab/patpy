@@ -1434,9 +1434,7 @@ class TestEdgeCases:
 
         # obsm covariates must be donor-level (n_donors × d), but MixMIL
         # uses obsm directly so this tests the code path.
-        basic_adata.obsm["X_cov"] = np.random.default_rng(0).random(
-            (N_CELLS, 3)
-        ).astype("float32")
+        basic_adata.obsm["X_cov"] = np.random.default_rng(0).random((N_CELLS, 3)).astype("float32")
         model = MixMIL(
             sample_key="donor_id",
             label_keys=["disease"],
