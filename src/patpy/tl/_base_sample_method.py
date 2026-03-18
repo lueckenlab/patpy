@@ -143,7 +143,9 @@ class BaseSampleMethod:
             raise RuntimeError(f"{type(self).__name__} is not fitted. Call prepare_anndata() first.")
 
     def calculate_distance_matrix(self):
+        """Compute a sample-by-sample distance matrix. Subclasses must override."""
         self._check_fitted()
+        raise NotImplementedError(f"{type(self).__name__} must implement calculate_distance_matrix().")
 
     def embed(
         self,
@@ -332,7 +334,7 @@ class BaseSampleMethod:
 
     def fit_linear_probe(
         self,
-        target: str | None = None,
+        target: str,
         task: Literal["classification", "regression"] = "classification",
         test_size: float = 0.2,
         random_state: int = 42,
@@ -343,8 +345,7 @@ class BaseSampleMethod:
         Parameters
         ----------
         target
-            Column in ``adata.obs`` to predict. Defaults to
-            ``label_keys[0]``.
+            Column in ``self.adata.obs`` to predict.
         task
             ``"classification"`` or ``"regression"``.
         test_size
@@ -364,23 +365,28 @@ class BaseSampleMethod:
         Returns
         -------
         dict
-            Keys: ``"model"``, ``"test_sample_labels"``, ``"y_test"``,
-            ``"y_pred"``.
+            Keys: ``"model"``, ``"test_sample_labels"``,
+            ``"{target}_test"``, ``"{target}_pred"``.
 
             For classification: additionally ``"accuracy"`` and ``"f1"``.
             For regression: additionally ``"r2"`` and ``"pearson"``.
 
         Examples
         --------
-        >>> result = model.fit_linear_probe(task="regression")
+        >>> result = model.fit_linear_probe(target="age", task="regression")
         >>> print(f"Pearson r = {result['pearson']:.3f}")
         """
         self._check_adata_loaded()
         self._check_fitted()
 
-        target = target or self.label_keys[0]
+        if target not in self.adata.obs.columns:
+            raise ValueError(f"target='{target}' not found in adata.obs.")
+
         rep = self.sample_representation
         all_labels = rep.index
+
+        # Extract target values from adata.obs (works for all sample methods)
+        target_values = self._extract_metadata(columns=[target])
 
         if test_sample_labels is not None:
             test_idx = list(test_sample_labels)
@@ -388,7 +394,7 @@ class BaseSampleMethod:
         else:
             from sklearn.model_selection import train_test_split
 
-            y_all = self.labels.loc[all_labels, target].values
+            y_all = target_values.loc[all_labels, target].values
             train_idx, test_idx = train_test_split(
                 list(all_labels),
                 test_size=test_size,
@@ -399,8 +405,8 @@ class BaseSampleMethod:
         self.test_sample_labels = test_idx
         X_train = rep.loc[train_idx].values
         X_test = rep.loc[test_idx].values
-        y_train = self.labels.loc[train_idx, target].values
-        y_test = self.labels.loc[test_idx, target].values
+        y_train = target_values.loc[train_idx, target].values
+        y_test = target_values.loc[test_idx, target].values
 
         if task == "classification":
             from sklearn.linear_model import LogisticRegression
