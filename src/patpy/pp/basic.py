@@ -152,7 +152,7 @@ def extract_metadata(adata: sc.AnnData, sample_key: str, columns: list, samples:
             "Metadata contains multiple values for the same sample, taking only the first occurence", stacklevel=2
         )
         metadata = metadata[~metadata.index.duplicated(keep="first")]
-    
+
     return metadata.loc[samples]
 
 
