@@ -69,11 +69,11 @@ optional-dependencies.gloscope-py-gpu = [
   "cuml",
   "cupy",
 ]
-optional-dependencies.mixmil = [
-  "mixmil>=0.1.2",
-]
 optional-dependencies.helical = [
   "helical>=1.8.3",
+]
+optional-dependencies.mixmil = [
+  "mixmil>=0.1.2",
 ]
 optional-dependencies.mrvi = [
   "scvi-tools>=1.2",
@@ -96,7 +96,6 @@ optional-dependencies.test = [
 optional-dependencies.wassersteintsne = [
   "wassersteintsne>=1.1",
 ]
-
 # https://docs.pypi.org/project_metadata/#project-urls
 urls.Documentation = "https://patpy.readthedocs.io/"
 urls.Homepage = "https://github.com/lueckenlab/patpy"
