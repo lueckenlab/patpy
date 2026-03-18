@@ -96,6 +96,45 @@ class SupervisedSampleMethod(BaseSampleMethod):
 
         self.labels = self._extract_metadata(self.label_keys)
 
+    def predict(self, label: str, task: _PREDICTION_TASKS):
+        """Predict `label` for every sample in `self.samples`
+        
+        Parameters
+        ----------
+        label: str
+            Sample label to predict, such as "disease" or "age".
+            Must be in `self.label_keys` either from initialisation or by
+            calling a fine-tuning method in prior to running prediction
+        task: one of ["classification", "regression", "ranking"]
+            Prediction task:
+            - "classification": predict one of categorical labels
+            - "regression": predict a continuous number
+            - "ranking": predict a rank. Might not be supported by some methods
+
+        Returns
+        -------
+        predictions: np.array
+            Array of predictions
+        """
+        if label not in self.label_keys:
+            raise ValueError(f"`label=f{label}` is not found in model label keys. Please train the model to predict the label first")
+        
+    def fine_tune(self, labels: list[str], tasks: list[_PREDICTION_TASKS], **kwargs):
+        """Fine-tune base model to predict `labels`
+        
+        Parameters
+        ----------
+        labels: list[str]
+            Sample labels to predict, for example ["disease", "age"].
+        task: list of ["classification", "regression", "ranking"]
+            Prediction task:
+            - "classification": predict one of categorical labels
+            - "regression": predict a continuous number
+            - "ranking": predict a rank. Might not be supported by some methods
+        """
+        raise NotImplementedError()
+
+
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
         """Return per-donor prediction importances / posterior means.
 
