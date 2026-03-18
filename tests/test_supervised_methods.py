@@ -94,6 +94,57 @@ def mixmil_model_multilabel(basic_adata):
 
 
 @pytest.fixture
+def basic_adata_string_labels(basic_adata):
+    """AnnData with multiclass string labels (3 classes)."""
+    adata = basic_adata.copy()
+    # Convert disease to string labels
+    disease_mapping = {0: "healthy", 1: "diseased"}
+    adata.obs["disease_str"] = adata.obs["disease"].map(disease_mapping)
+
+    # Add a 3-class string label
+    disease_classes = ["healthy", "diseased", "pre-disease"]
+    donor_disease_multi = {
+        d: disease_classes[i % len(disease_classes)]
+        for i, d in enumerate(adata.obs["donor_id"].unique())
+    }
+    adata.obs["disease_multi"] = [donor_disease_multi[d] for d in adata.obs["donor_id"]]
+
+    return adata
+
+
+@pytest.fixture
+def mixmil_model_string_labels(basic_adata_string_labels):
+    """MixMIL trained on string labels (binary)."""
+    from patpy.tl.supervised import MixMIL
+
+    model = MixMIL(
+        sample_key="donor_id",
+        label_keys=["disease_str"],
+        tasks=["classification"],
+        layer="X_pca",
+        n_epochs=2,
+    )
+    model.prepare_anndata(basic_adata_string_labels)
+    return model
+
+
+@pytest.fixture
+def mixmil_model_multiclass_strings(basic_adata_string_labels):
+    """MixMIL trained on 3-class string labels."""
+    from patpy.tl.supervised import MixMIL
+
+    model = MixMIL(
+        sample_key="donor_id",
+        label_keys=["disease_multi"],
+        tasks=["classification"],
+        layer="X_pca",
+        n_epochs=2,
+    )
+    model.prepare_anndata(basic_adata_string_labels)
+    return model
+
+
+@pytest.fixture
 def pulsar_adata(basic_adata):
     basic_adata.obsm["X_uce"] = np.random.default_rng(1).random((N_CELLS, 1280)).astype("float32")
     return basic_adata
@@ -519,6 +570,225 @@ class TestMixMIL:
     def test_multilabel_get_cell_importance_invalid_label_raises(self, mixmil_model_multilabel):
         with pytest.raises(ValueError, match="label_keys"):
             mixmil_model_multilabel.get_cell_importance(label="nonexistent")
+
+    # ------------------------------------------------------------------
+    # predict method
+    # ------------------------------------------------------------------
+
+    def test_predict_classification_returns_dataframe(self, mixmil_model):
+        pred = mixmil_model.predict("disease")
+        assert isinstance(pred, pd.DataFrame)
+
+    def test_predict_classification_has_probability_columns(self, mixmil_model):
+        pred = mixmil_model.predict("disease")
+        assert "prob_0" in pred.columns
+        assert "prob_1" in pred.columns
+        assert "y_pred" in pred.columns
+
+    def test_predict_classification_shape(self, mixmil_model):
+        pred = mixmil_model.predict("disease")
+        assert pred.shape[0] == N_DONORS
+
+    def test_predict_classification_probabilities_sum_to_one(self, mixmil_model):
+        pred = mixmil_model.predict("disease")
+        prob_sum = pred[["prob_0", "prob_1"]].sum(axis=1)
+        assert np.allclose(prob_sum, 1.0)
+
+    def test_predict_classification_indexed_by_donor(self, mixmil_model):
+        pred = mixmil_model.predict("disease")
+        assert list(pred.index) == list(mixmil_model.samples)
+
+    def test_predict_invalid_label_raises(self, mixmil_model):
+        with pytest.raises(ValueError, match="not found in model label keys"):
+            mixmil_model.predict("nonexistent_label")
+
+    def test_predict_raises_on_unfitted_model(self, basic_adata):
+        from patpy.tl.supervised import MixMIL
+
+        model = MixMIL(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            layer="X_pca",
+            n_epochs=2,
+        )
+        with pytest.raises(RuntimeError, match="prepare_anndata"):
+            model.predict("disease")
+
+    # ------------------------------------------------------------------
+    # fine_tune method
+    # ------------------------------------------------------------------
+
+    def test_fine_tune_extends_label_keys(self, basic_adata):
+        from patpy.tl.supervised import MixMIL
+
+        model = MixMIL(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            layer="X_pca",
+            n_epochs=2,
+        )
+        model.prepare_anndata(basic_adata)
+        original_label = model.label_keys.copy()
+
+        # Add another label
+        model.fine_tune(["disease"], ["classification"], n_epochs=1)
+        # Since "disease" is already there, it should not change
+        assert model.label_keys == original_label
+
+    def test_fine_tune_adds_new_label(self, mixmil_model, basic_adata):
+        assert "disease" in mixmil_model.label_keys
+        assert "age" not in mixmil_model.label_keys
+
+        # Add age as a new label (but skip it since it's regression)
+        # Instead, create a new binary label
+        basic_adata.obs["disease2"] = (basic_adata.obs["disease"] == 0).astype(int)
+        mixmil_model.fine_tune(["disease2"], ["classification"], n_epochs=1)
+
+        assert "disease" in mixmil_model.label_keys
+        assert "disease2" in mixmil_model.label_keys
+
+    def test_fine_tune_preserves_predict_on_old_labels(self, mixmil_model, basic_adata):
+        basic_adata.obs["disease2"] = (basic_adata.obs["disease"] == 0).astype(int)
+
+        pred_before = mixmil_model.predict("disease")
+
+        mixmil_model.fine_tune(["disease2"], ["classification"], n_epochs=1)
+        pred_after = mixmil_model.predict("disease")
+
+        # Predictions should still work (though values may differ due to retraining)
+        assert pred_after.shape == pred_before.shape
+
+    def test_fine_tune_rejects_mixed_task_types(self, mixmil_model):
+        with pytest.raises(ValueError, match="single task type"):
+            mixmil_model.fine_tune(["age"], ["regression"], n_epochs=1)
+
+    def test_fine_tune_clears_cache(self, mixmil_model):
+        # Get importance before fine-tune
+        mixmil_model.get_sample_importance()
+        assert "supervised_sample_importance" in mixmil_model.adata.uns
+
+        # Fine-tune should clear the cache
+        mixmil_model.fine_tune(["disease"], ["classification"], n_epochs=1)
+        assert "supervised_sample_importance" not in mixmil_model.adata.uns
+
+    def test_fine_tune_raises_on_missing_label(self, mixmil_model):
+        with pytest.raises(ValueError, match="not found in adata.obs.columns"):
+            mixmil_model.fine_tune(["nonexistent_label"], ["classification"])
+
+    # ------------------------------------------------------------------
+    # String labels and multiclass classification
+    # ------------------------------------------------------------------
+
+    def test_predict_binary_string_labels_creates_mappings(self, mixmil_model_string_labels):
+        """Test that string labels are stored in _label_mappings."""
+        assert "disease_str" in mixmil_model_string_labels._label_mappings
+        classes, encode_dict = mixmil_model_string_labels._label_mappings["disease_str"]
+        assert set(classes) == {"healthy", "diseased"}
+        # Classes are sorted alphabetically, so diseased comes before healthy
+        assert encode_dict == {"diseased": 0, "healthy": 1}
+
+    def test_predict_binary_string_labels_returns_class_names(self, mixmil_model_string_labels):
+        """Test that y_pred contains original string class names, not indices."""
+        pred = mixmil_model_string_labels.predict("disease_str")
+        assert set(pred["y_pred"].unique()).issubset({"healthy", "diseased"})
+        # Should not contain indices like 0 or 1
+        assert not pred["y_pred"].isin([0, 1]).all()
+
+    def test_predict_binary_string_labels_prob_columns(self, mixmil_model_string_labels):
+        """Test that probability columns use class names."""
+        pred = mixmil_model_string_labels.predict("disease_str")
+        expected_cols = {"prob_healthy", "prob_diseased", "y_pred"}
+        assert set(pred.columns) == expected_cols
+
+    def test_predict_multiclass_string_labels_creates_mappings(self, mixmil_model_multiclass_strings):
+        """Test that 3-class string labels are stored in _label_mappings."""
+        assert "disease_multi" in mixmil_model_multiclass_strings._label_mappings
+        classes, encode_dict = mixmil_model_multiclass_strings._label_mappings["disease_multi"]
+        assert set(classes) == {"healthy", "diseased", "pre-disease"}
+        assert len(encode_dict) == 3
+
+    def test_predict_multiclass_string_labels_returns_class_names(self, mixmil_model_multiclass_strings):
+        """Test that y_pred contains original string class names for multiclass."""
+        pred = mixmil_model_multiclass_strings.predict("disease_multi")
+        assert set(pred["y_pred"].unique()).issubset({"healthy", "diseased", "pre-disease"})
+
+    def test_predict_multiclass_string_labels_prob_columns(self, mixmil_model_multiclass_strings):
+        """Test that probability columns use class names for multiclass."""
+        pred = mixmil_model_multiclass_strings.predict("disease_multi")
+        prob_cols = {c for c in pred.columns if c.startswith("prob_")}
+        expected_cols = {"prob_healthy", "prob_diseased", "prob_pre-disease"}
+        assert prob_cols == expected_cols
+
+    def test_predict_multiclass_string_labels_probabilities_sum(self, mixmil_model_multiclass_strings):
+        """Test that probabilities sum to 1 for multiclass string labels."""
+        pred = mixmil_model_multiclass_strings.predict("disease_multi")
+        prob_cols = [c for c in pred.columns if c.startswith("prob_")]
+        prob_sum = pred[prob_cols].sum(axis=1)
+        assert np.allclose(prob_sum, 1.0)
+
+    def test_fine_tune_preserves_string_label_mappings(self, basic_adata_string_labels):
+        """Test that mappings are preserved when fine-tuning with same label."""
+        from patpy.tl.supervised import MixMIL
+
+        model = MixMIL(
+            sample_key="donor_id",
+            label_keys=["disease_str"],
+            tasks=["classification"],
+            layer="X_pca",
+            n_epochs=2,
+        )
+        model.prepare_anndata(basic_adata_string_labels)
+
+        # Get initial mapping
+        classes_before, _ = model._label_mappings["disease_str"]
+
+        # Fine-tune with same label
+        model.fine_tune(["disease_str"], ["classification"], n_epochs=1)
+
+        # Mapping should be unchanged
+        classes_after, _ = model._label_mappings["disease_str"]
+        assert classes_before == classes_after
+
+    def test_fine_tune_adds_string_label_mapping(self, basic_adata_string_labels):
+        """Test that new string label mappings are created during fine_tune."""
+        from patpy.tl.supervised import MixMIL
+
+        model = MixMIL(
+            sample_key="donor_id",
+            label_keys=["disease_str"],
+            tasks=["classification"],
+            layer="X_pca",
+            n_epochs=2,
+        )
+        model.prepare_anndata(basic_adata_string_labels)
+
+        # Fine-tune with a new string label
+        model.fine_tune(["disease_multi"], ["classification"], n_epochs=1)
+
+        # Both mappings should exist
+        assert "disease_str" in model._label_mappings
+        assert "disease_multi" in model._label_mappings
+
+        # New mapping should be created
+        classes, _ = model._label_mappings["disease_multi"]
+        assert set(classes) == {"healthy", "diseased", "pre-disease"}
+
+    def test_training_history_extends_on_fine_tune(self, mixmil_model, basic_adata):
+        """Test that training history accumulates across fine_tune calls."""
+        initial_history_len = len(mixmil_model._history)
+        assert initial_history_len > 0
+
+        # Fine-tune with same label
+        basic_adata.obs["disease2"] = (basic_adata.obs["disease"] == 0).astype(int)
+        mixmil_model.fine_tune(["disease2"], ["classification"], n_epochs=2)
+
+        # History should have extended, not replaced
+        final_history_len = len(mixmil_model._history)
+        assert final_history_len > initial_history_len
+        # Should have added 2 more epochs
+        assert final_history_len == initial_history_len + 2
 
 
 class TestPULSAR:
