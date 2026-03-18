@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning][].
   GPU required), multi-label MixMIL tests, and PULSAR linear probe tests.
 - Base class for sample methods: (`tl/_base_sample_method/BaseSampleMethod`)
 - `fit_linear_probe()` method for sample-level methods
+- `fine_tune()` method for supervised sample-level methods with linear probing as a default
+- `predict()` method for supervised sample-level methods
 - States for sample-level methods with `_check_adata_loaded()` and `_check_fitted()`
 - Tests for supervised methods
 
