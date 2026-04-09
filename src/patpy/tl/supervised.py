@@ -1706,12 +1706,12 @@ class PaSCient(SupervisedSampleMethod):
                 continue
 
             patient_vec = self.sample_representation.loc[donor_id].values
+            n_real_cells = cell_mask.sum()
 
-            if donor_id in self._cell_embeddings:
-                # Use PaSCient cell embeddings (may include padding rows)
-                cell_emb = self._cell_embeddings[donor_id]
-                n_real_cells = cell_mask.sum()
-                cell_emb = cell_emb[:n_real_cells]
+            # Use PaSCient cell embeddings when they cover all cells for
+            # this donor; otherwise fall back to expression cosine similarity.
+            if donor_id in self._cell_embeddings and self._cell_embeddings[donor_id].shape[0] >= n_real_cells:
+                cell_emb = self._cell_embeddings[donor_id][:n_real_cells]
                 d = min(cell_emb.shape[1], patient_vec.shape[0])
                 dot = np.abs(cell_emb[:, :d] @ patient_vec[:d])
                 cell_norms = np.linalg.norm(cell_emb[:, :d], axis=1) + 1e-8
