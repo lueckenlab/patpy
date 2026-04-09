@@ -703,3 +703,126 @@ class TestPaSCientTraining:
         reps = model.get_sample_representations()
         assert reps.shape == (N_DONORS, EMB_DIM)
         assert not reps.isna().any().any()
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: real pascient components (no mocks)
+# ---------------------------------------------------------------------------
+
+_has_pascient = importlib.util.find_spec("pascient") is not None
+_skip_no_pascient = pytest.mark.skipif(not _has_pascient, reason="pascient not installed")
+
+SMALL_LATENT = 32  # keep integration tests fast
+SMALL_EMB = 16
+
+
+@_skip_no_pascient
+class TestPaSCientIntegration:
+    """Tests that run real pascient model components end-to-end.
+
+    Skipped when the ``pascient`` package is not installed.  Uses tiny
+    dimensions (latent_dim=32, patient_emb_dim=16) so the tests stay
+    fast.
+    """
+
+    def test_build_model_returns_sample_predictor(self, basic_adata):
+        from pascient.model.sample_predictor import SamplePredictor
+
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            latent_dim=SMALL_LATENT,
+            patient_emb_dim=SMALL_EMB,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata)  # populates self.labels
+        predictor = model._build_model(n_genes=N_GENES, n_classes=2)
+        assert isinstance(predictor, SamplePredictor)
+
+    def test_train_from_scratch_real(self, basic_adata):
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            latent_dim=SMALL_LATENT,
+            patient_emb_dim=SMALL_EMB,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        assert model._fitted
+        assert model.sample_representation is not None
+        assert model.sample_representation.shape == (N_DONORS, SMALL_EMB)
+
+    def test_sample_importance_real(self, basic_adata):
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            latent_dim=SMALL_LATENT,
+            patient_emb_dim=SMALL_EMB,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        scores = model.get_sample_importance()
+        assert scores.shape[0] == N_DONORS
+        assert "disease_importance" in scores.columns
+
+    def test_cell_importance_real(self, basic_adata):
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            latent_dim=SMALL_LATENT,
+            patient_emb_dim=SMALL_EMB,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        imp = model.get_cell_importance()
+        assert imp.shape[0] == N_CELLS
+        assert (imp["disease_importance"] >= 0).all()
+
+    def test_fine_tune_and_predict_real(self, basic_adata):
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            latent_dim=SMALL_LATENT,
+            patient_emb_dim=SMALL_EMB,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        model.fine_tune("disease", "classification")
+        preds = model.predict("disease")
+        assert isinstance(preds, pd.DataFrame)
+        assert "disease_pred" in preds.columns
+        assert set(preds.index) == set(model.samples)
+
+    def test_distance_matrix_real(self, basic_adata):
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            latent_dim=SMALL_LATENT,
+            patient_emb_dim=SMALL_EMB,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        dist = model.calculate_distance_matrix()
+        assert dist.shape == (N_DONORS, N_DONORS)
+        np.testing.assert_allclose(dist, dist.T, atol=1e-6)
