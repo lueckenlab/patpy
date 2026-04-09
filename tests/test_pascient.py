@@ -611,14 +611,37 @@ class TestPaSCientCheckpointResolution:
 # ---------------------------------------------------------------------------
 
 
+def _mock_train(self, adata):
+    """Lightweight training stand-in that builds a mock model and runs one forward pass."""
+    expression = self._get_expression_matrix(adata)
+    n_genes = expression.shape[1]
+    label_vals = self.labels[self.label_keys[0]].values
+    n_classes = len(np.unique(label_vals)) if self.tasks[0] == "classification" else 1
+
+    if self._pascient_model is None:
+        self._pascient_model = _MockPaSCientModel(n_genes, n_classes=n_classes)
+
+    model = self._pascient_model
+    model.train()
+    optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
+    x = torch.randn(1, 1, self.n_cells, n_genes)
+    pad = torch.ones(1, 1, self.n_cells, dtype=torch.bool)
+    preds = self._forward_model(x, pad)[2].squeeze(1)
+    loss = torch.nn.functional.cross_entropy(preds, torch.zeros(1, dtype=torch.long))
+    loss.backward()
+    optimizer.step()
+    model.eval()
+
+
 @pytest.fixture
 def _patch_build_model(monkeypatch):
-    """Patch _build_model to return a lightweight mock instead of importing pascient."""
+    """Patch _build_model and _train to avoid importing pascient/lightning."""
     monkeypatch.setattr(
         PaSCient,
         "_build_model",
         lambda self, n_genes, n_classes: _MockPaSCientModel(n_genes, n_classes=n_classes),
     )
+    monkeypatch.setattr(PaSCient, "_train", _mock_train)
 
 
 class TestPaSCientTraining:
