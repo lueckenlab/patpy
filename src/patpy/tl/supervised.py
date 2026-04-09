@@ -1535,11 +1535,10 @@ class PaSCient(SupervisedSampleMethod):
     def _train(self, adata: sc.AnnData) -> None:
         """Train PaSCient on *adata* using a plain PyTorch loop.
 
-        Uses PaSCient's component classes (``BasicMLP``,
-        ``CellToCellIdentity``, ``NonLinearAttnAggregator``) for the
-        architecture and trains end-to-end with cross-entropy
-        (classification) or MSE (regression) loss on the first label
-        key.
+        Uses PaSCient's gene-to-cell encoder, cell-to-cell encoder,
+        cell-to-patient aggregator, patient encoder and predictor head
+        and trains end-to-end with cross-entropy (classification) or
+        MSE (regression) loss on the first label key.
 
         Parameters
         ----------
