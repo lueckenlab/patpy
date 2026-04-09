@@ -726,6 +726,8 @@ class TestPaSCientIntegration:
     """
 
     def test_build_model_returns_sample_predictor(self, basic_adata):
+        from patpy.tl.supervised import SupervisedSampleMethod
+
         from pascient.model.sample_predictor import SamplePredictor
 
         model = PaSCient(
@@ -736,7 +738,9 @@ class TestPaSCientIntegration:
             patient_emb_dim=SMALL_EMB,
             device="cpu",
         )
-        model.prepare_anndata(basic_adata)  # populates self.labels
+        # Only populate labels without running full prepare_anndata
+        # (which requires checkpoint_dir or train=True)
+        SupervisedSampleMethod.prepare_anndata(model, basic_adata)
         predictor = model._build_model(n_genes=N_GENES, n_classes=2)
         assert isinstance(predictor, SamplePredictor)
 
