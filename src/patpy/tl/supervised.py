@@ -1507,11 +1507,13 @@ class PaSCient(SupervisedSampleMethod):
         latent_dim = self.latent_dim  # 1024
         emb_dim = self.patient_emb_dim  # 512
 
+        from pascient.components.losses import CrossEntropyLossViews
+
         # Minimal losses config expected by SamplePredictor.init_losses()
         losses = SimpleNamespace(
             sample_prediction_loss=SimpleNamespace(
                 weight=1.0,
-                loss_fn=partial(nn.CrossEntropyLoss),
+                loss_fn=partial(CrossEntropyLossViews),
                 labels=self.label_keys[:1],
             ),
         )
@@ -1549,12 +1551,12 @@ class PaSCient(SupervisedSampleMethod):
         )
 
     def _train(self, adata: sc.AnnData) -> None:
-        """Train PaSCient on *adata* using a plain PyTorch loop.
+        """Train PaSCient using a Lightning Trainer following the upstream pipeline.
 
-        Uses PaSCient's gene-to-cell encoder, cell-to-cell encoder,
-        cell-to-patient aggregator, patient encoder and predictor head
-        and trains end-to-end with cross-entropy (classification) or
-        MSE (regression) loss on the first label key.
+        Builds a :class:`~pascient.model.sample_predictor.SamplePredictor`
+        (or reuses an existing one loaded from a checkpoint) and trains it
+        with ``lightning.Trainer.fit`` on a DataModule that wraps *adata*
+        into PaSCient's ``SampleBatch`` format.
 
         Parameters
         ----------
@@ -1562,15 +1564,21 @@ class PaSCient(SupervisedSampleMethod):
             AnnData with donor labels in ``.obs``.
         """
         import torch
-        import torch.nn as nn
+        from torch.utils.data import DataLoader, Dataset, random_split
 
-        rng = np.random.default_rng(self.seed)
+        try:
+            import lightning as L
+            from pascient.data.data_structures import SampleBatch
+        except ImportError as e:
+            raise ImportError(
+                "pascient and lightning are required for training. Install from: https://github.com/genentech/pascient"
+            ) from e
+
         expression = self._get_expression_matrix(adata)
         n_genes = expression.shape[1]
         donor_col = adata.obs[self.sample_key].values
-        donor_list = list(self.samples)
 
-        # Determine output dimension and loss from the first label/task
+        # Encode labels to integer class indices for classification
         label_key = self.label_keys[0]
         task = self.tasks[0]
         label_vals = self.labels[label_key].values
@@ -1579,79 +1587,90 @@ class PaSCient(SupervisedSampleMethod):
             classes = np.unique(label_vals)
             n_classes = len(classes)
             class_to_int = {c: i for i, c in enumerate(classes)}
-            y_all = np.array([class_to_int[v] for v in label_vals])
-            criterion = nn.CrossEntropyLoss()
+            y_map = {d: class_to_int[v] for d, v in zip(self.labels.index, label_vals, strict=True)}
         else:
             n_classes = 1
-            y_all = label_vals.astype(np.float32)
-            criterion = nn.MSELoss()
+            y_map = {d: float(v) for d, v in zip(self.labels.index, label_vals, strict=True)}
 
-        # Build or reuse model
         if self._pascient_model is None:
             self._pascient_model = self._build_model(n_genes, n_classes)
 
-        model = self._pascient_model.to(self.device)
-        model.train()
-        optimizer = torch.optim.Adam(model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        # -- Dataset that produces SampleBatch per donor ----------------
 
-        for epoch in range(self.n_epochs):
-            rng.shuffle(donor_list)
-            epoch_loss = 0.0
+        n_cells = self.n_cells
+        normalize = self.normalize
+        lognorm = self._lognormalize  # staticmethod ref
 
-            for batch_start in range(0, len(donor_list), self.batch_size):
-                batch_donors = donor_list[batch_start : batch_start + self.batch_size]
-                batch_x, batch_pad, batch_y = [], [], []
+        class _DS(Dataset):
+            def __init__(self_, donors):
+                self_.donors = list(donors)
 
-                for donor_id in batch_donors:
-                    cell_mask = donor_col == donor_id
-                    donor_expr = expression[cell_mask]
-                    n_donor_cells = donor_expr.shape[0]
-                    if n_donor_cells == 0:
-                        continue
+            def __len__(self_):
+                return len(self_.donors)
 
-                    if n_donor_cells >= self.n_cells:
-                        idx = rng.choice(n_donor_cells, size=self.n_cells, replace=False)
-                        sampled = donor_expr[idx]
-                        pad = np.ones(self.n_cells, dtype=bool)
-                    else:
-                        sampled = np.zeros((self.n_cells, n_genes), dtype=np.float32)
-                        sampled[:n_donor_cells] = donor_expr
-                        pad = np.zeros(self.n_cells, dtype=bool)
-                        pad[:n_donor_cells] = True
+            def __getitem__(self_, idx):
+                did = self_.donors[idx]
+                mask = donor_col == did
+                de = expression[mask]
+                nc = de.shape[0]
 
-                    batch_x.append(sampled[np.newaxis, :, :])
-                    batch_pad.append(pad[np.newaxis, :])
-
-                    donor_idx = np.where(self.labels.index == donor_id)[0][0]
-                    batch_y.append(y_all[donor_idx])
-
-                if not batch_x:
-                    continue
-
-                x_t = torch.tensor(np.stack(batch_x), dtype=torch.float32, device=self.device)
-                pad_t = torch.tensor(np.stack(batch_pad), dtype=torch.bool, device=self.device)
-
-                if self.normalize:
-                    x_t, pad_t = self._lognormalize(x_t, pad_t)
-
-                preds = self._forward_model(x_t, pad_t)[2]  # patient_preds
-                preds = preds.squeeze(1)  # (batch, n_classes)
-
-                if task == "classification":
-                    y_t = torch.tensor(batch_y, dtype=torch.long, device=self.device)
+                if nc >= n_cells:
+                    sel = np.random.choice(nc, size=n_cells, replace=False)
+                    x = de[sel]
+                    pad = np.ones(n_cells, dtype=bool)
                 else:
-                    y_t = torch.tensor(batch_y, dtype=torch.float32, device=self.device)
-                    preds = preds.squeeze(-1)
+                    x = np.zeros((n_cells, n_genes), dtype=np.float32)
+                    x[:nc] = de
+                    pad = np.zeros(n_cells, dtype=bool)
+                    pad[:nc] = True
 
-                loss = criterion(preds, y_t)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                epoch_loss += loss.item()
+                x_t = torch.tensor(x[np.newaxis], dtype=torch.float32)
+                pad_t = torch.tensor(pad[np.newaxis], dtype=torch.bool)
 
-            logger.info("PaSCient epoch %d/%d  loss=%.4f", epoch + 1, self.n_epochs, epoch_loss)
+                if normalize:
+                    x_t, pad_t = lognorm(x_t, pad_t)
 
-        model.eval()
+                return SampleBatch(
+                    x=x_t,
+                    padded_mask=pad_t,
+                    sample_metadata={label_key: torch.tensor(y_map[did])},
+                    cell_metadata={},
+                    view_names=["view_0"],
+                )
+
+        def _collate(batch):
+            return SampleBatch(
+                x=torch.stack([b.x for b in batch]),
+                padded_mask=torch.stack([b.padded_mask for b in batch]),
+                sample_metadata={
+                    k: torch.stack([b.sample_metadata[k] for b in batch]) for k in batch[0].sample_metadata
+                },
+                cell_metadata={},
+                view_names=batch[0].view_names,
+            )
+
+        # 90/10 train-val split
+        full_ds = _DS(self.samples)
+        n_val = max(1, int(len(full_ds) * 0.1))
+        n_train = len(full_ds) - n_val
+        train_ds, val_ds = random_split(full_ds, [n_train, n_val], generator=torch.Generator().manual_seed(self.seed))
+
+        train_dl = DataLoader(train_ds, batch_size=self.batch_size, shuffle=True, collate_fn=_collate)
+        val_dl = DataLoader(val_ds, batch_size=self.batch_size, shuffle=False, collate_fn=_collate)
+
+        # -- Train via Lightning Trainer --------------------------------
+
+        accelerator = "gpu" if self.device.startswith("cuda") and torch.cuda.is_available() else "cpu"
+        trainer = L.Trainer(
+            max_epochs=self.n_epochs,
+            accelerator=accelerator,
+            devices=1,
+            enable_checkpointing=False,
+            logger=False,
+            enable_progress_bar=True,
+        )
+        trainer.fit(self._pascient_model, train_dataloaders=train_dl, val_dataloaders=val_dl)
+        self._pascient_model.eval()
 
     def _get_expression_matrix(self, adata: sc.AnnData) -> np.ndarray:
         """Return expression data as a dense float32 numpy array.
