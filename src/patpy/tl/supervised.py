@@ -1484,53 +1484,69 @@ class PaSCient(SupervisedSampleMethod):
 
         Returns
         -------
-        torch.nn.Module
-            A module with the standard PaSCient sub-module attributes
-            (``gene2cell_encoder``, ``cell2cell_encoder``, etc.).
+        pascient.model.sample_predictor.SamplePredictor
+            A ``SamplePredictor`` instance with the default PaSCient
+            architecture.
         """
+        from functools import partial
+        from types import SimpleNamespace
+
+        import torch
         import torch.nn as nn
 
         try:
             from pascient.components.aggregators import NonLinearAttnAggregator
             from pascient.components.basic_models import BasicMLP
             from pascient.components.cell_to_cell import CellToCellIdentity
+            from pascient.components.cell_to_output import CellToOutputNone
+            from pascient.components.masking import DummyMasking
+            from pascient.model.sample_predictor import SamplePredictor
         except ImportError as e:
             raise ImportError("pascient is required. Install from: https://github.com/genentech/pascient") from e
 
         latent_dim = self.latent_dim  # 1024
         emb_dim = self.patient_emb_dim  # 512
 
-        class _Model(nn.Module):
-            def __init__(self_):
-                super().__init__()
-                # Linear gene→cell encoder: n_hidden_layers=-1 is a pascient
-                # BasicMLP convention meaning "single Linear(input_dim, hidden_dim),
-                # no activation, no output projection".
-                self_.gene2cell_encoder = BasicMLP(
-                    n_genes, hidden_dim=latent_dim, output_dim=latent_dim, n_hidden_layers=-1
-                )
-                self_.cell2cell_encoder = CellToCellIdentity()
-                # Learned attention aggregation (NonLinearAttnAggregator)
-                self_.cell2patient_aggregation = NonLinearAttnAggregator(
-                    attention_model=BasicMLP(
-                        latent_dim, hidden_dim=latent_dim, output_dim=1, n_hidden_layers=0, activation_cls=nn.Tanh
-                    )
-                )
-                # Patient encoder with PReLU activations
-                self_.patient_encoder = BasicMLP(
-                    latent_dim,
-                    hidden_dim=emb_dim,
-                    output_dim=emb_dim,
-                    n_hidden_layers=0,
-                    activation_cls=nn.PReLU,
-                    activation_out_cls=nn.PReLU,
-                )
-                # Linear predictor head (n_hidden_layers=-1 → single linear layer)
-                self_.patient_predictor = BasicMLP(
-                    emb_dim, hidden_dim=n_classes, output_dim=n_classes, n_hidden_layers=-1
-                )
+        # Minimal losses config expected by SamplePredictor.init_losses()
+        losses = SimpleNamespace(
+            sample_prediction_loss=SimpleNamespace(
+                weight=1.0,
+                loss_fn=partial(nn.CrossEntropyLoss),
+                labels=self.label_keys[:1],
+            ),
+        )
 
-        return _Model()
+        return SamplePredictor(
+            num_genes=n_genes,
+            optimizer=partial(torch.optim.Adam, lr=self.lr, weight_decay=self.weight_decay),
+            scheduler=None,
+            masking_strategy=DummyMasking(),
+            # Linear gene→cell encoder: n_hidden_layers=-1 is a pascient
+            # BasicMLP convention meaning "single Linear(input_dim, hidden_dim),
+            # no activation, no output projection".
+            gene2cell_encoder=BasicMLP(n_genes, hidden_dim=latent_dim, output_dim=latent_dim, n_hidden_layers=-1),
+            cell2cell_encoder=CellToCellIdentity(),
+            cell2patient_aggregation=NonLinearAttnAggregator(
+                attention_model=BasicMLP(
+                    latent_dim, hidden_dim=latent_dim, output_dim=1, n_hidden_layers=0, activation_cls=nn.Tanh
+                )
+            ),
+            cell2output=CellToOutputNone(),
+            patient_encoder=BasicMLP(
+                latent_dim,
+                hidden_dim=emb_dim,
+                output_dim=emb_dim,
+                n_hidden_layers=0,
+                activation_cls=nn.PReLU,
+                activation_out_cls=nn.PReLU,
+            ),
+            cell_decoder=None,
+            # Linear predictor head (n_hidden_layers=-1 → single linear layer)
+            patient_predictor=BasicMLP(emb_dim, hidden_dim=n_classes, output_dim=n_classes, n_hidden_layers=-1),
+            metrics=[],
+            losses=losses,
+            cell_contrastive_strategy="classic",
+        )
 
     def _train(self, adata: sc.AnnData) -> None:
         """Train PaSCient on *adata* using a plain PyTorch loop.
