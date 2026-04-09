@@ -1667,17 +1667,28 @@ class PaSCient(SupervisedSampleMethod):
         self.adata.uns[cache_key] = sample_importance.to_dict()
         return sample_importance
 
-    def get_cell_importance(self, force: bool = False) -> pd.DataFrame:
-        """Per-cell importance as cosine similarity to the donor patient embedding.
+    def get_cell_importance(self, force: bool = False, target: int = 0) -> pd.DataFrame:
+        """Per-cell importance via Integrated Gradients.
 
-        Computes the absolute cosine similarity between each cell's
-        intermediate embedding (from the cell-to-cell encoder) and the
-        corresponding donor's patient embedding.
+        Computes Integrated Gradients (IG) attributions from ``captum``
+        following the approach in the PaSCient paper (De Brouwer et al.
+        2024).  For each donor, the IG attributions at the gene level
+        are computed with respect to the model's prediction for the
+        specified *target* class, using a zero baseline.  The per-cell
+        importance score is the L2 norm of the per-gene attribution
+        vector for that cell.
+
+        When ``captum`` is not installed or the model is unavailable,
+        cosine similarity between each cell's expression and the
+        donor patient embedding is used as a proxy.
 
         Parameters
         ----------
         force
             Recompute even if cached results exist in ``adata.obs``.
+        target
+            Index of the prediction target (class index) for which IG
+            attributions are computed.  Defaults to 0.
 
         Returns
         -------
@@ -1697,6 +1708,134 @@ class PaSCient(SupervisedSampleMethod):
         if not force and all(c in self.adata.obs.columns for c in importance_cols):
             return self.adata.obs[importance_cols]
 
+        # Try IG-based importance; fall back to cosine similarity.
+        try:
+            scores = self._cell_importance_ig(target=target)
+        except (ImportError, RuntimeError):
+            logger.info(
+                "Integrated Gradients not available; falling back to cosine similarity "
+                "(install captum for gradient-based cell importance)."
+            )
+            scores = self._cell_importance_cosine()
+
+        result = pd.DataFrame(index=self.adata.obs_names)
+        for col in importance_cols:
+            result[col] = scores
+            self.adata.obs[col] = scores
+
+        return result
+
+    def _cell_importance_ig(self, target: int = 0) -> np.ndarray:
+        """Compute per-cell importance using Integrated Gradients.
+
+        Parameters
+        ----------
+        target
+            Class index for the IG attribution target.
+
+        Returns
+        -------
+        np.ndarray
+            Per-cell importance scores of length ``n_cells``.
+        """
+        import torch
+        from captum.attr import IntegratedGradients
+
+        if self._pascient_model is None:
+            raise RuntimeError("PaSCient model not loaded.")
+
+        model = self._pascient_model
+
+        class _IGForwardModel(torch.nn.Module):
+            """Wrapper that returns softmax predictions for IG attribution."""
+
+            def __init__(self, base_model):
+                super().__init__()
+                self.base_model = base_model
+
+            def forward(self, x, padding_mask):
+                cell_embds = self.base_model.gene2cell_encoder(x)
+                cell_cross_embds = self.base_model.cell2cell_encoder(cell_embds, padding_mask=padding_mask)
+                patient_embds = self.base_model.cell2patient_aggregation.aggregate(
+                    data=cell_cross_embds, mask=padding_mask
+                )
+                patient_embds = self.base_model.patient_encoder(patient_embds)
+                patient_preds = self.base_model.patient_predictor(patient_embds)
+                return torch.softmax(patient_preds[:, 0], dim=-1)
+
+        ig_model = _IGForwardModel(model)
+        ig = IntegratedGradients(ig_model)
+
+        rng = np.random.default_rng(self.seed)
+        donor_col = self.adata.obs[self.sample_key].values
+        expression = self._get_expression_matrix(self.adata)
+        n_genes = expression.shape[1]
+        scores = np.zeros(len(self.adata))
+
+        for donor_id in self.samples:
+            cell_mask = donor_col == donor_id
+            if not cell_mask.any():
+                continue
+
+            donor_expr = expression[cell_mask]
+            n_donor_cells = donor_expr.shape[0]
+
+            # Subsample or pad to n_cells
+            if n_donor_cells >= self.n_cells:
+                idx = rng.choice(n_donor_cells, size=self.n_cells, replace=False)
+                sampled = donor_expr[idx]
+                pad_mask = np.ones(self.n_cells, dtype=bool)
+                # Map back: cell_indices[j] is the position within the
+                # donor's cells in adata for the j-th sampled cell.
+                cell_indices = idx
+            else:
+                padded = np.zeros((self.n_cells, n_genes), dtype=np.float32)
+                padded[:n_donor_cells] = donor_expr
+                sampled = padded
+                pad_mask = np.zeros(self.n_cells, dtype=bool)
+                pad_mask[:n_donor_cells] = True
+                cell_indices = np.arange(n_donor_cells)
+
+            # Shape: (1, 1, n_cells, n_genes)
+            x_tensor = torch.tensor(sampled[np.newaxis, np.newaxis, :, :], dtype=torch.float32, device=self.device)
+            pad_tensor = torch.tensor(pad_mask[np.newaxis, np.newaxis, :], dtype=torch.bool, device=self.device)
+
+            if self.normalize:
+                x_tensor, pad_tensor = self._lognormalize(x_tensor, pad_tensor)
+
+            x_tensor.requires_grad = True
+            baseline = torch.zeros_like(x_tensor)
+
+            attr, _ = ig.attribute(
+                x_tensor,
+                baselines=baseline,
+                additional_forward_args=pad_tensor,
+                target=target,
+                return_convergence_delta=True,
+            )
+
+            # attr: (1, 1, n_cells, n_genes)
+            attr_np = attr[0, 0].detach().cpu().numpy()  # (n_cells, n_genes)
+
+            # Per-cell importance = L2 norm of the gene-level attributions
+            n_real = min(len(cell_indices), self.n_cells)
+            cell_scores = np.linalg.norm(attr_np[:n_real], axis=1)
+
+            # Map scores back to the donor's cells in adata
+            donor_positions = np.where(cell_mask)[0]
+            for j in range(n_real):
+                scores[donor_positions[cell_indices[j]]] = cell_scores[j]
+
+        return scores
+
+    def _cell_importance_cosine(self) -> np.ndarray:
+        """Compute per-cell importance via cosine similarity with patient embedding.
+
+        Returns
+        -------
+        np.ndarray
+            Per-cell importance scores of length ``n_cells``.
+        """
         donor_col = self.adata.obs[self.sample_key].values
         scores = np.zeros(len(self.adata))
 
@@ -1708,8 +1847,6 @@ class PaSCient(SupervisedSampleMethod):
             patient_vec = self.sample_representation.loc[donor_id].values
             n_real_cells = cell_mask.sum()
 
-            # Use PaSCient cell embeddings when they cover all cells for
-            # this donor; otherwise fall back to expression cosine similarity.
             if donor_id in self._cell_embeddings and self._cell_embeddings[donor_id].shape[0] >= n_real_cells:
                 cell_emb = self._cell_embeddings[donor_id][:n_real_cells]
                 d = min(cell_emb.shape[1], patient_vec.shape[0])
@@ -1718,7 +1855,6 @@ class PaSCient(SupervisedSampleMethod):
                 patient_norm = np.linalg.norm(patient_vec[:d]) + 1e-8
                 scores[cell_mask] = dot / (cell_norms * patient_norm)
             else:
-                # Fallback: cosine similarity with raw expression features
                 cell_data = self._get_data()[cell_mask]
                 if hasattr(cell_data, "toarray"):
                     cell_data = cell_data.toarray()
@@ -1728,9 +1864,4 @@ class PaSCient(SupervisedSampleMethod):
                 patient_norm = np.linalg.norm(patient_vec[:d]) + 1e-8
                 scores[cell_mask] = dot / (cell_norms * patient_norm)
 
-        result = pd.DataFrame(index=self.adata.obs_names)
-        for col in importance_cols:
-            result[col] = scores
-            self.adata.obs[col] = scores
-
-        return result
+        return scores
