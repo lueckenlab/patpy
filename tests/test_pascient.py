@@ -1,4 +1,7 @@
-"""Tests for the PaSCient supervised method wrapper."""
+"""Tests for the PaSCient supervised method wrapper.
+
+All tests are skipped when ``torch`` is not installed.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +11,16 @@ import numpy as np
 import pandas as pd
 import pytest
 import scanpy as sc
-import torch
-from torch import nn
 
-from patpy.tl.supervised import PaSCient
+_has_torch = importlib.util.find_spec("torch") is not None
+
+# Skip the entire module at collection time when torch is absent.
+# pytest.importorskip raises Skipped during collection, preventing
+# ImportErrors from torch/nn class definitions below.
+torch = pytest.importorskip("torch", reason="torch not installed")
+nn = torch.nn
+
+from patpy.tl.supervised import PaSCient  # noqa: E402
 
 N_CELLS = 200
 N_GENES = 30
@@ -299,7 +308,7 @@ class TestPaSCientSampleImportance:
 # ---------------------------------------------------------------------------
 
 
-_has_captum = importlib.util.find_spec("captum") is not None
+_has_captum = _has_torch and importlib.util.find_spec("captum") is not None
 
 
 class TestPaSCientCellImportance:
