@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.util
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -290,6 +292,9 @@ class TestPaSCientSampleImportance:
 # ---------------------------------------------------------------------------
 
 
+_has_captum = importlib.util.find_spec("captum") is not None
+
+
 class TestPaSCientCellImportance:
     def test_one_row_per_cell(self, pascient_model):
         assert pascient_model.get_cell_importance().shape[0] == N_CELLS
@@ -297,10 +302,9 @@ class TestPaSCientCellImportance:
     def test_column_named_after_label(self, pascient_model):
         assert "disease_importance" in pascient_model.get_cell_importance().columns
 
-    def test_values_in_zero_one(self, pascient_model):
+    def test_values_non_negative(self, pascient_model):
         imp = pascient_model.get_cell_importance()
         assert (imp["disease_importance"] >= 0).all()
-        assert (imp["disease_importance"] <= 1.0 + 1e-6).all()
 
     def test_written_to_adata_obs(self, pascient_model):
         pascient_model.get_cell_importance()
@@ -311,6 +315,7 @@ class TestPaSCientCellImportance:
         # Corrupt internal state
         pascient_model._cell_embeddings = {}
         pascient_model.sample_representation = None
+        pascient_model._pascient_model = None
         imp2 = pascient_model.get_cell_importance()
         pd.testing.assert_frame_equal(imp1, imp2, check_dtype=False)
 
@@ -318,6 +323,20 @@ class TestPaSCientCellImportance:
         imp = pascient_model_multilabel.get_cell_importance()
         assert "disease_importance" in imp.columns
         assert "age_importance" in imp.columns
+
+    @pytest.mark.skipif(not _has_captum, reason="captum not installed")
+    def test_ig_produces_scores(self, pascient_model):
+        """IG-based importance should produce non-negative scores."""
+        scores = pascient_model._cell_importance_ig(target=0)
+        assert len(scores) == N_CELLS
+        assert (scores >= 0).all()
+
+    def test_cosine_fallback_produces_scores(self, pascient_model):
+        """Cosine fallback should produce values in [0, 1]."""
+        scores = pascient_model._cell_importance_cosine()
+        assert len(scores) == N_CELLS
+        assert (scores >= 0).all()
+        assert (scores <= 1.0 + 1e-6).all()
 
 
 # ---------------------------------------------------------------------------
