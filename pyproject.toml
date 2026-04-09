@@ -75,6 +75,10 @@ optional-dependencies.helical = [
 optional-dependencies.mixmil = [
   "mixmil>=0.1.2",
 ]
+optional-dependencies.pascient = [
+  "pascient @ git+https://github.com/genentech/pascient.git@main",
+  "hydra-core>=1.3",
+]
 optional-dependencies.mrvi = [
   "scvi-tools>=1.2",
   "torch>=1.13",
