@@ -1250,7 +1250,7 @@ class PaSCient(SupervisedSampleMethod):
         ``.hydra/config.yaml`` and a checkpoint file under
         ``checkpoints/``.  When ``None``, a model is trained from
         scratch via :meth:`prepare_anndata` with ``train=True``.
-    n_cells : int, default 1000
+    n_cells : int, default 1500
         Number of cells to sample per donor during training and
         inference.  Donors with fewer cells are zero-padded; donors
         with more are randomly subsampled.
@@ -1263,18 +1263,18 @@ class PaSCient(SupervisedSampleMethod):
         with ``target_sum=1e4`` followed by ``log1p``) to the
         expression data.  Set to ``False`` if the data is already
         log-normalised.
-    n_epochs : int, default 10
+    n_epochs : int, default 4
         Training epochs (only used when ``train=True``).
     lr : float, default 1e-4
         Learning rate (only used when ``train=True``).
     weight_decay : float, default 1e-4
         Weight decay (only used when ``train=True``).
-    latent_dim : int, default 128
+    latent_dim : int, default 1024
         Cell embedding dimension (only used when training from scratch).
     patient_emb_dim : int, default 512
         Patient embedding dimension (only used when training from
         scratch).
-    seed : int, default 42
+    seed : int, default 12345
         Random seed.
 
     Examples
@@ -1285,7 +1285,6 @@ class PaSCient(SupervisedSampleMethod):
     ...     sample_key="donor_id",
     ...     label_keys=["disease"],
     ...     tasks=["classification"],
-    ...     n_epochs=10,
     ... )
     >>> model.prepare_anndata(adata, train=True)
 
@@ -1308,16 +1307,16 @@ class PaSCient(SupervisedSampleMethod):
         cell_group_key: str | None = None,
         layer: str | None = None,
         checkpoint_dir: str | None = None,
-        n_cells: int = 1000,
+        n_cells: int = 1500,
         batch_size: int = 16,
         device: str = "cuda",
         normalize: bool = True,
-        n_epochs: int = 10,
+        n_epochs: int = 4,
         lr: float = 1e-4,
         weight_decay: float = 1e-4,
-        latent_dim: int = 128,
+        latent_dim: int = 1024,
         patient_emb_dim: int = 512,
-        seed: int = 42,
+        seed: int = 12345,
     ) -> None:
         super().__init__(
             sample_key=sample_key,
@@ -1492,30 +1491,51 @@ class PaSCient(SupervisedSampleMethod):
         import torch.nn as nn
 
         try:
-            from pascient.components.aggregators import MeanAggregator
+            from pascient.components.aggregators import NonLinearAttnAggregator
             from pascient.components.basic_models import BasicMLP
             from pascient.components.cell_to_cell import CellToCellIdentity
-            from pascient.components.gene_to_cell import GeneToCellMLP
         except ImportError as e:
             raise ImportError("pascient is required. Install from: https://github.com/genentech/pascient") from e
 
-        class _Model(nn.Module):
-            def __init__(self_, n_genes, latent_dim, emb_dim, n_classes):
-                super().__init__()
-                self_.gene2cell_encoder = GeneToCellMLP(n_genes, latent_dim=latent_dim, hidden_dim=[latent_dim * 4])
-                self_.cell2cell_encoder = CellToCellIdentity()
-                self_.cell2patient_aggregation = MeanAggregator(dim=2)
-                self_.patient_encoder = BasicMLP(latent_dim, latent_dim, emb_dim, n_hidden_layers=0)
-                self_.patient_predictor = BasicMLP(emb_dim, n_classes, n_classes, n_hidden_layers=-1)
+        latent_dim = self.latent_dim  # 1024
+        emb_dim = self.patient_emb_dim  # 512
 
-        return _Model(n_genes, self.latent_dim, self.patient_emb_dim, n_classes)
+        class _Model(nn.Module):
+            def __init__(self_):
+                super().__init__()
+                # Linear gene→cell encoder (BasicMLP with n_hidden_layers=-1)
+                self_.gene2cell_encoder = BasicMLP(
+                    n_genes, hidden_dim=latent_dim, output_dim=latent_dim, n_hidden_layers=-1
+                )
+                self_.cell2cell_encoder = CellToCellIdentity()
+                # Learned attention aggregation (NonLinearAttnAggregator)
+                self_.cell2patient_aggregation = NonLinearAttnAggregator(
+                    attention_model=BasicMLP(
+                        latent_dim, hidden_dim=latent_dim, output_dim=1, n_hidden_layers=0, activation_cls=nn.Tanh
+                    )
+                )
+                # Patient encoder with PReLU activations
+                self_.patient_encoder = BasicMLP(
+                    latent_dim,
+                    hidden_dim=emb_dim,
+                    output_dim=emb_dim,
+                    n_hidden_layers=0,
+                    activation_cls=nn.PReLU,
+                    activation_out_cls=nn.PReLU,
+                )
+                # Linear predictor head
+                self_.patient_predictor = BasicMLP(
+                    emb_dim, hidden_dim=n_classes, output_dim=n_classes, n_hidden_layers=-1
+                )
+
+        return _Model()
 
     def _train(self, adata: sc.AnnData) -> None:
         """Train PaSCient on *adata* using a plain PyTorch loop.
 
-        Uses PaSCient's component classes (``GeneToCellMLP``,
-        ``CellToCellIdentity``, ``MeanAggregator``, ``BasicMLP``) for
-        the architecture and trains end-to-end with cross-entropy
+        Uses PaSCient's component classes (``BasicMLP``,
+        ``CellToCellIdentity``, ``NonLinearAttnAggregator``) for the
+        architecture and trains end-to-end with cross-entropy
         (classification) or MSE (regression) loss on the first label
         key.
 
