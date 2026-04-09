@@ -177,9 +177,15 @@ class TestPaSCientConstruction:
             tasks=["classification"],
             checkpoint_dir="/p",
         )
-        assert model.n_cells == 1000
+        assert model.n_cells == 1500
         assert model.batch_size == 16
         assert model.normalize is True
+        assert model.n_epochs == 4
+        assert model.lr == 1e-4
+        assert model.weight_decay == 1e-4
+        assert model.latent_dim == 1024
+        assert model.patient_emb_dim == 512
+        assert model.seed == 12345
 
 
 # ---------------------------------------------------------------------------
