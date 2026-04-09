@@ -1503,7 +1503,9 @@ class PaSCient(SupervisedSampleMethod):
         class _Model(nn.Module):
             def __init__(self_):
                 super().__init__()
-                # Linear gene→cell encoder (BasicMLP with n_hidden_layers=-1)
+                # Linear gene→cell encoder: n_hidden_layers=-1 is a pascient
+                # BasicMLP convention meaning "single Linear(input_dim, hidden_dim),
+                # no activation, no output projection".
                 self_.gene2cell_encoder = BasicMLP(
                     n_genes, hidden_dim=latent_dim, output_dim=latent_dim, n_hidden_layers=-1
                 )
@@ -1523,7 +1525,7 @@ class PaSCient(SupervisedSampleMethod):
                     activation_cls=nn.PReLU,
                     activation_out_cls=nn.PReLU,
                 )
-                # Linear predictor head
+                # Linear predictor head (n_hidden_layers=-1 → single linear layer)
                 self_.patient_predictor = BasicMLP(
                     emb_dim, hidden_dim=n_classes, output_dim=n_classes, n_hidden_layers=-1
                 )
