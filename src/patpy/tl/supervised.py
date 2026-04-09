@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import warnings
 from typing import Literal
 
@@ -9,6 +10,8 @@ import scanpy as sc
 
 from patpy.tl._base_sample_method import BaseSampleMethod
 from patpy.tl._types import _PREDICTION_TASKS
+
+logger = logging.getLogger(__name__)
 
 
 class SupervisedSampleMethod(BaseSampleMethod):
@@ -1212,3 +1215,522 @@ class PULSAR(SupervisedSampleMethod):
         )
         self.adata.obs[importance_col] = scores
         return cell_importances
+
+
+class PaSCient(SupervisedSampleMethod):
+    """Patient-level representation via PaSCient by De Brouwer et al. 2024 (https://arxiv.org/abs/2405.12459).
+
+    PaSCient learns multi-cellular patient representations from single-cell
+    transcriptomics data using a hierarchical encoder that processes gene
+    expression through gene-to-cell, cell-to-cell, and cell-to-patient
+    aggregation stages to produce a fixed-size patient embedding.
+
+    This wrapper loads a pre-trained PaSCient model from a checkpoint
+    directory and extracts patient-level and cell-level representations
+    following the patpy ``SupervisedSampleMethod`` interface.
+
+    Parameters
+    ----------
+    sample_key : str
+        Column in ``adata.obs`` with donor / sample identifiers.
+    label_keys : list[str]
+        Donor-level target columns.  Used for evaluation and
+        prediction when the model has a prediction head.
+    tasks : list[_PREDICTION_TASKS]
+        Prediction task for each label key.
+    cell_group_key : str or None, optional
+        Column in ``adata.obs`` with cell-type annotations.
+    layer : str or None, default ``None``
+        Key in ``adata.layers`` containing raw counts or log-normalised
+        expression.  If ``None``, ``adata.X`` is used.  PaSCient
+        expects log-normalised expression; set ``normalize=True``
+        (the default) to apply log-normalisation automatically.
+    checkpoint_dir : str
+        Path to a PaSCient checkpoint directory.  Must contain
+        ``.hydra/config.yaml`` and a checkpoint file under
+        ``checkpoints/``.
+    n_cells : int, default 1000
+        Number of cells to sample per donor during inference.  Donors
+        with fewer cells are zero-padded; donors with more are
+        randomly subsampled.
+    batch_size : int, default 16
+        Donors processed per forward pass.
+    device : str, default ``"cuda"``
+        Inference device.
+    normalize : bool, default True
+        Whether to apply log-normalisation (total-count normalisation
+        with ``target_sum=1e4`` followed by ``log1p``) to the
+        expression data before inference.  Set to ``False`` if the
+        data is already log-normalised.
+    seed : int, default 42
+        Random seed.
+
+    Examples
+    --------
+    >>> model = PaSCient(
+    ...     sample_key="donor_id",
+    ...     label_keys=["disease"],
+    ...     tasks=["classification"],
+    ...     checkpoint_dir="/path/to/pascient/checkpoint",
+    ... )
+    >>> model.prepare_anndata(adata)
+    >>> embeddings = model.get_sample_representations()
+    >>> scores = model.get_sample_importance()
+    """
+
+    def __init__(
+        self,
+        sample_key: str,
+        label_keys: list[str],
+        tasks: list[_PREDICTION_TASKS],
+        cell_group_key: str | None = None,
+        layer: str | None = None,
+        checkpoint_dir: str | None = None,
+        n_cells: int = 1000,
+        batch_size: int = 16,
+        device: str = "cuda",
+        normalize: bool = True,
+        seed: int = 42,
+    ) -> None:
+        super().__init__(
+            sample_key=sample_key,
+            label_keys=label_keys,
+            tasks=tasks,
+            cell_group_key=cell_group_key,
+            layer=layer,
+            seed=seed,
+        )
+        if checkpoint_dir is None:
+            raise ValueError("checkpoint_dir is required. Provide the path to a PaSCient checkpoint directory.")
+
+        self.checkpoint_dir = checkpoint_dir
+        self.n_cells = n_cells
+        self.batch_size = batch_size
+        self.device = device
+        self.normalize = normalize
+
+        self._pascient_model = None
+        self._cell_embeddings: dict[str, np.ndarray] = {}  # donor_id → (n_cells, emb_dim)
+        self.sample_representation: pd.DataFrame | None = None
+
+    @staticmethod
+    def _load_pascient_model(config_path: str, checkpoint_path: str):
+        """Load a PaSCient model from Hydra config and PyTorch checkpoint.
+
+        Parameters
+        ----------
+        config_path
+            Path to the ``.hydra/`` config directory inside the
+            checkpoint directory.
+        checkpoint_path
+            Path to the ``.ckpt`` file.
+
+        Returns
+        -------
+        torch.nn.Module
+            PaSCient model in eval mode with loaded weights.
+        """
+        import sys
+
+        import torch
+
+        try:
+            import pascient
+        except ImportError as e:
+            raise ImportError("pascient is required. Install from: https://github.com/genentech/pascient") from e
+
+        # PaSCient was originally packaged as "cellm"; Hydra configs may
+        # reference the old name, so register it as an alias.
+        sys.modules.setdefault("cellm", pascient)
+
+        try:
+            import hydra
+            from hydra import compose, initialize_config_dir
+        except ImportError as e:
+            raise ImportError(
+                "hydra-core is required for PaSCient model loading. Install with: pip install hydra-core"
+            ) from e
+
+        with initialize_config_dir(version_base=None, config_dir=config_path, job_name="patpy_pascient"):
+            cfg = compose(
+                config_name="config.yaml",
+                return_hydra_config=True,
+                overrides=[
+                    "data.multiprocessing_context=null",
+                    "data.batch_size=1",
+                ],
+            )
+
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        metrics = hydra.utils.instantiate(cfg.get("metrics"))
+        model = hydra.utils.instantiate(cfg.model, metrics=metrics)
+        model.load_state_dict(checkpoint["state_dict"])
+        model.eval()
+
+        return model
+
+    def _resolve_checkpoint_paths(self) -> tuple[str, str]:
+        """Resolve config and checkpoint file paths from :attr:`checkpoint_dir`.
+
+        Returns
+        -------
+        config_path : str
+            Absolute path to the ``.hydra`` config directory.
+        checkpoint_path : str
+            Absolute path to the ``.ckpt`` checkpoint file.
+        """
+        import glob
+        import os
+
+        config_path = os.path.join(self.checkpoint_dir, ".hydra")
+        if not os.path.isdir(config_path):
+            raise FileNotFoundError(
+                f"Hydra config directory not found at '{config_path}'. "
+                "checkpoint_dir must contain a '.hydra/' subdirectory."
+            )
+        config_path = os.path.abspath(config_path)
+
+        ckpt_dir = os.path.join(self.checkpoint_dir, "checkpoints")
+        if os.path.isdir(ckpt_dir):
+            ckpt_files = glob.glob(os.path.join(ckpt_dir, "*.ckpt"))
+        else:
+            ckpt_files = glob.glob(os.path.join(self.checkpoint_dir, "*.ckpt"))
+
+        if not ckpt_files:
+            raise FileNotFoundError(
+                f"No .ckpt checkpoint file found in '{self.checkpoint_dir}' or '{self.checkpoint_dir}/checkpoints/'."
+            )
+        checkpoint_path = os.path.abspath(ckpt_files[0])
+
+        return config_path, checkpoint_path
+
+    def prepare_anndata(self, adata: sc.AnnData) -> None:
+        """Load PaSCient model and extract donor-level embeddings.
+
+        Parameters
+        ----------
+        adata
+            Single-cell AnnData.  Must contain :attr:`sample_key` and all
+            :attr:`label_keys` in ``.obs``.  Expression data should be raw
+            counts (if ``normalize=True``) or log-normalised expression
+            (if ``normalize=False``).  Gene ordering must match the model's
+            training data.
+        """
+        super().prepare_anndata(adata)
+
+        config_path, checkpoint_path = self._resolve_checkpoint_paths()
+        self._pascient_model = self._load_pascient_model(config_path, checkpoint_path)
+
+        try:
+            self._pascient_model = self._pascient_model.to(self.device)
+        except RuntimeError as e:
+            warnings.warn(
+                f"Could not move model to device='{self.device}': {e}. Falling back to CPU.",
+                stacklevel=2,
+            )
+            self.device = "cpu"
+            self._pascient_model = self._pascient_model.to("cpu")
+
+        # Extract embeddings for all donors
+        self._extract_embeddings(adata)
+        self._fitted = True
+
+    def _get_expression_matrix(self, adata: sc.AnnData) -> np.ndarray:
+        """Return expression data as a dense float32 numpy array.
+
+        No normalisation is applied here — normalisation is performed
+        per-batch on the tensor level in :meth:`_extract_embeddings`.
+
+        Parameters
+        ----------
+        adata
+            Input AnnData.
+
+        Returns
+        -------
+        np.ndarray
+            Dense expression matrix of shape ``(n_cells, n_genes)``.
+        """
+        import scipy.sparse
+
+        if self.layer is None or self.layer == "X":
+            X = adata.X
+        elif self.layer in adata.layers:
+            X = adata.layers[self.layer]
+        else:
+            raise ValueError(
+                f"layer='{self.layer}' not found in adata.layers. Provide a valid layer key or None to use adata.X."
+            )
+
+        if scipy.sparse.issparse(X):
+            X = X.toarray()
+        return np.asarray(X, dtype=np.float32)
+
+    @staticmethod
+    def _lognormalize(x, padding_mask, target_sum: float = 1e4):
+        """Log-normalise a batch tensor following the PaSCient convention.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Raw count tensor of shape ``(batch, 1, cells, genes)``.
+        padding_mask : torch.Tensor
+            Boolean mask of shape ``(batch, 1, cells)``.  ``True`` for
+            observed cells.
+        target_sum : float
+            Total-count normalisation target (default ``1e4``).
+
+        Returns
+        -------
+        x_norm : torch.Tensor
+            Log-normalised tensor, same shape as *x*.
+        padding_mask : torch.Tensor
+            Unchanged mask (returned for convenience).
+        """
+        counts_per_cell = x.sum(dim=-1) + 1e-8  # (batch, 1, cells)
+        counts_per_cell = counts_per_cell / target_sum
+        counts_per_cell[~padding_mask] = 1
+        x_norm = x / counts_per_cell.unsqueeze(-1)
+        x_norm = x_norm.log1p()
+        return x_norm, padding_mask
+
+    def _forward_model(self, x, padding_mask):
+        """Run the PaSCient encoder pipeline.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Expression tensor ``(batch, 1, cells, genes)``.
+        padding_mask : torch.Tensor
+            Boolean mask ``(batch, 1, cells)``.
+
+        Returns
+        -------
+        patient_embeddings : torch.Tensor
+            ``(batch, 1, emb_dim)``
+        cell_embeddings : torch.Tensor
+            ``(batch, 1, cells, cell_emb_dim)``
+        patient_predictions : torch.Tensor
+            ``(batch, 1, n_classes)``
+        """
+        model = self._pascient_model
+        cell_embds = model.gene2cell_encoder(x)
+        cell_cross_embds = model.cell2cell_encoder(cell_embds, padding_mask=padding_mask)
+        patient_embds = model.cell2patient_aggregation.aggregate(data=cell_cross_embds, mask=padding_mask)
+        patient_embds_enc = model.patient_encoder(patient_embds)
+        patient_preds = model.patient_predictor(patient_embds_enc)
+        return patient_embds_enc, cell_cross_embds, patient_preds
+
+    def _extract_embeddings(self, adata: sc.AnnData) -> None:
+        """Process all donors through PaSCient and store embeddings.
+
+        Parameters
+        ----------
+        adata
+            Source AnnData.
+        """
+        import torch
+
+        rng = np.random.default_rng(self.seed)
+        donor_col = adata.obs[self.sample_key].values
+        expression = self._get_expression_matrix(adata)
+        n_genes = expression.shape[1]
+
+        donor_ids = []
+        all_sample_embeddings = []
+
+        donor_list = list(self.samples)
+        for batch_start in range(0, len(donor_list), self.batch_size):
+            batch_donors = donor_list[batch_start : batch_start + self.batch_size]
+            batch_x = []
+            batch_pad = []
+            batch_donor_ids = []
+
+            for donor_id in batch_donors:
+                cell_mask = donor_col == donor_id
+                donor_expr = expression[cell_mask]
+                n_donor_cells = donor_expr.shape[0]
+
+                if n_donor_cells == 0:
+                    logger.warning("Donor '%s' has no cells, skipping.", donor_id)
+                    continue
+
+                # Subsample or pad to n_cells
+                if n_donor_cells >= self.n_cells:
+                    idx = rng.choice(n_donor_cells, size=self.n_cells, replace=False)
+                    sampled = donor_expr[idx]
+                    pad_mask = np.ones(self.n_cells, dtype=bool)
+                else:
+                    padded = np.zeros((self.n_cells, n_genes), dtype=np.float32)
+                    padded[:n_donor_cells] = donor_expr
+                    sampled = padded
+                    pad_mask = np.zeros(self.n_cells, dtype=bool)
+                    pad_mask[:n_donor_cells] = True
+
+                # PaSCient expects shape (1, n_cells, n_genes) per view
+                batch_x.append(sampled[np.newaxis, :, :])
+                batch_pad.append(pad_mask[np.newaxis, :])
+                batch_donor_ids.append(donor_id)
+
+            if not batch_x:
+                continue
+
+            x_tensor = torch.tensor(np.stack(batch_x), dtype=torch.float32, device=self.device)
+            pad_tensor = torch.tensor(np.stack(batch_pad), dtype=torch.bool, device=self.device)
+
+            # Apply log-normalisation on the tensor if requested
+            if self.normalize:
+                x_tensor, pad_tensor = self._lognormalize(x_tensor, pad_tensor)
+
+            with torch.no_grad():
+                patient_embds, cell_embds, _preds = self._forward_model(x_tensor, pad_tensor)
+
+            # patient_embds: (batch, 1, emb_dim) → (batch, emb_dim)
+            sample_emb = patient_embds.squeeze(1).cpu().numpy()
+            all_sample_embeddings.append(sample_emb)
+
+            # cell_embds: (batch, 1, n_cells, cell_emb_dim)
+            cell_emb_np = cell_embds.squeeze(1).cpu().numpy()
+            for i, did in enumerate(batch_donor_ids):
+                self._cell_embeddings[did] = cell_emb_np[i]
+
+            donor_ids.extend(batch_donor_ids)
+
+        if not all_sample_embeddings:
+            raise RuntimeError("No donor embeddings could be extracted. Check that adata contains valid samples.")
+
+        embeddings_arr = np.concatenate(all_sample_embeddings, axis=0)
+        cols = [f"dim_{i}" for i in range(embeddings_arr.shape[1])]
+        self.sample_representation = pd.DataFrame(embeddings_arr, index=donor_ids, columns=cols)
+        self.samples = np.array(donor_ids)
+
+    def get_sample_representations(self) -> pd.DataFrame:
+        """Per-donor embeddings from PaSCient.
+
+        Returns
+        -------
+        pd.DataFrame
+            Shape ``(n_donors, emb_dim)`` (typically 512), indexed by
+            donor ID.  Columns are named ``"dim_0"``, ``"dim_1"``, ...
+
+        Examples
+        --------
+        >>> embeddings = model.get_sample_representations()
+        >>> distances = model.calculate_distance_matrix()
+        """
+        self._check_adata_loaded()
+        return self.sample_representation
+
+    def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
+        """Per-donor importance derived from the L2 norm of patient embeddings.
+
+        PaSCient does not expose per-label importance directly.  The L2
+        norm of the patient embedding is used as a scalar proxy.  For
+        label-specific prediction, use :meth:`fine_tune` and
+        :meth:`predict`.
+
+        Parameters
+        ----------
+        force
+            Recompute even if cached results exist.
+
+        Returns
+        -------
+        pd.DataFrame
+            Indexed by donor ID.  One column per label key named
+            ``"<label_key>_importance"``.
+
+        Examples
+        --------
+        >>> scores = model.get_sample_importance()
+        """
+        self._check_adata_loaded()
+
+        cache_key = "supervised_sample_importance"
+        if not force and cache_key in self.adata.uns:
+            return pd.DataFrame(self.adata.uns[cache_key], index=self.samples)
+
+        norms = np.linalg.norm(self.sample_representation.values, axis=1)
+
+        if len(self.label_keys) == 1:
+            sample_importance = pd.DataFrame(
+                {f"{self.label_keys[0]}_importance": norms},
+                index=self.samples,
+            )
+        else:
+            sample_importance = pd.DataFrame(
+                {f"{k}_importance": norms for k in self.label_keys},
+                index=self.samples,
+            )
+            sample_importance.insert(0, "average_importance", norms)
+
+        self.adata.uns[cache_key] = sample_importance.to_dict()
+        return sample_importance
+
+    def get_cell_importance(self, force: bool = False) -> pd.DataFrame:
+        """Per-cell importance as cosine similarity to the donor patient embedding.
+
+        Computes the absolute cosine similarity between each cell's
+        intermediate embedding (from the cell-to-cell encoder) and the
+        corresponding donor's patient embedding.
+
+        Parameters
+        ----------
+        force
+            Recompute even if cached results exist in ``adata.obs``.
+
+        Returns
+        -------
+        pd.DataFrame
+            Indexed by ``adata.obs_names``.  One column per label key
+            named ``"<label_key>_importance"``.
+
+        Examples
+        --------
+        >>> importance = model.get_cell_importance()
+        >>> adata.obs["importance"] = importance.values
+        >>> sc.pl.umap(adata, color="importance")
+        """
+        self._check_adata_loaded()
+
+        importance_cols = [f"{k}_importance" for k in self.label_keys]
+        if not force and all(c in self.adata.obs.columns for c in importance_cols):
+            return self.adata.obs[importance_cols]
+
+        donor_col = self.adata.obs[self.sample_key].values
+        scores = np.zeros(len(self.adata))
+
+        for donor_id in self.samples:
+            cell_mask = donor_col == donor_id
+            if not cell_mask.any() or donor_id not in self.sample_representation.index:
+                continue
+
+            patient_vec = self.sample_representation.loc[donor_id].values
+
+            if donor_id in self._cell_embeddings:
+                # Use PaSCient cell embeddings (may include padding rows)
+                cell_emb = self._cell_embeddings[donor_id]
+                n_real_cells = cell_mask.sum()
+                cell_emb = cell_emb[:n_real_cells]
+                d = min(cell_emb.shape[1], patient_vec.shape[0])
+                dot = np.abs(cell_emb[:, :d] @ patient_vec[:d])
+                cell_norms = np.linalg.norm(cell_emb[:, :d], axis=1) + 1e-8
+                patient_norm = np.linalg.norm(patient_vec[:d]) + 1e-8
+                scores[cell_mask] = dot / (cell_norms * patient_norm)
+            else:
+                # Fallback: cosine similarity with raw expression features
+                cell_data = self._get_data()[cell_mask]
+                if hasattr(cell_data, "toarray"):
+                    cell_data = cell_data.toarray()
+                d = min(cell_data.shape[1], patient_vec.shape[0])
+                dot = np.abs(cell_data[:, :d] @ patient_vec[:d])
+                cell_norms = np.linalg.norm(cell_data[:, :d], axis=1) + 1e-8
+                patient_norm = np.linalg.norm(patient_vec[:d]) + 1e-8
+                scores[cell_mask] = dot / (cell_norms * patient_norm)
+
+        result = pd.DataFrame(index=self.adata.obs_names)
+        for col in importance_cols:
+            result[col] = scores
+            self.adata.obs[col] = scores
+
+        return result
