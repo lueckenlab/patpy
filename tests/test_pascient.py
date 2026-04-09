@@ -726,9 +726,9 @@ class TestPaSCientIntegration:
     """
 
     def test_build_model_returns_sample_predictor(self, basic_adata):
-        from patpy.tl.supervised import SupervisedSampleMethod
-
         from pascient.model.sample_predictor import SamplePredictor
+
+        from patpy.tl.supervised import SupervisedSampleMethod
 
         model = PaSCient(
             sample_key="donor_id",
