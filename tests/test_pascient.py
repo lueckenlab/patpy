@@ -148,9 +148,10 @@ def pascient_model_multilabel(basic_adata, _patch_pascient):
 
 
 class TestPaSCientConstruction:
-    def test_checkpoint_dir_required(self):
-        with pytest.raises(ValueError, match="checkpoint_dir is required"):
-            PaSCient(sample_key="d", label_keys=["x"], tasks=["classification"])
+    def test_no_checkpoint_and_no_train_raises(self, basic_adata):
+        model = PaSCient(sample_key="donor_id", label_keys=["disease"], tasks=["classification"], device="cpu")
+        with pytest.raises(ValueError, match="checkpoint_dir or.*train=True"):
+            model.prepare_anndata(basic_adata)
 
     def test_constructor_stores_params(self):
         model = PaSCient(
@@ -588,3 +589,79 @@ class TestPaSCientCheckpointResolution:
         )
         config_path, ckpt_path = model._resolve_checkpoint_paths()
         assert ckpt_path.endswith("weights.ckpt")
+
+
+# ---------------------------------------------------------------------------
+# Tests: end-to-end training
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _patch_build_model(monkeypatch):
+    """Patch _build_model to return a lightweight mock instead of importing pascient."""
+    monkeypatch.setattr(
+        PaSCient,
+        "_build_model",
+        lambda self, n_genes, n_classes: _MockPaSCientModel(n_genes, n_classes=n_classes),
+    )
+
+
+class TestPaSCientTraining:
+    def test_train_from_scratch(self, basic_adata, _patch_build_model):
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=2,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        assert model._fitted
+        assert model.sample_representation is not None
+        assert model.sample_representation.shape[0] == N_DONORS
+
+    def test_train_regression(self, basic_adata, _patch_build_model):
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["age"],
+            tasks=["regression"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=2,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        assert model._fitted
+
+    def test_train_then_predict(self, basic_adata, _patch_build_model):
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=2,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        model.fine_tune("disease", "classification")
+        preds = model.predict("disease")
+        assert isinstance(preds, pd.DataFrame)
+        assert "disease_pred" in preds.columns
+
+    def test_train_produces_embeddings(self, basic_adata, _patch_build_model):
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=2,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        reps = model.get_sample_representations()
+        assert reps.shape == (N_DONORS, EMB_DIM)
+        assert not reps.isna().any().any()
