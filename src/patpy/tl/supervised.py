@@ -1225,17 +1225,17 @@ class PaSCient(SupervisedSampleMethod):
     expression through gene-to-cell, cell-to-cell, and cell-to-patient
     aggregation stages to produce a fixed-size patient embedding.
 
-    This wrapper loads a pre-trained PaSCient model from a checkpoint
-    directory and extracts patient-level and cell-level representations
-    following the patpy ``SupervisedSampleMethod`` interface.
+    This wrapper can either load a pre-trained PaSCient model from a
+    checkpoint directory **or** train one from scratch on the provided
+    AnnData.
 
     Parameters
     ----------
     sample_key : str
         Column in ``adata.obs`` with donor / sample identifiers.
     label_keys : list[str]
-        Donor-level target columns.  Used for evaluation and
-        prediction when the model has a prediction head.
+        Donor-level target columns.  Used for training (when
+        ``train=True``) and for evaluation.
     tasks : list[_PREDICTION_TASKS]
         Prediction task for each label key.
     cell_group_key : str or None, optional
@@ -1245,28 +1245,52 @@ class PaSCient(SupervisedSampleMethod):
         expression.  If ``None``, ``adata.X`` is used.  PaSCient
         expects log-normalised expression; set ``normalize=True``
         (the default) to apply log-normalisation automatically.
-    checkpoint_dir : str
+    checkpoint_dir : str or None, optional
         Path to a PaSCient checkpoint directory.  Must contain
         ``.hydra/config.yaml`` and a checkpoint file under
-        ``checkpoints/``.
+        ``checkpoints/``.  When ``None``, a model is trained from
+        scratch via :meth:`prepare_anndata` with ``train=True``.
     n_cells : int, default 1000
-        Number of cells to sample per donor during inference.  Donors
-        with fewer cells are zero-padded; donors with more are
-        randomly subsampled.
+        Number of cells to sample per donor during training and
+        inference.  Donors with fewer cells are zero-padded; donors
+        with more are randomly subsampled.
     batch_size : int, default 16
         Donors processed per forward pass.
     device : str, default ``"cuda"``
-        Inference device.
+        Device for training and inference.
     normalize : bool, default True
         Whether to apply log-normalisation (total-count normalisation
         with ``target_sum=1e4`` followed by ``log1p``) to the
-        expression data before inference.  Set to ``False`` if the
-        data is already log-normalised.
+        expression data.  Set to ``False`` if the data is already
+        log-normalised.
+    n_epochs : int, default 10
+        Training epochs (only used when ``train=True``).
+    lr : float, default 1e-4
+        Learning rate (only used when ``train=True``).
+    weight_decay : float, default 1e-4
+        Weight decay (only used when ``train=True``).
+    latent_dim : int, default 128
+        Cell embedding dimension (only used when training from scratch).
+    patient_emb_dim : int, default 512
+        Patient embedding dimension (only used when training from
+        scratch).
     seed : int, default 42
         Random seed.
 
     Examples
     --------
+    Train from scratch:
+
+    >>> model = PaSCient(
+    ...     sample_key="donor_id",
+    ...     label_keys=["disease"],
+    ...     tasks=["classification"],
+    ...     n_epochs=10,
+    ... )
+    >>> model.prepare_anndata(adata, train=True)
+
+    Load from checkpoint:
+
     >>> model = PaSCient(
     ...     sample_key="donor_id",
     ...     label_keys=["disease"],
@@ -1274,8 +1298,6 @@ class PaSCient(SupervisedSampleMethod):
     ...     checkpoint_dir="/path/to/pascient/checkpoint",
     ... )
     >>> model.prepare_anndata(adata)
-    >>> embeddings = model.get_sample_representations()
-    >>> scores = model.get_sample_importance()
     """
 
     def __init__(
@@ -1290,6 +1312,11 @@ class PaSCient(SupervisedSampleMethod):
         batch_size: int = 16,
         device: str = "cuda",
         normalize: bool = True,
+        n_epochs: int = 10,
+        lr: float = 1e-4,
+        weight_decay: float = 1e-4,
+        latent_dim: int = 128,
+        patient_emb_dim: int = 512,
         seed: int = 42,
     ) -> None:
         super().__init__(
@@ -1300,14 +1327,17 @@ class PaSCient(SupervisedSampleMethod):
             layer=layer,
             seed=seed,
         )
-        if checkpoint_dir is None:
-            raise ValueError("checkpoint_dir is required. Provide the path to a PaSCient checkpoint directory.")
 
         self.checkpoint_dir = checkpoint_dir
         self.n_cells = n_cells
         self.batch_size = batch_size
         self.device = device
         self.normalize = normalize
+        self.n_epochs = n_epochs
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.latent_dim = latent_dim
+        self.patient_emb_dim = patient_emb_dim
 
         self._pascient_model = None
         self._cell_embeddings: dict[str, np.ndarray] = {}  # donor_id → (n_cells, emb_dim)
@@ -1404,22 +1434,30 @@ class PaSCient(SupervisedSampleMethod):
 
         return config_path, checkpoint_path
 
-    def prepare_anndata(self, adata: sc.AnnData) -> None:
-        """Load PaSCient model and extract donor-level embeddings.
+    def prepare_anndata(self, adata: sc.AnnData, train: bool = False) -> None:
+        """Load or train PaSCient model and extract donor-level embeddings.
 
         Parameters
         ----------
         adata
             Single-cell AnnData.  Must contain :attr:`sample_key` and all
-            :attr:`label_keys` in ``.obs``.  Expression data should be raw
-            counts (if ``normalize=True``) or log-normalised expression
-            (if ``normalize=False``).  Gene ordering must match the model's
-            training data.
+            :attr:`label_keys` in ``.obs``.
+        train
+            If ``True``, train the model on *adata*.  When
+            ``checkpoint_dir`` is ``None`` a fresh model is built;
+            otherwise the pretrained model is loaded first and then
+            fine-tuned.
         """
         super().prepare_anndata(adata)
 
-        config_path, checkpoint_path = self._resolve_checkpoint_paths()
-        self._pascient_model = self._load_pascient_model(config_path, checkpoint_path)
+        if self.checkpoint_dir is not None:
+            config_path, checkpoint_path = self._resolve_checkpoint_paths()
+            self._pascient_model = self._load_pascient_model(config_path, checkpoint_path)
+        elif not train:
+            raise ValueError("Either provide checkpoint_dir or set train=True to train from scratch.")
+
+        if train:
+            self._train(adata)
 
         try:
             self._pascient_model = self._pascient_model.to(self.device)
@@ -1434,6 +1472,149 @@ class PaSCient(SupervisedSampleMethod):
         # Extract embeddings for all donors
         self._extract_embeddings(adata)
         self._fitted = True
+
+    def _build_model(self, n_genes: int, n_classes: int):
+        """Build a fresh PaSCient model from pascient component classes.
+
+        Parameters
+        ----------
+        n_genes
+            Number of input genes.
+        n_classes
+            Number of prediction outputs.
+
+        Returns
+        -------
+        torch.nn.Module
+            A module with the standard PaSCient sub-module attributes
+            (``gene2cell_encoder``, ``cell2cell_encoder``, etc.).
+        """
+        import torch.nn as nn
+
+        try:
+            from pascient.components.aggregators import MeanAggregator
+            from pascient.components.basic_models import BasicMLP
+            from pascient.components.cell_to_cell import CellToCellIdentity
+            from pascient.components.gene_to_cell import GeneToCellMLP
+        except ImportError as e:
+            raise ImportError("pascient is required. Install from: https://github.com/genentech/pascient") from e
+
+        class _Model(nn.Module):
+            def __init__(self_, n_genes, latent_dim, emb_dim, n_classes):
+                super().__init__()
+                self_.gene2cell_encoder = GeneToCellMLP(n_genes, latent_dim=latent_dim, hidden_dim=[latent_dim * 4])
+                self_.cell2cell_encoder = CellToCellIdentity()
+                self_.cell2patient_aggregation = MeanAggregator(dim=2)
+                self_.patient_encoder = BasicMLP(latent_dim, latent_dim, emb_dim, n_hidden_layers=0)
+                self_.patient_predictor = BasicMLP(emb_dim, n_classes, n_classes, n_hidden_layers=-1)
+
+        return _Model(n_genes, self.latent_dim, self.patient_emb_dim, n_classes)
+
+    def _train(self, adata: sc.AnnData) -> None:
+        """Train PaSCient on *adata* using a plain PyTorch loop.
+
+        Uses PaSCient's component classes (``GeneToCellMLP``,
+        ``CellToCellIdentity``, ``MeanAggregator``, ``BasicMLP``) for
+        the architecture and trains end-to-end with cross-entropy
+        (classification) or MSE (regression) loss on the first label
+        key.
+
+        Parameters
+        ----------
+        adata
+            AnnData with donor labels in ``.obs``.
+        """
+        import torch
+        import torch.nn as nn
+
+        rng = np.random.default_rng(self.seed)
+        expression = self._get_expression_matrix(adata)
+        n_genes = expression.shape[1]
+        donor_col = adata.obs[self.sample_key].values
+        donor_list = list(self.samples)
+
+        # Determine output dimension and loss from the first label/task
+        label_key = self.label_keys[0]
+        task = self.tasks[0]
+        label_vals = self.labels[label_key].values
+
+        if task == "classification":
+            classes = np.unique(label_vals)
+            n_classes = len(classes)
+            class_to_int = {c: i for i, c in enumerate(classes)}
+            y_all = np.array([class_to_int[v] for v in label_vals])
+            criterion = nn.CrossEntropyLoss()
+        else:
+            n_classes = 1
+            y_all = label_vals.astype(np.float32)
+            criterion = nn.MSELoss()
+
+        # Build or reuse model
+        if self._pascient_model is None:
+            self._pascient_model = self._build_model(n_genes, n_classes)
+
+        model = self._pascient_model.to(self.device)
+        model.train()
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+
+        for epoch in range(self.n_epochs):
+            rng.shuffle(donor_list)
+            epoch_loss = 0.0
+
+            for batch_start in range(0, len(donor_list), self.batch_size):
+                batch_donors = donor_list[batch_start : batch_start + self.batch_size]
+                batch_x, batch_pad, batch_y = [], [], []
+
+                for donor_id in batch_donors:
+                    cell_mask = donor_col == donor_id
+                    donor_expr = expression[cell_mask]
+                    n_donor_cells = donor_expr.shape[0]
+                    if n_donor_cells == 0:
+                        continue
+
+                    if n_donor_cells >= self.n_cells:
+                        idx = rng.choice(n_donor_cells, size=self.n_cells, replace=False)
+                        sampled = donor_expr[idx]
+                        pad = np.ones(self.n_cells, dtype=bool)
+                    else:
+                        sampled = np.zeros((self.n_cells, n_genes), dtype=np.float32)
+                        sampled[:n_donor_cells] = donor_expr
+                        pad = np.zeros(self.n_cells, dtype=bool)
+                        pad[:n_donor_cells] = True
+
+                    batch_x.append(sampled[np.newaxis, :, :])
+                    batch_pad.append(pad[np.newaxis, :])
+
+                    donor_idx = np.where(self.labels.index == donor_id)[0][0]
+                    batch_y.append(y_all[donor_idx])
+
+                if not batch_x:
+                    continue
+
+                x_t = torch.tensor(np.stack(batch_x), dtype=torch.float32, device=self.device)
+                pad_t = torch.tensor(np.stack(batch_pad), dtype=torch.bool, device=self.device)
+
+                if self.normalize:
+                    x_t, pad_t = self._lognormalize(x_t, pad_t)
+
+                preds = self._forward_model(x_t, pad_t)[2]  # patient_preds
+                preds = preds.squeeze(1)  # (batch, n_classes)
+
+                if task == "classification":
+                    y_t = torch.tensor(batch_y, dtype=torch.long, device=self.device)
+                else:
+                    y_t = torch.tensor(batch_y, dtype=torch.float32, device=self.device)
+                    preds = preds.squeeze(-1)
+
+                loss = criterion(preds, y_t)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+
+            logger.info("PaSCient epoch %d/%d  loss=%.4f", epoch + 1, self.n_epochs, epoch_loss)
+
+        model.eval()
 
     def _get_expression_matrix(self, adata: sc.AnnData) -> np.ndarray:
         """Return expression data as a dense float32 numpy array.
