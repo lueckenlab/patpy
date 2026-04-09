@@ -81,7 +81,9 @@ optional-dependencies.mrvi = [
 ]
 optional-dependencies.pascient = [
   "hydra-core>=1.3",
+  "lightning",
   "pascient @ git+https://github.com/genentech/pascient.git@main",
+  "s3fs",
 ]
 optional-dependencies.pilot = [
   "pilotpy",
