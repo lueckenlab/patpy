@@ -1366,7 +1366,7 @@ class PaSCient(SupervisedSampleMethod):
         try:
             import pascient
         except ImportError as e:
-            raise ImportError("pascient is required. Install from: https://github.com/genentech/pascient") from e
+            raise ImportError("pascient is required. Install with: pip install patpy[pascient]") from e
 
         # PaSCient was originally packaged as "cellm"; Hydra configs may
         # reference the old name, so register it as an alias.
@@ -1377,7 +1377,7 @@ class PaSCient(SupervisedSampleMethod):
             from hydra import compose, initialize_config_dir
         except ImportError as e:
             raise ImportError(
-                "hydra-core is required for PaSCient model loading. Install with: pip install hydra-core"
+                "hydra-core is required for PaSCient model loading. Install with: pip install patpy[pascient]"
             ) from e
 
         with initialize_config_dir(version_base=None, config_dir=config_path, job_name="patpy_pascient"):
@@ -1502,7 +1502,7 @@ class PaSCient(SupervisedSampleMethod):
             from pascient.components.masking import DummyMasking
             from pascient.model.sample_predictor import SamplePredictor
         except ImportError as e:
-            raise ImportError("pascient is required. Install from: https://github.com/genentech/pascient") from e
+            raise ImportError("pascient is required. Install with: pip install patpy[pascient]") from e
 
         latent_dim = self.latent_dim  # 1024
         emb_dim = self.patient_emb_dim  # 512
@@ -1571,7 +1571,7 @@ class PaSCient(SupervisedSampleMethod):
             from pascient.data.data_structures import SampleBatch
         except ImportError as e:
             raise ImportError(
-                "pascient and lightning are required for training. Install from: https://github.com/genentech/pascient"
+                "pascient and lightning are required for training. Install with: pip install patpy[pascient]"
             ) from e
 
         expression = self._get_expression_matrix(adata)
