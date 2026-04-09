@@ -1218,7 +1218,7 @@ class PULSAR(SupervisedSampleMethod):
 
 
 class PaSCient(SupervisedSampleMethod):
-    """Patient-level representation via PaSCient by De Brouwer et al. 2024 (https://arxiv.org/abs/2405.12459).
+    """Patient-level representation via PaSCient by De Brouwer et al. 2025 (https://doi.org/10.1016/j.cels.2025.101195).
 
     PaSCient learns multi-cellular patient representations from single-cell
     transcriptomics data using a hierarchical encoder that processes gene
@@ -1269,6 +1269,8 @@ class PaSCient(SupervisedSampleMethod):
         Learning rate (only used when ``train=True``).
     weight_decay : float, default 1e-4
         Weight decay (only used when ``train=True``).
+    val_fraction : float, default 0.1
+        Fraction of donors held out for validation during training.
     latent_dim : int, default 1024
         Cell embedding dimension (only used when training from scratch).
     patient_emb_dim : int, default 512
@@ -1314,6 +1316,7 @@ class PaSCient(SupervisedSampleMethod):
         n_epochs: int = 4,
         lr: float = 1e-4,
         weight_decay: float = 1e-4,
+        val_fraction: float = 0.1,
         latent_dim: int = 1024,
         patient_emb_dim: int = 512,
         seed: int = 12345,
@@ -1335,6 +1338,7 @@ class PaSCient(SupervisedSampleMethod):
         self.n_epochs = n_epochs
         self.lr = lr
         self.weight_decay = weight_decay
+        self.val_fraction = val_fraction
         self.latent_dim = latent_dim
         self.patient_emb_dim = patient_emb_dim
 
@@ -1649,9 +1653,8 @@ class PaSCient(SupervisedSampleMethod):
                 view_names=batch[0].view_names,
             )
 
-        # 90/10 train-val split
         full_ds = _DS(self.samples)
-        n_val = max(1, int(len(full_ds) * 0.1))
+        n_val = max(1, int(len(full_ds) * self.val_fraction))
         n_train = len(full_ds) - n_val
         train_ds, val_ds = random_split(full_ds, [n_train, n_val], generator=torch.Generator().manual_seed(self.seed))
 
@@ -1909,7 +1912,7 @@ class PaSCient(SupervisedSampleMethod):
 
         Computes Integrated Gradients (IG) attributions from ``captum``
         following the approach in the PaSCient paper (De Brouwer et al.
-        2024).  For each donor, the IG attributions at the gene level
+        2025, https://doi.org/10.1016/j.cels.2025.101195).  For each donor, the IG attributions at the gene level
         are computed with respect to the model's prediction for the
         specified *target* class, using a zero baseline.  The per-cell
         importance score is the L2 norm of the per-gene attribution
