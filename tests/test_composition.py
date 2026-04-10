@@ -57,7 +57,7 @@ def categorical_adata():
 
 class TestCellGroupCompositionInitialization:
     def test_default_parameters(self):
-        comp = CellGroupComposition()
+        comp = CellGroupComposition(sample_key="sample", cell_group_key="type")
         assert comp.sample_key == "sample"
         assert comp.cell_group_key == "type"
         assert comp.apply_clr is False

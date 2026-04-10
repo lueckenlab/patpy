@@ -768,8 +768,8 @@ class MrVI(SampleRepresentationMethod):
 
     def __init__(
         self,
-        sample_key: str = "sample",
-        cell_group_key: str = "type",
+        sample_key: str,
+        cell_group_key: str,
         batch_key: str = None,
         layer=None,
         seed=67,
@@ -908,7 +908,7 @@ class WassersteinTSNE(SampleRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_wasserstein_distances"
 
-    def __init__(self, sample_key="sample", cell_group_key="type", replicate_key=None, layer="X_scvi", seed=67):
+    def __init__(self, sample_key, cell_group_key, replicate_key=None, layer="X_scvi", seed=67):
         """Create Wasserstein distances embedding between samples
 
         Parameters
@@ -994,8 +994,8 @@ class PILOT(SampleRepresentationMethod):
 
     def __init__(
         self,
-        sample_key="sample",
-        cell_group_key="type",
+        sample_key,
+        cell_group_key,
         sample_state_col=None,
         dataset_name="pilot_dataset",
         layer="X_pca",
@@ -1114,7 +1114,7 @@ class GroupedPseudobulk(SampleRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_ct_pseudobulk_distances"
 
-    def __init__(self, sample_key="sample", cell_group_key="type", layer="X_pca", seed=67):
+    def __init__(self, sample_key, cell_group_key, layer="X_pca", seed=67):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
         self.sample_representation = None
@@ -1158,7 +1158,7 @@ class RandomVector(SampleRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_random_vector_distances"
 
-    def __init__(self, sample_key="sample", cell_group_key="type", latent_dim: int = 30, seed=67):
+    def __init__(self, sample_key, cell_group_key, latent_dim: int = 30, seed=67):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, seed=seed)
 
         self.latent_dim = latent_dim
@@ -1194,14 +1194,14 @@ class CellGroupComposition(SampleRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_composition"
 
-    def __init__(self, sample_key="sample", cell_group_key="type", apply_clr=False, pseudocount=1, layer=None, seed=67):
+    def __init__(self, sample_key, cell_group_key, apply_clr=False, pseudocount=1, layer=None, seed=67):
         """Initialize CellGroupComposition
 
         Parameters
         ----------
-        sample_key : str = "sample"
+        sample_key : str
             Column in `.obs` containing sample IDs.
-        cell_group_key : str = "type"
+        cell_group_key : str
             Column in `.obs` containing cell group annotations (e.g., cell types).
         apply_clr : bool = False
             If True, apply centered log-ratio (CLR) transformation to the composition
@@ -1301,8 +1301,8 @@ class SCPoli(SampleRepresentationMethod):
 
     def __init__(
         self,
-        sample_key="sample",
-        cell_group_key="type",
+        sample_key,
+        cell_group_key,
         latent_dim=3,
         layer=None,
         seed=67,
@@ -1387,7 +1387,7 @@ class PhEMD(SampleRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_phemd"
 
-    def __init__(self, sample_key="sample", cell_group_key="type", layer=None, n_clusters: int = 8, seed=67):
+    def __init__(self, sample_key, cell_group_key, layer=None, n_clusters: int = 8, seed=67):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
         self.n_clusters = n_clusters
@@ -1460,7 +1460,7 @@ class DiffusionEarthMoverDistance(SampleRepresentationMethod):
     DISTANCES_UNS_KEY = "X_diffusion_emd"
 
     def __init__(
-        self, sample_key="sample", cell_group_key="type", layer=None, seed=67, n_neighbors: int = 15, n_scales: int = 6
+        self, sample_key, cell_group_key, layer=None, seed=67, n_neighbors: int = 15, n_scales: int = 6
     ):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
@@ -1578,8 +1578,8 @@ class MOFA(SampleRepresentationMethod):
 
     def __init__(
         self,
-        sample_key: str = "sample",
-        cell_group_key: str = "type",
+        sample_key: str,
+        cell_group_key: str,
         layer: str | None = None,
         seed: int = 67,
         n_factors: int = 10,
@@ -1752,7 +1752,7 @@ class GloScope(SampleRepresentationMethod):
 
     def __init__(
         self,
-        sample_key="sample",
+        sample_key,
         cell_group_key=None,
         layer=None,
         seed=67,
