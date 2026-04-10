@@ -795,9 +795,7 @@ class TestPaSCientDeviceConsistency:
     def _assert_model_on_device(self, model):
         expected = torch.device(model.device)
         for name, param in model._pascient_model.named_parameters():
-            assert param.device == expected, (
-                f"Parameter {name} is on {param.device}, expected {expected}"
-            )
+            assert param.device == expected, f"Parameter {name} is on {param.device}, expected {expected}"
 
     def test_model_on_device_after_prepare_anndata(self, basic_adata, _patch_build_model_cpu):
         model = PaSCient(
