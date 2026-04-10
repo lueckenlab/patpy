@@ -1234,6 +1234,7 @@ class CellGroupComposition(SampleRepresentationMethod):
 
     def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between samples represented as cell group composition vectors"""
+        self._check_adata_loaded()
         is_correct_params_in_uns = (
             "composition_parameters" in self.adata.uns
             and self.adata.uns["composition_parameters"].get("apply_clr") == self.apply_clr
