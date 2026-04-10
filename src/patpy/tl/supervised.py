@@ -1345,6 +1345,8 @@ class PaSCient(SupervisedSampleMethod):
         self._pascient_model = None
         self._cell_embeddings: dict[str, np.ndarray] = {}  # donor_id → (n_cells, emb_dim)
         self.sample_representation: pd.DataFrame | None = None
+        self._trained_label: str | None = None  # label_key used to train the native head
+        self._class_names: list | None = None  # class names for classification decode
 
     @staticmethod
     def _load_pascient_model(config_path: str, checkpoint_path: str):
@@ -1578,7 +1580,7 @@ class PaSCient(SupervisedSampleMethod):
                 "pascient and lightning are required for training. Install with: pip install patpy[pascient]"
             ) from e
 
-        expression = self._get_expression_matrix(adata)
+        expression = self._get_expression_matrix()
         n_genes = expression.shape[1]
         donor_col = adata.obs[self.sample_key].values
 
@@ -1588,13 +1590,17 @@ class PaSCient(SupervisedSampleMethod):
         label_vals = self.labels[label_key].values
 
         if task == "classification":
-            classes = np.unique(label_vals)
+            classes = sorted(np.unique(label_vals))
             n_classes = len(classes)
             class_to_int = {c: i for i, c in enumerate(classes)}
             y_map = {d: class_to_int[v] for d, v in zip(self.labels.index, label_vals, strict=True)}
+            self._class_names = list(classes)
         else:
             n_classes = 1
             y_map = {d: float(v) for d, v in zip(self.labels.index, label_vals, strict=True)}
+            self._class_names = None
+
+        self._trained_label = label_key
 
         if self._pascient_model is None:
             self._pascient_model = self._build_model(n_genes, n_classes)
@@ -1613,20 +1619,20 @@ class PaSCient(SupervisedSampleMethod):
                 return len(self_.donors)
 
             def __getitem__(self_, idx):
-                did = self_.donors[idx]
-                mask = donor_col == did
-                de = expression[mask]
-                nc = de.shape[0]
+                donor_id = self_.donors[idx]
+                mask = donor_col == donor_id
+                donor_expression = expression[mask]
+                n_donor_cells = donor_expression.shape[0]
 
-                if nc >= n_cells:
-                    sel = np.random.choice(nc, size=n_cells, replace=False)
-                    x = de[sel]
+                if n_donor_cells >= n_cells:
+                    sel = np.random.choice(n_donor_cells, size=n_cells, replace=False)
+                    x = donor_expression[sel]
                     pad = np.ones(n_cells, dtype=bool)
                 else:
                     x = np.zeros((n_cells, n_genes), dtype=np.float32)
-                    x[:nc] = de
+                    x[:n_donor_cells] = donor_expression
                     pad = np.zeros(n_cells, dtype=bool)
-                    pad[:nc] = True
+                    pad[:n_donor_cells] = True
 
                 x_t = torch.tensor(x[np.newaxis], dtype=torch.float32)
                 pad_t = torch.tensor(pad[np.newaxis], dtype=torch.bool)
@@ -1637,7 +1643,7 @@ class PaSCient(SupervisedSampleMethod):
                 return SampleBatch(
                     x=x_t,
                     padded_mask=pad_t,
-                    sample_metadata={label_key: torch.tensor(y_map[did])},
+                    sample_metadata={label_key: torch.tensor(y_map[donor_id])},
                     cell_metadata={},
                     view_names=["view_0"],
                 )
@@ -1675,16 +1681,11 @@ class PaSCient(SupervisedSampleMethod):
         trainer.fit(self._pascient_model, train_dataloaders=train_dl, val_dataloaders=val_dl)
         self._pascient_model.eval()
 
-    def _get_expression_matrix(self, adata: sc.AnnData) -> np.ndarray:
+    def _get_expression_matrix(self) -> np.ndarray:
         """Return expression data as a dense float32 numpy array.
 
-        No normalisation is applied here — normalisation is performed
-        per-batch on the tensor level in :meth:`_extract_embeddings`.
-
-        Parameters
-        ----------
-        adata
-            Input AnnData.
+        Delegates to :meth:`_get_data` from the base class, then
+        densifies and casts to float32.
 
         Returns
         -------
@@ -1693,15 +1694,7 @@ class PaSCient(SupervisedSampleMethod):
         """
         import scipy.sparse
 
-        if self.layer is None or self.layer == "X":
-            X = adata.X
-        elif self.layer in adata.layers:
-            X = adata.layers[self.layer]
-        else:
-            raise ValueError(
-                f"layer='{self.layer}' not found in adata.layers. Provide a valid layer key or None to use adata.X."
-            )
-
+        X = self._get_data()
         if scipy.sparse.issparse(X):
             X = X.toarray()
         return np.asarray(X, dtype=np.float32)
@@ -1773,7 +1766,7 @@ class PaSCient(SupervisedSampleMethod):
 
         rng = np.random.default_rng(self.seed)
         donor_col = adata.obs[self.sample_key].values
-        expression = self._get_expression_matrix(adata)
+        expression = self._get_expression_matrix()
         n_genes = expression.shape[1]
 
         donor_ids = []
@@ -1860,6 +1853,186 @@ class PaSCient(SupervisedSampleMethod):
         """
         self._check_adata_loaded()
         return self.sample_representation
+
+    def fine_tune(
+        self,
+        labels: list[str] | str,
+        tasks: list[_PREDICTION_TASKS] | _PREDICTION_TASKS,
+        **kwargs,
+    ) -> None:
+        """Fine-tune the PaSCient model on new or existing labels.
+
+        If the label matches the one used for initial training and
+        ``pascient`` is installed, the ``SamplePredictor`` is trained
+        for further epochs via ``lightning.Trainer.fit``.  Otherwise,
+        sklearn linear probes are fitted on top of the frozen patient
+        embeddings (inherited behaviour).
+
+        Parameters
+        ----------
+        labels : list[str] or str
+            Labels to train for.
+        tasks : list[_PREDICTION_TASKS] or _PREDICTION_TASKS
+            Corresponding prediction task per label.
+        **kwargs
+            Extra arguments forwarded to the training loop (e.g.
+            ``n_epochs``).
+        """
+        labels_list = [labels] if isinstance(labels, str) else list(labels)
+        tasks_list = [tasks] if isinstance(tasks, str) else list(tasks)
+
+        # If the request matches the native head label, continue
+        # training the SamplePredictor end-to-end.
+        if len(labels_list) == 1 and labels_list[0] == self._trained_label and self._pascient_model is not None:
+            n_epochs = kwargs.get("n_epochs", self.n_epochs)
+            old_epochs = self.n_epochs
+            self.n_epochs = n_epochs
+            try:
+                self._train(self.adata)
+            finally:
+                self.n_epochs = old_epochs
+            # Re-extract embeddings after continued training
+            self._extract_embeddings(self.adata)
+            return
+
+        # For a different label, swap the prediction head and train
+        # the full model if pascient is available.
+        if self._pascient_model is not None:
+            try:
+                from pascient.components.basic_models import BasicMLP
+            except ImportError:
+                BasicMLP = None
+
+            if BasicMLP is not None and len(labels_list) == 1:
+                labels_list, tasks_list = self._prepare_fine_tune(labels_list, tasks_list)
+                label_key = labels_list[0]
+                task = tasks_list[0]
+                label_vals = self.labels[label_key].values
+
+                if task == "classification":
+                    classes = sorted(np.unique(label_vals))
+                    n_out = len(classes)
+                    self._class_names = list(classes)
+                else:
+                    n_out = 1
+                    self._class_names = None
+
+                emb_dim = self.patient_emb_dim
+                self._pascient_model.patient_predictor = BasicMLP(
+                    emb_dim, hidden_dim=n_out, output_dim=n_out, n_hidden_layers=-1
+                )
+                self._trained_label = label_key
+
+                n_epochs = kwargs.get("n_epochs", self.n_epochs)
+                old_epochs = self.n_epochs
+                self.n_epochs = n_epochs
+                try:
+                    self._train(self.adata)
+                finally:
+                    self.n_epochs = old_epochs
+                self._extract_embeddings(self.adata)
+                return
+
+        # Fallback: sklearn probes on frozen embeddings
+        super().fine_tune(labels, tasks, **kwargs)
+
+    def predict(self, label: str) -> pd.Series | pd.DataFrame:
+        """Predict *label* for every donor.
+
+        When *label* matches the label used to train the native
+        ``SamplePredictor`` head, the model's own predictions are
+        returned.  Otherwise, the inherited sklearn-probe prediction
+        is used (requires :meth:`fine_tune` to have been called for
+        that label first).
+
+        Parameters
+        ----------
+        label : str
+            Donor-level label to predict.
+
+        Returns
+        -------
+        pd.Series or pd.DataFrame
+            Classification: DataFrame with ``prob_<class>`` columns
+            and ``<label>_pred``.  Regression: Series of values.
+        """
+        self._check_fitted()
+        if label not in self.label_keys:
+            raise ValueError(f"`label='{label}'` is not found in model label keys.")
+
+        # Use the native prediction head when available
+        if label == self._trained_label and self._pascient_model is not None:
+            return self._predict_native(label)
+
+        # Fallback to sklearn probes
+        return super().predict(label)
+
+    def _predict_native(self, label: str) -> pd.Series | pd.DataFrame:
+        """Run the SamplePredictor's native head on all donors."""
+        import torch
+
+        task = self.tasks[self.label_keys.index(label)]
+        expression = self._get_expression_matrix()
+        n_genes = expression.shape[1]
+        donor_col = self.adata.obs[self.sample_key].values
+        rng = np.random.default_rng(self.seed)
+
+        all_preds = []
+        donor_ids = []
+
+        for batch_start in range(0, len(self.samples), self.batch_size):
+            batch_donors = list(self.samples[batch_start : batch_start + self.batch_size])
+            batch_x, batch_pad = [], []
+
+            for donor_id in batch_donors:
+                cell_mask = donor_col == donor_id
+                donor_expr = expression[cell_mask]
+                nc = donor_expr.shape[0]
+                if nc == 0:
+                    continue
+
+                if nc >= self.n_cells:
+                    idx = rng.choice(nc, size=self.n_cells, replace=False)
+                    sampled = donor_expr[idx]
+                    pad = np.ones(self.n_cells, dtype=bool)
+                else:
+                    sampled = np.zeros((self.n_cells, n_genes), dtype=np.float32)
+                    sampled[:nc] = donor_expr
+                    pad = np.zeros(self.n_cells, dtype=bool)
+                    pad[:nc] = True
+
+                batch_x.append(sampled[np.newaxis, :, :])
+                batch_pad.append(pad[np.newaxis, :])
+                donor_ids.append(donor_id)
+
+            if not batch_x:
+                continue
+
+            x_t = torch.tensor(np.stack(batch_x), dtype=torch.float32, device=self.device)
+            pad_t = torch.tensor(np.stack(batch_pad), dtype=torch.bool, device=self.device)
+            if self.normalize:
+                x_t, pad_t = self._lognormalize(x_t, pad_t)
+
+            with torch.no_grad():
+                preds = self._forward_model(x_t, pad_t)[2]  # (batch, 1, n_out)
+
+            all_preds.append(preds.squeeze(1).cpu().numpy())
+
+        preds_arr = np.concatenate(all_preds, axis=0)  # (n_donors, n_out)
+
+        if task == "classification":
+            import scipy.special
+
+            proba = scipy.special.softmax(preds_arr, axis=1)
+            classes = self._class_names or list(range(proba.shape[1]))
+            result = pd.DataFrame(
+                {f"prob_{c}": proba[:, i] for i, c in enumerate(classes)},
+                index=donor_ids,
+            )
+            result[f"{label}_pred"] = [classes[i] for i in proba.argmax(axis=1)]
+            return result
+        else:
+            return pd.Series(preds_arr.ravel(), index=donor_ids, name=label)
 
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
         """Per-donor importance derived from the L2 norm of patient embeddings.
@@ -2008,7 +2181,7 @@ class PaSCient(SupervisedSampleMethod):
 
         rng = np.random.default_rng(self.seed)
         donor_col = self.adata.obs[self.sample_key].values
-        expression = self._get_expression_matrix(self.adata)
+        expression = self._get_expression_matrix()
         n_genes = expression.shape[1]
         scores = np.zeros(len(self.adata))
 
