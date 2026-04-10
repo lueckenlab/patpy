@@ -908,7 +908,7 @@ class WassersteinTSNE(SampleRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_wasserstein_distances"
 
-    def __init__(self, sample_key, cell_group_key, replicate_key, layer="X_scvi", seed=67):
+    def __init__(self, sample_key, cell_group_key, replicate_key=None, layer="X_scvi", seed=67):
         """Create Wasserstein distances embedding between samples
 
         Parameters
@@ -996,7 +996,7 @@ class PILOT(SampleRepresentationMethod):
         self,
         sample_key,
         cell_group_key,
-        sample_state_col,
+        sample_state_col=None,
         dataset_name="pilot_dataset",
         layer="X_pca",
         seed=67,
@@ -1185,35 +1185,101 @@ class RandomVector(SampleRepresentationMethod):
 
 
 class CellGroupComposition(SampleRepresentationMethod):
-    """A simple baseline, which represents samples as composition of their cell groups (for example, cell type fractions)"""
+    """A simple baseline, which represents samples as composition of their cell groups (for example, cell type fractions).
+
+    Optionally applies centered log-ratio (CLR) transformation, which is the approach used by SETA.
+
+    Source (SETA): https://www.bioconductor.org/packages//release/bioc/html/SETA.html
+    """
 
     DISTANCES_UNS_KEY = "X_composition"
 
-    def __init__(self, sample_key, cell_group_key, layer=None, seed=67):
+    def __init__(self, sample_key, cell_group_key, apply_clr=False, pseudocount=1, layer=None, seed=67):
+        """Initialize CellGroupComposition
+
+        Parameters
+        ----------
+        sample_key : str
+            Column in `.obs` containing sample IDs.
+        cell_group_key : str
+            Column in `.obs` containing cell group annotations (e.g., cell types).
+        apply_clr : bool = False
+            If True, apply centered log-ratio (CLR) transformation to the composition
+            data before computing distances. This is the approach used by SETA.
+        pseudocount : float = 1
+            Value added to counts before log transformation when `apply_clr=True`.
+        layer : str = None
+            Not used by this method. Kept for API consistency.
+        seed : int = 67
+            Random seed. Not used by this method. Kept for API consistency.
+        """
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
+        self.apply_clr = apply_clr
+        self.pseudocount = pseudocount
         self.sample_representation = None
+
+    def _compute_clr(self, sample_col, cell_group_col):
+        """Compute CLR-transformed cell type composition matrix"""
+        # Generate count matrix
+        counts = pd.crosstab(sample_col, cell_group_col)
+
+        # Apply CLR transformation
+        counts_adjusted = counts + self.pseudocount
+        log_counts = np.log(counts_adjusted)
+        gm = np.exp(log_counts.mean(axis=1))
+        clr_mat = log_counts.sub(np.log(gm), axis=0)
+
+        return clr_mat
 
     def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between samples represented as cell group composition vectors"""
-        distances = super().calculate_distance_matrix(force=force)
+        self._check_adata_loaded()
+        is_correct_params_in_uns = (
+            "composition_parameters" in self.adata.uns
+            and self.adata.uns["composition_parameters"].get("apply_clr") == self.apply_clr
+            and self.adata.uns["composition_parameters"].get("pseudocount")
+            == (self.pseudocount if self.apply_clr else None)
+        )
+        is_recalculated = force or not is_correct_params_in_uns
 
-        if distances is not None:
-            return distances
+        if self.DISTANCES_UNS_KEY in self.adata.uns:
+            if is_recalculated:
+                warnings.warn(f"Rewriting uns key {self.DISTANCES_UNS_KEY}", stacklevel=1)
+            else:
+                return self.adata.uns[self.DISTANCES_UNS_KEY]
 
         distance_metric = valid_distance_metric(dist)
 
-        # Calculate proportions of the cell groups for each sample
-        self.sample_representation = pd.crosstab(
-            self.adata.obs[self.sample_key], self.adata.obs[self.cell_group_key], normalize="index"
-        )
+        sample_col = self.adata.obs[self.sample_key]
+        cell_group_col = self.adata.obs[self.cell_group_key]
+
+        # Handle categorical columns with unused categories
+        if hasattr(sample_col, "cat"):
+            sample_col = sample_col.cat.remove_unused_categories()
+        if hasattr(cell_group_col, "cat"):
+            cell_group_col = cell_group_col.cat.remove_unused_categories()
+
+        if self.apply_clr:
+            # CLR transformation (SETA-style)
+            self.sample_representation = self._compute_clr(sample_col, cell_group_col)
+        else:
+            # Standard proportions
+            self.sample_representation = pd.crosstab(sample_col, cell_group_col, normalize="index")
+
         self.sample_representation = self.sample_representation.loc[self.samples]
 
         distances = scipy.spatial.distance.pdist(self.sample_representation.values, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
-        self.adata.uns["composition_parameters"] = {"sample_key": self.sample_key, "distance_type": distance_metric}
+        self.adata.uns["composition_parameters"] = {
+            "sample_key": self.sample_key,
+            "cell_group_key": self.cell_group_key,
+            "distance_type": distance_metric,
+            "apply_clr": self.apply_clr,
+            "pseudocount": self.pseudocount if self.apply_clr else None,
+        }
 
         return distances
 
@@ -1683,7 +1749,15 @@ class GloScope(SampleRepresentationMethod):
     DISTANCES_UNS_KEY = "X_gloscope_distances"
 
     def __init__(
-        self, sample_key, cell_group_key=None, layer=None, seed=67, dist_mat="KL", dens="KNN", k=25, n_workers=1
+        self,
+        sample_key,
+        cell_group_key=None,
+        layer=None,
+        seed=67,
+        dist_mat="KL",
+        dens="KNN",
+        k=25,
+        n_workers=1,
     ):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
         self.dist_mat = dist_mat
