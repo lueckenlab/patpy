@@ -1556,7 +1556,7 @@ class PaSCient(SupervisedSampleMethod):
             cell_contrastive_strategy="classic",
         )
 
-    def _train(self, adata: sc.AnnData) -> None:
+    def _train(self, adata: sc.AnnData, *, label_key: str | None = None, task: str | None = None) -> None:
         """Train PaSCient using a Lightning Trainer following the upstream pipeline.
 
         Builds a :class:`~pascient.model.sample_predictor.SamplePredictor`
@@ -1568,6 +1568,10 @@ class PaSCient(SupervisedSampleMethod):
         ----------
         adata
             AnnData with donor labels in ``.obs``.
+        label_key
+            Which label to train on.  Defaults to ``self.label_keys[0]``.
+        task
+            Prediction task type.  Defaults to ``self.tasks[0]``.
         """
         import torch
         from torch.utils.data import DataLoader, Dataset, random_split
@@ -1585,8 +1589,8 @@ class PaSCient(SupervisedSampleMethod):
         donor_col = adata.obs[self.sample_key].values
 
         # Encode labels to integer class indices for classification
-        label_key = self.label_keys[0]
-        task = self.tasks[0]
+        label_key = label_key if label_key is not None else self.label_keys[0]
+        task = task if task is not None else self.tasks[0]
         label_vals = self.labels[label_key].values
 
         if task == "classification":
@@ -1796,6 +1800,10 @@ class PaSCient(SupervisedSampleMethod):
         donor_col = adata.obs[self.sample_key].values
         expression = self._get_expression_matrix()
 
+        # Ensure model is on the target device for inference (Lightning
+        # Trainer may have moved it to CPU during teardown).
+        self._pascient_model.to(self.device)
+
         donor_ids = []
         all_sample_embeddings = []
 
@@ -1937,13 +1945,24 @@ class PaSCient(SupervisedSampleMethod):
                 self._pascient_model.patient_predictor = BasicMLP(
                     emb_dim, hidden_dim=n_out, output_dim=n_out, n_hidden_layers=-1
                 )
-                self._trained_label = label_key
+
+                # Update loss config and prediction_labels to match the new label
+                self._pascient_model.losses.sample_prediction_loss.labels = [label_key]
+                self._pascient_model.prediction_labels = [label_key]
+                if task == "regression":
+                    import torch.nn as nn
+
+                    self._pascient_model.sample_prediction_loss_func = nn.MSELoss()
+                else:
+                    from pascient.components.losses import CrossEntropyLossViews
+
+                    self._pascient_model.sample_prediction_loss_func = CrossEntropyLossViews()
 
                 n_epochs = kwargs.get("n_epochs", self.n_epochs)
                 old_epochs = self.n_epochs
                 self.n_epochs = n_epochs
                 try:
-                    self._train(self.adata)
+                    self._train(self.adata, label_key=label_key, task=task)
                 finally:
                     self.n_epochs = old_epochs
                 self._extract_embeddings(self.adata)
@@ -1991,6 +2010,9 @@ class PaSCient(SupervisedSampleMethod):
         expression = self._get_expression_matrix()
         donor_col = self.adata.obs[self.sample_key].values
         rng = np.random.default_rng(self.seed)
+
+        # Ensure model is on the target device for inference
+        self._pascient_model.to(self.device)
 
         all_preds = []
         donor_ids = []
@@ -2181,6 +2203,7 @@ class PaSCient(SupervisedSampleMethod):
                 patient_preds = self.base_model.patient_predictor(patient_embds)
                 return torch.softmax(patient_preds[:, 0], dim=-1)
 
+        model.to(self.device)
         ig_model = _IGForwardModel(model)
         ig = IntegratedGradients(ig_model)
 
