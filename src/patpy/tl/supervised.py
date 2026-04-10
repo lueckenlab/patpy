@@ -1218,7 +1218,7 @@ class PULSAR(SupervisedSampleMethod):
 
 
 class PaSCient(SupervisedSampleMethod):
-    """Patient-level representation via PaSCient by De Brouwer et al. 2025 (https://doi.org/10.1016/j.cels.2025.101195).
+    """Patient-level representation via PaSCient by Liu, De Brouwer et al. 2025 (https://www.cell.com/cell-systems/fulltext/S2405-4712(26)00052-9).
 
     PaSCient learns multi-cellular patient representations from single-cell
     transcriptomics data using a hierarchical encoder that processes gene
@@ -2092,8 +2092,8 @@ class PaSCient(SupervisedSampleMethod):
         """Per-cell importance via Integrated Gradients.
 
         Computes Integrated Gradients (IG) attributions from ``captum``
-        following the approach in the PaSCient paper (De Brouwer et al.
-        2025, https://doi.org/10.1016/j.cels.2025.101195).  For each donor, the IG attributions at the gene level
+        following the approach in the PaSCient paper (Liu, De Brouwer et al.
+        2025, https://www.cell.com/cell-systems/fulltext/S2405-4712(26)00052-9).  For each donor, the IG attributions at the gene level
         are computed with respect to the model's prediction for the
         specified *target* class, using a zero baseline.  The per-cell
         importance score is the L2 norm of the per-gene attribution
