@@ -613,7 +613,7 @@ class TestPaSCientCheckpointResolution:
 
 def _mock_train(self, adata):
     """Lightweight training stand-in that builds a mock model and runs one forward pass."""
-    expression = self._get_expression_matrix(adata)
+    expression = self._get_expression_matrix()
     n_genes = expression.shape[1]
     label_vals = self.labels[self.label_keys[0]].values
     n_classes = len(np.unique(label_vals)) if self.tasks[0] == "classification" else 1
