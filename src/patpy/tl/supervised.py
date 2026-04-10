@@ -1478,7 +1478,7 @@ class PaSCient(SupervisedSampleMethod):
         self._extract_embeddings(adata)
         self._fitted = True
 
-    def _build_model(self, n_genes: int, n_classes: int):
+    def _build_model(self, n_genes: int, n_classes: int, class_counts: list[int] | None = None):
         """Build a fresh PaSCient model from pascient component classes.
 
         Parameters
@@ -1487,6 +1487,10 @@ class PaSCient(SupervisedSampleMethod):
             Number of input genes.
         n_classes
             Number of prediction outputs.
+        class_counts
+            Per-class sample counts for loss weighting.  When provided,
+            ``CrossEntropyLossViews`` uses inverse counts so that
+            under-represented classes receive higher loss.
 
         Returns
         -------
@@ -1516,10 +1520,13 @@ class PaSCient(SupervisedSampleMethod):
         from pascient.components.losses import CrossEntropyLossViews
 
         # Minimal losses config expected by SamplePredictor.init_losses()
+        # CrossEntropyLossViews internally inverts the weights (1/w),
+        # so passing class counts upweights rare classes.
+        loss_kwargs = {"weight": class_counts} if class_counts is not None else {}
         losses = SimpleNamespace(
             sample_prediction_loss=SimpleNamespace(
                 weight=1.0,
-                loss_fn=partial(CrossEntropyLossViews),
+                loss_fn=partial(CrossEntropyLossViews, **loss_kwargs),
                 labels=self.label_keys[:1],
             ),
         )
@@ -1599,15 +1606,19 @@ class PaSCient(SupervisedSampleMethod):
             class_to_int = {c: i for i, c in enumerate(classes)}
             y_map = {d: class_to_int[v] for d, v in zip(self.labels.index, label_vals, strict=True)}
             self._class_names = list(classes)
+            # Compute per-class counts for loss weighting (rare classes
+            # receive higher loss via CrossEntropyLossViews's 1/w scheme).
+            class_counts = [int((label_vals == c).sum()) for c in classes]
         else:
             n_classes = 1
             y_map = {d: float(v) for d, v in zip(self.labels.index, label_vals, strict=True)}
             self._class_names = None
+            class_counts = None
 
         self._trained_label = label_key
 
         if self._pascient_model is None:
-            self._pascient_model = self._build_model(n_genes, n_classes)
+            self._pascient_model = self._build_model(n_genes, n_classes, class_counts=class_counts)
 
         # -- Dataset that produces SampleBatch per donor ----------------
 
@@ -1937,15 +1948,16 @@ class PaSCient(SupervisedSampleMethod):
                     classes = sorted(np.unique(label_vals))
                     n_out = len(classes)
                     self._class_names = list(classes)
+                    class_counts = [int((label_vals == c).sum()) for c in classes]
                 else:
                     n_out = 1
                     self._class_names = None
+                    class_counts = None
 
                 emb_dim = self.patient_emb_dim
                 self._pascient_model.patient_predictor = BasicMLP(
                     emb_dim, hidden_dim=n_out, output_dim=n_out, n_hidden_layers=-1
                 )
-
                 # Update loss config and prediction_labels to match the new label
                 self._pascient_model.losses.sample_prediction_loss.labels = [label_key]
                 self._pascient_model.prediction_labels = [label_key]
@@ -1956,7 +1968,8 @@ class PaSCient(SupervisedSampleMethod):
                 else:
                     from pascient.components.losses import CrossEntropyLossViews
 
-                    self._pascient_model.sample_prediction_loss_func = CrossEntropyLossViews()
+                    self._pascient_model.sample_prediction_loss_func = CrossEntropyLossViews(weight=class_counts)
+                self._trained_label = label_key
 
                 n_epochs = kwargs.get("n_epochs", self.n_epochs)
                 old_epochs = self.n_epochs
@@ -1968,7 +1981,10 @@ class PaSCient(SupervisedSampleMethod):
                 self._extract_embeddings(self.adata)
                 return
 
-        # Fallback: sklearn probes on frozen embeddings
+        # Fallback: sklearn probes on frozen embeddings.
+        # The native head no longer matches the requested label.
+        if len(labels_list) == 1 and labels_list[0] != self._trained_label:
+            self._trained_label = None
         super().fine_tune(labels, tasks, **kwargs)
 
     def predict(self, label: str) -> pd.Series | pd.DataFrame:
