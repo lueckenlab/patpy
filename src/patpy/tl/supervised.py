@@ -1607,9 +1607,9 @@ class PaSCient(SupervisedSampleMethod):
 
         # -- Dataset that produces SampleBatch per donor ----------------
 
-        n_cells = self.n_cells
         normalize = self.normalize
         lognorm = self._lognormalize  # staticmethod ref
+        subset_or_pad = self._subset_or_pad_cells
 
         class _DS(Dataset):
             def __init__(self_, donors):
@@ -1621,18 +1621,7 @@ class PaSCient(SupervisedSampleMethod):
             def __getitem__(self_, idx):
                 donor_id = self_.donors[idx]
                 mask = donor_col == donor_id
-                donor_expression = expression[mask]
-                n_donor_cells = donor_expression.shape[0]
-
-                if n_donor_cells >= n_cells:
-                    sel = np.random.choice(n_donor_cells, size=n_cells, replace=False)
-                    x = donor_expression[sel]
-                    pad = np.ones(n_cells, dtype=bool)
-                else:
-                    x = np.zeros((n_cells, n_genes), dtype=np.float32)
-                    x[:n_donor_cells] = donor_expression
-                    pad = np.zeros(n_cells, dtype=bool)
-                    pad[:n_donor_cells] = True
+                x, pad, _ = subset_or_pad(expression[mask])
 
                 x_t = torch.tensor(x[np.newaxis], dtype=torch.float32)
                 pad_t = torch.tensor(pad[np.newaxis], dtype=torch.bool)
@@ -1698,6 +1687,46 @@ class PaSCient(SupervisedSampleMethod):
         if scipy.sparse.issparse(X):
             X = X.toarray()
         return np.asarray(X, dtype=np.float32)
+
+    def _subset_or_pad_cells(
+        self,
+        donor_expression: np.ndarray,
+        rng: np.random.Generator | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Subsample or zero-pad a donor's cells to :attr:`n_cells`.
+
+        Parameters
+        ----------
+        donor_expression
+            Expression matrix for one donor, shape ``(n_donor_cells, n_genes)``.
+        rng
+            Random generator for subsampling.  When ``None``,
+            ``np.random`` is used.
+
+        Returns
+        -------
+        sampled : np.ndarray
+            ``(n_cells, n_genes)`` expression matrix.
+        pad_mask : np.ndarray
+            ``(n_cells,)`` boolean mask (``True`` for real cells).
+        indices : np.ndarray
+            Indices into *donor_expression* for each real cell.
+        """
+        n_donor_cells, n_genes = donor_expression.shape
+        choice = rng.choice if rng is not None else np.random.choice
+
+        if n_donor_cells >= self.n_cells:
+            idx = choice(n_donor_cells, size=self.n_cells, replace=False)
+            sampled = donor_expression[idx]
+            pad_mask = np.ones(self.n_cells, dtype=bool)
+        else:
+            sampled = np.zeros((self.n_cells, n_genes), dtype=np.float32)
+            sampled[:n_donor_cells] = donor_expression
+            pad_mask = np.zeros(self.n_cells, dtype=bool)
+            pad_mask[:n_donor_cells] = True
+            idx = np.arange(n_donor_cells)
+
+        return sampled, pad_mask, idx
 
     @staticmethod
     def _lognormalize(x, padding_mask, target_sum: float = 1e4):
@@ -1767,7 +1796,7 @@ class PaSCient(SupervisedSampleMethod):
         rng = np.random.default_rng(self.seed)
         donor_col = adata.obs[self.sample_key].values
         expression = self._get_expression_matrix()
-        n_genes = expression.shape[1]
+        expression.shape[1]
 
         donor_ids = []
         all_sample_embeddings = []
@@ -1782,23 +1811,12 @@ class PaSCient(SupervisedSampleMethod):
             for donor_id in batch_donors:
                 cell_mask = donor_col == donor_id
                 donor_expr = expression[cell_mask]
-                n_donor_cells = donor_expr.shape[0]
 
-                if n_donor_cells == 0:
+                if donor_expr.shape[0] == 0:
                     logger.warning("Donor '%s' has no cells, skipping.", donor_id)
                     continue
 
-                # Subsample or pad to n_cells
-                if n_donor_cells >= self.n_cells:
-                    idx = rng.choice(n_donor_cells, size=self.n_cells, replace=False)
-                    sampled = donor_expr[idx]
-                    pad_mask = np.ones(self.n_cells, dtype=bool)
-                else:
-                    padded = np.zeros((self.n_cells, n_genes), dtype=np.float32)
-                    padded[:n_donor_cells] = donor_expr
-                    sampled = padded
-                    pad_mask = np.zeros(self.n_cells, dtype=bool)
-                    pad_mask[:n_donor_cells] = True
+                sampled, pad_mask, _ = self._subset_or_pad_cells(donor_expr, rng)
 
                 # PaSCient expects shape (1, n_cells, n_genes) per view
                 batch_x.append(sampled[np.newaxis, :, :])
@@ -1973,7 +1991,7 @@ class PaSCient(SupervisedSampleMethod):
 
         task = self.tasks[self.label_keys.index(label)]
         expression = self._get_expression_matrix()
-        n_genes = expression.shape[1]
+        expression.shape[1]
         donor_col = self.adata.obs[self.sample_key].values
         rng = np.random.default_rng(self.seed)
 
@@ -1987,20 +2005,10 @@ class PaSCient(SupervisedSampleMethod):
             for donor_id in batch_donors:
                 cell_mask = donor_col == donor_id
                 donor_expr = expression[cell_mask]
-                nc = donor_expr.shape[0]
-                if nc == 0:
+                if donor_expr.shape[0] == 0:
                     continue
 
-                if nc >= self.n_cells:
-                    idx = rng.choice(nc, size=self.n_cells, replace=False)
-                    sampled = donor_expr[idx]
-                    pad = np.ones(self.n_cells, dtype=bool)
-                else:
-                    sampled = np.zeros((self.n_cells, n_genes), dtype=np.float32)
-                    sampled[:nc] = donor_expr
-                    pad = np.zeros(self.n_cells, dtype=bool)
-                    pad[:nc] = True
-
+                sampled, pad, _ = self._subset_or_pad_cells(donor_expr, rng)
                 batch_x.append(sampled[np.newaxis, :, :])
                 batch_pad.append(pad[np.newaxis, :])
                 donor_ids.append(donor_id)
@@ -2182,7 +2190,7 @@ class PaSCient(SupervisedSampleMethod):
         rng = np.random.default_rng(self.seed)
         donor_col = self.adata.obs[self.sample_key].values
         expression = self._get_expression_matrix()
-        n_genes = expression.shape[1]
+        expression.shape[1]
         scores = np.zeros(len(self.adata))
 
         for donor_id in self.samples:
@@ -2191,23 +2199,10 @@ class PaSCient(SupervisedSampleMethod):
                 continue
 
             donor_expr = expression[cell_mask]
-            n_donor_cells = donor_expr.shape[0]
+            if donor_expr.shape[0] == 0:
+                continue
 
-            # Subsample or pad to n_cells
-            if n_donor_cells >= self.n_cells:
-                idx = rng.choice(n_donor_cells, size=self.n_cells, replace=False)
-                sampled = donor_expr[idx]
-                pad_mask = np.ones(self.n_cells, dtype=bool)
-                # Map back: cell_indices[j] is the position within the
-                # donor's cells in adata for the j-th sampled cell.
-                cell_indices = idx
-            else:
-                padded = np.zeros((self.n_cells, n_genes), dtype=np.float32)
-                padded[:n_donor_cells] = donor_expr
-                sampled = padded
-                pad_mask = np.zeros(self.n_cells, dtype=bool)
-                pad_mask[:n_donor_cells] = True
-                cell_indices = np.arange(n_donor_cells)
+            sampled, pad_mask, cell_indices = self._subset_or_pad_cells(donor_expr, rng)
 
             # Shape: (1, 1, n_cells, n_genes)
             x_tensor = torch.tensor(sampled[np.newaxis, np.newaxis, :, :], dtype=torch.float32, device=self.device)
