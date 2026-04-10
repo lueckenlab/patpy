@@ -1607,9 +1607,7 @@ class PaSCient(SupervisedSampleMethod):
 
         # -- Dataset that produces SampleBatch per donor ----------------
 
-        normalize = self.normalize
-        lognorm = self._lognormalize  # staticmethod ref
-        subset_or_pad = self._subset_or_pad_cells
+        pascient_self = self  # capture for use inside nested class
 
         class _DS(Dataset):
             def __init__(self_, donors):
@@ -1621,13 +1619,13 @@ class PaSCient(SupervisedSampleMethod):
             def __getitem__(self_, idx):
                 donor_id = self_.donors[idx]
                 mask = donor_col == donor_id
-                x, pad, _ = subset_or_pad(expression[mask])
+                x, pad, _ = pascient_self._subset_or_pad_cells(expression[mask])
 
                 x_t = torch.tensor(x[np.newaxis], dtype=torch.float32)
                 pad_t = torch.tensor(pad[np.newaxis], dtype=torch.bool)
 
-                if normalize:
-                    x_t, pad_t = lognorm(x_t, pad_t)
+                if pascient_self.normalize:
+                    x_t, pad_t = pascient_self._lognormalize(x_t, pad_t)
 
                 return SampleBatch(
                     x=x_t,
@@ -1796,7 +1794,6 @@ class PaSCient(SupervisedSampleMethod):
         rng = np.random.default_rng(self.seed)
         donor_col = adata.obs[self.sample_key].values
         expression = self._get_expression_matrix()
-        expression.shape[1]
 
         donor_ids = []
         all_sample_embeddings = []
@@ -1991,7 +1988,6 @@ class PaSCient(SupervisedSampleMethod):
 
         task = self.tasks[self.label_keys.index(label)]
         expression = self._get_expression_matrix()
-        expression.shape[1]
         donor_col = self.adata.obs[self.sample_key].values
         rng = np.random.default_rng(self.seed)
 
@@ -2190,7 +2186,6 @@ class PaSCient(SupervisedSampleMethod):
         rng = np.random.default_rng(self.seed)
         donor_col = self.adata.obs[self.sample_key].values
         expression = self._get_expression_matrix()
-        expression.shape[1]
         scores = np.zeros(len(self.adata))
 
         for donor_id in self.samples:
