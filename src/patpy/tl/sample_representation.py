@@ -1459,9 +1459,7 @@ class DiffusionEarthMoverDistance(SampleRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_diffusion_emd"
 
-    def __init__(
-        self, sample_key, cell_group_key, layer=None, seed=67, n_neighbors: int = 15, n_scales: int = 6
-    ):
+    def __init__(self, sample_key, cell_group_key, layer=None, seed=67, n_neighbors: int = 15, n_scales: int = 6):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
         self.n_neighbors = n_neighbors
