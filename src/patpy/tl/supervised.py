@@ -1665,6 +1665,7 @@ class PaSCient(SupervisedSampleMethod):
             logger=False,
             enable_progress_bar=True,
         )
+        self._pascient_model.train()
         trainer.fit(self._pascient_model, train_dataloaders=train_dl, val_dataloaders=val_dl)
         self._pascient_model.eval()
 
