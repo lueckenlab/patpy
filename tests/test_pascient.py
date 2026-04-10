@@ -44,6 +44,19 @@ class _MockAggregator(nn.Module):
         return (data * mask_f).sum(dim=2) / mask_f.sum(dim=2).clamp(min=1)
 
 
+class _MockLossConfig:
+    """Minimal loss config matching SamplePredictor expectations."""
+
+    def __init__(self, labels):
+        self.sample_prediction_loss = _MockSamplePredLoss(labels)
+
+
+class _MockSamplePredLoss:
+    def __init__(self, labels):
+        self.weight = 1.0
+        self.labels = labels
+
+
 class _MockPaSCientModel(nn.Module):
     """Minimal model implementing the PaSCient sub-module interface.
 
@@ -61,6 +74,9 @@ class _MockPaSCientModel(nn.Module):
         self.cell2patient_aggregation = _MockAggregator()
         self.patient_encoder = nn.Identity()
         self.patient_predictor = nn.Linear(emb_dim, n_classes)
+        self.losses = _MockLossConfig(["mock_label"])
+        self.prediction_labels = ["mock_label"]
+        self.sample_prediction_loss_func = nn.CrossEntropyLoss()
 
 
 class _IdentityWithKwargs(nn.Module):
@@ -611,12 +627,29 @@ class TestPaSCientCheckpointResolution:
 # ---------------------------------------------------------------------------
 
 
-def _mock_train(self, adata):
-    """Lightweight training stand-in that builds a mock model and runs one forward pass."""
+def _mock_train(self, adata, *, label_key=None, task=None):
+    """Lightweight training stand-in that builds a mock model and runs one forward pass.
+
+    After training, moves the model to CPU to simulate Lightning Trainer
+    teardown behaviour (which moves modules off the accelerator device).
+    Downstream methods (``_extract_embeddings``, ``_predict_native``) are
+    responsible for moving the model back to ``self.device`` before inference.
+    """
     expression = self._get_expression_matrix()
     n_genes = expression.shape[1]
-    label_vals = self.labels[self.label_keys[0]].values
-    n_classes = len(np.unique(label_vals)) if self.tasks[0] == "classification" else 1
+    label_key = label_key or self.label_keys[0]
+    task = task or self.tasks[0]
+    label_vals = self.labels[label_key].values
+
+    if task == "classification":
+        classes = sorted(np.unique(label_vals))
+        n_classes = len(classes)
+        self._class_names = list(classes)
+    else:
+        n_classes = 1
+        self._class_names = None
+
+    self._trained_label = label_key
 
     if self._pascient_model is None:
         self._pascient_model = _MockPaSCientModel(n_genes, n_classes=n_classes)
@@ -630,6 +663,8 @@ def _mock_train(self, adata):
     loss = torch.nn.functional.cross_entropy(preds, torch.zeros(1, dtype=torch.long))
     loss.backward()
     optimizer.step()
+    # Simulate Lightning Trainer teardown: move model to CPU
+    model.to("cpu")
     model.eval()
 
 
@@ -703,6 +738,240 @@ class TestPaSCientTraining:
         reps = model.get_sample_representations()
         assert reps.shape == (N_DONORS, EMB_DIM)
         assert not reps.isna().any().any()
+
+
+# ---------------------------------------------------------------------------
+# Tests: device consistency after training
+# ---------------------------------------------------------------------------
+
+
+def _mock_train_moves_to_cpu(self, adata, *, label_key=None, task=None):
+    """Like _mock_train — simulates Lightning teardown moving model to CPU.
+    Callers (``_extract_embeddings``, ``_predict_native``) must handle the move back."""
+    expression = self._get_expression_matrix()
+    n_genes = expression.shape[1]
+    label_key = label_key or self.label_keys[0]
+    task = task or self.tasks[0]
+    label_vals = self.labels[label_key].values
+
+    if task == "classification":
+        classes = sorted(np.unique(label_vals))
+        n_classes = len(classes)
+        self._class_names = list(classes)
+    else:
+        n_classes = 1
+        self._class_names = None
+
+    self._trained_label = label_key
+
+    if self._pascient_model is None:
+        self._pascient_model = _MockPaSCientModel(n_genes, n_classes=n_classes)
+
+    model = self._pascient_model
+    model.train()
+    optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
+    x = torch.randn(1, 1, self.n_cells, n_genes)
+    pad = torch.ones(1, 1, self.n_cells, dtype=torch.bool)
+    preds = self._forward_model(x, pad)[2].squeeze(1)
+    loss = torch.nn.functional.cross_entropy(preds, torch.zeros(1, dtype=torch.long))
+    loss.backward()
+    optimizer.step()
+    model.to("cpu")
+    model.eval()
+
+
+class TestPaSCientDeviceConsistency:
+    """Verify that model parameters stay on ``self.device`` after every operation."""
+
+    @pytest.fixture
+    def _patch_build_model_cpu(self, monkeypatch):
+        monkeypatch.setattr(
+            PaSCient,
+            "_build_model",
+            lambda self, n_genes, n_classes: _MockPaSCientModel(n_genes, n_classes=n_classes),
+        )
+        monkeypatch.setattr(PaSCient, "_train", _mock_train_moves_to_cpu)
+
+    def _assert_model_on_device(self, model):
+        expected = torch.device(model.device)
+        for name, param in model._pascient_model.named_parameters():
+            assert param.device == expected, (
+                f"Parameter {name} is on {param.device}, expected {expected}"
+            )
+
+    def test_model_on_device_after_prepare_anndata(self, basic_adata, _patch_build_model_cpu):
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        self._assert_model_on_device(model)
+
+    def test_model_on_device_after_fine_tune_same_label(self, basic_adata, _patch_build_model_cpu):
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        model.fine_tune("disease", "classification")
+        self._assert_model_on_device(model)
+
+    def test_model_on_device_after_fine_tune_new_label(self, basic_adata, _patch_build_model_cpu):
+        basic_adata.obs["age"] = np.tile(np.arange(20, 20 + N_DONORS, dtype=float), CELLS_PER_DONOR)
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            patient_emb_dim=EMB_DIM,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        model.fine_tune("age", tasks="regression")
+        self._assert_model_on_device(model)
+
+    def test_extract_embeddings_after_train(self, basic_adata, _patch_build_model_cpu):
+        """_extract_embeddings should succeed even when _train moved model to CPU."""
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        # Re-extract should not raise a device mismatch error
+        model._extract_embeddings(basic_adata)
+        assert model.sample_representation is not None
+
+    def test_forward_model_consistent_device(self, basic_adata, _patch_build_model_cpu):
+        """_forward_model should work with tensors on self.device."""
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        x = torch.randn(1, 1, 10, N_GENES, device=model.device)
+        pad = torch.ones(1, 1, 10, dtype=torch.bool, device=model.device)
+        patient_emb, cell_emb, preds = model._forward_model(x, pad)
+        assert patient_emb.device == torch.device(model.device)
+
+
+# ---------------------------------------------------------------------------
+# Tests: predict without fine_tune for training label
+# ---------------------------------------------------------------------------
+
+
+class TestPaSCientPredictNative:
+    """Verify that predict() works for the training label without fine_tune()."""
+
+    def test_predict_training_label_without_fine_tune(self, basic_adata, _patch_build_model):
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        preds = model.predict("disease")
+        assert isinstance(preds, pd.DataFrame)
+        assert "disease_pred" in preds.columns
+        assert set(preds.index) == set(model.samples)
+
+    def test_predict_training_label_probabilities_sum_to_one(self, basic_adata, _patch_build_model):
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        preds = model.predict("disease")
+        prob_cols = [c for c in preds.columns if c.startswith("prob_")]
+        np.testing.assert_array_almost_equal(preds[prob_cols].sum(axis=1), 1.0)
+
+    def test_predict_new_label_requires_fine_tune(self, basic_adata, _patch_build_model):
+        """predict() for a label not used in training should require fine_tune."""
+        basic_adata.obs["age"] = np.tile(np.arange(20, 20 + N_DONORS, dtype=float), CELLS_PER_DONOR)
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        with pytest.raises((RuntimeError, ValueError)):
+            model.predict("age")
+
+    def test_fine_tune_new_label_then_predict(self, basic_adata, _patch_build_model):
+        """After fine-tuning for a new label, the native head predicts it."""
+        basic_adata.obs["age"] = np.tile(np.arange(20, 20 + N_DONORS, dtype=float), CELLS_PER_DONOR)
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            patient_emb_dim=EMB_DIM,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        model.fine_tune("age", tasks="regression")
+        # Fine-tuned label should work via native head
+        age_preds = model.predict("age")
+        assert isinstance(age_preds, pd.Series)
+
+    def test_original_label_needs_probe_after_new_fine_tune(self, basic_adata, _patch_build_model):
+        """After fine-tuning a new label, original label needs sklearn probe."""
+        basic_adata.obs["age"] = np.tile(np.arange(20, 20 + N_DONORS, dtype=float), CELLS_PER_DONOR)
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            patient_emb_dim=EMB_DIM,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        model.fine_tune("age", tasks="regression")
+        # Original label no longer has native head — needs sklearn probe
+        with pytest.raises(RuntimeError, match="fine_tune"):
+            model.predict("disease")
+        # But sklearn fine-tune + predict works
+        model.fine_tune("disease", tasks="classification")
+        preds = model.predict("disease")
+        assert "disease_pred" in preds.columns
 
 
 # ---------------------------------------------------------------------------
@@ -830,3 +1099,83 @@ class TestPaSCientIntegration:
         dist = model.calculate_distance_matrix()
         assert dist.shape == (N_DONORS, N_DONORS)
         np.testing.assert_allclose(dist, dist.T, atol=1e-6)
+
+    def test_model_on_device_after_train_real(self, basic_adata):
+        """After real Lightning training, model should remain on self.device."""
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            latent_dim=SMALL_LATENT,
+            patient_emb_dim=SMALL_EMB,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        expected = torch.device(model.device)
+        for name, param in model._pascient_model.named_parameters():
+            assert param.device == expected, f"{name} on {param.device}, expected {expected}"
+
+    def test_model_on_device_after_fine_tune_new_label_real(self, basic_adata):
+        """After fine-tuning with a new label, model should stay on self.device."""
+        basic_adata.obs["age"] = np.tile(np.arange(20, 20 + N_DONORS, dtype=float), CELLS_PER_DONOR)
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            latent_dim=SMALL_LATENT,
+            patient_emb_dim=SMALL_EMB,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        model.fine_tune("age", tasks="regression")
+        expected = torch.device(model.device)
+        for name, param in model._pascient_model.named_parameters():
+            assert param.device == expected, f"{name} on {param.device}, expected {expected}"
+
+    def test_predict_training_label_without_fine_tune_real(self, basic_adata):
+        """Native predict() should work without calling fine_tune() first."""
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            latent_dim=SMALL_LATENT,
+            patient_emb_dim=SMALL_EMB,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        preds = model.predict("disease")
+        assert isinstance(preds, pd.DataFrame)
+        assert "disease_pred" in preds.columns
+        prob_cols = [c for c in preds.columns if c.startswith("prob_")]
+        np.testing.assert_array_almost_equal(preds[prob_cols].sum(axis=1), 1.0)
+
+    def test_fine_tune_new_label_then_predict_real(self, basic_adata):
+        """After fine-tuning a new label, native head predicts it."""
+        basic_adata.obs["age"] = np.tile(np.arange(20, 20 + N_DONORS, dtype=float), CELLS_PER_DONOR)
+        model = PaSCient(
+            sample_key="donor_id",
+            label_keys=["disease"],
+            tasks=["classification"],
+            n_cells=10,
+            batch_size=4,
+            n_epochs=1,
+            latent_dim=SMALL_LATENT,
+            patient_emb_dim=SMALL_EMB,
+            device="cpu",
+        )
+        model.prepare_anndata(basic_adata, train=True)
+        model.fine_tune("age", tasks="regression")
+        age_preds = model.predict("age")
+        assert isinstance(age_preds, pd.Series)
+        # Original label requires sklearn probe after new fine-tune
+        with pytest.raises(RuntimeError, match="fine_tune"):
+            model.predict("disease")
