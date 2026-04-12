@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning][].
 ## 0.14.0
 
 ### Added
+
+- Sparse matrix support in sample representation methods
+- Tests with input layers containing sparse matrices
+
+## 0.14.0
+
+### Added
 - CLR-transformation to the composition baseline to bridge it with SETA: https://www.bioconductor.org/packages//release/bioc/html/SETA.html
 
 ## 0.13.0
