@@ -84,6 +84,9 @@ optional-dependencies.pilot = [
 optional-dependencies.pulsar = [
   "pulsar @ git+https://github.com/snap-stanford/PULSAR.git@main",
 ]
+optional-dependencies.sclkme = [
+  "sclkme",
+]
 optional-dependencies.scpoli = [
   "scarches>=0.5.1",
 ]

@@ -26,6 +26,7 @@ from patpy.tl.sample_representation import (
     correlate_cell_type_expression,
     correlate_composition,
     make_matrix_symmetric,
+    scLKME,
     valid_aggregate,
     valid_distance_metric,
 )
@@ -64,6 +65,7 @@ _ALL_SR_METHODS = [
     pytest.param(MOFA, {}, id="MOFA"),
     pytest.param(GloScope, {}, id="GloScope", marks=_skip_if_missing("rpy2")),
     pytest.param(GloScope_py, {}, id="GloScope_py"),
+    pytest.param(scLKME, {}, id="scLKME", marks=_skip_if_missing("sclkme")),
 ]
 
 
@@ -362,6 +364,63 @@ def test_gloscope_py(pbmc3k_adata):
 
     _assert_distances(distances, n_samples, adata.uns, method.DISTANCES_UNS_KEY)
     _assert_cache_respected(method, adata.uns, distances)
+
+
+# ---------------------------------------------------------------------------
+# scLKME (requires sclkme)
+# ---------------------------------------------------------------------------
+
+
+def test_sclkme(pbmc3k_adata):
+    pytest.importorskip("sclkme")
+    adata = pbmc3k_adata.copy()
+    n_samples = adata.obs[SAMPLE_KEY].nunique()
+
+    method = scLKME(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca", n_sketch=64)
+    method.prepare_anndata(adata)
+
+    assert method.X_anchor is not None
+    assert method.anchor_indices is not None
+    assert method.X_anchor.shape[0] <= 64
+
+    distances = method.calculate_distance_matrix(force=True)
+
+    _assert_distances(distances, n_samples, adata.uns, method.DISTANCES_UNS_KEY)
+    _assert_cache_respected(method, adata.uns, distances)
+
+
+def test_sclkme_stores_parameters(pbmc3k_adata):
+    pytest.importorskip("sclkme")
+    adata = pbmc3k_adata.copy()
+
+    method = scLKME(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca", n_sketch=64)
+    method.prepare_anndata(adata)
+    method.calculate_distance_matrix(force=True)
+
+    params = adata.uns["sclkme_parameters"]
+    assert params["sample_key"] == SAMPLE_KEY
+    assert params["cell_group_key"] == PBMC_CELL_KEY
+    assert params["layer"] == "X_pca"
+    assert params["n_sketch"] == 64
+    assert params["distance_metric"] == "euclidean"
+
+
+def test_sclkme_custom_distance_metric(pbmc3k_adata):
+    pytest.importorskip("sclkme")
+    adata = pbmc3k_adata.copy()
+    n_samples = adata.obs[SAMPLE_KEY].nunique()
+
+    method = scLKME(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca", n_sketch=64)
+    method.prepare_anndata(adata)
+    distances = method.calculate_distance_matrix(force=True, dist="cosine")
+
+    assert distances.shape == (n_samples, n_samples)
+    assert adata.uns["sclkme_parameters"]["distance_metric"] == "cosine"
+
+
+def test_sclkme_default_n_sketch():
+    method = scLKME(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY)
+    assert method.n_sketch == 128
 
 
 # ---------------------------------------------------------------------------
@@ -925,6 +984,12 @@ class TestCheckAdataLoaded:
     def test_adata_loaded_true_after_prepare_anndata_gloscope_py(self, pbmc3k_adata):
         pytest.importorskip("pynndescent")
         method = GloScope_py(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca")
+        method.prepare_anndata(pbmc3k_adata.copy())
+        method._check_adata_loaded()
+
+    def test_adata_loaded_true_after_prepare_anndata_sclkme(self, pbmc3k_adata):
+        pytest.importorskip("sclkme")
+        method = scLKME(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca", n_sketch=64)
         method.prepare_anndata(pbmc3k_adata.copy())
         method._check_adata_loaded()
 
