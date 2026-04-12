@@ -8,12 +8,25 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+
 ## 0.15.0
 
 ### Added
 
 - **`PaSCient`** method wrapper (`tl/supervised/PaSCient`) for training and fine-tuning PaSCent foundational model
 - Example of running paSCient to `docs/notebooks/supervised_methods_example.ipynb`
+
+## 0.14.1
+
+### Added
+
+- Sparse matrix support in sample representation methods
+- Tests with input layers containing sparse matrices
+
+## 0.14.0
+
+### Added
+- CLR-transformation to the composition baseline to bridge it with SETA: https://www.bioconductor.org/packages//release/bioc/html/SETA.html
 
 ## 0.13.0
 
