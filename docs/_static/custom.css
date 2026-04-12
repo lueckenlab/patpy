@@ -1,0 +1,9 @@
+/* Custom styles */
+.navbar-brand img {
+	max-height: 100px; /* Adjust this value to make logo smaller */
+}
+
+.navbar-brand p {
+	font-size: 1.5rem; /* Make project name bigger */
+	font-weight: 600;
+}

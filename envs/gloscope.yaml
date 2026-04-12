@@ -1,0 +1,11 @@
+name: gloscope
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base=4.3
+  - r-data.table
+  - r-reticulate
+  - r-anndata
+  - bioconductor-gloscope
+  - anndata2ri

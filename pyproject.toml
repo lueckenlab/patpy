@@ -4,8 +4,8 @@ requires = [ "hatchling" ]
 
 [project]
 name = "patpy"
-version = "0.0.1"
-description = "Representing patients or samples from single-cell data"
+version = "0.14.0"
+description = "A toolbox for patient or sample representation from single-cell data"
 readme = "README.md"
 license = { file = "LICENSE" }
 maintainers = [
@@ -23,9 +23,77 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-  "anndata",
-  # for debug logging (referenced from the issue template)
-  "session-info2",
+  "anndata>=0.8",
+  "ehrapy",
+  "gudhi",
+  "matplotlib>=3.6",
+  "numpy>=1.23",
+  "opentsne>=0.6",
+  "pandas>=1.5",
+  "plottable",
+  "scipy>=1.10",
+  "seaborn>=0.12",
+]
+optional-dependencies.dev = [
+  # CLI for bumping the version number
+  "pre-commit",
+  "twine>=4.0.2",
+]
+optional-dependencies.diffusionemd = [
+  "diffusionemd",
+  "phate>=1.0.11",
+]
+optional-dependencies.doc = [
+  "docutils>=0.8,!=0.18.*,!=0.19.*",
+  "ipykernel",
+  "ipython",
+  "myst-nb>=1.1",
+  "nbsphinx",
+  "pandas",
+  # Until pybtex >0.24.0 releases: https://bitbucket.org/pybtex-devs/pybtex/issues/169/
+  "setuptools",
+  "sphinx>=8.1",
+  "sphinx-autodoc-typehints",
+  "sphinx-book-theme>=1",
+  "sphinx-copybutton",
+  "sphinx-design",
+  "sphinx-tabs",
+  "sphinxcontrib-bibtex>=1",
+  "sphinxext-opengraph",
+]
+optional-dependencies.gloscope-py-cpu = [
+  "pynndescent",
+]
+optional-dependencies.gloscope-py-gpu = [
+  "cuml",
+  "cupy",
+]
+optional-dependencies.helical = [
+  "helical>=1.8.3",
+]
+optional-dependencies.mixmil = [
+  "mixmil>=0.1.2",
+]
+optional-dependencies.mrvi = [
+  "scvi-tools>=1.2",
+  "torch>=1.13",
+]
+optional-dependencies.pilot = [
+  "pilotpy",
+]
+optional-dependencies.pulsar = [
+  "pulsar @ git+https://github.com/snap-stanford/PULSAR.git@main",
+]
+optional-dependencies.scpoli = [
+  "scarches>=0.5.1",
+]
+optional-dependencies.test = [
+  "coverage",
+  "pytest",
+  "pytest-cov",
+]
+optional-dependencies.wassersteintsne = [
+  "wassersteintsne>=1.1",
 ]
 # https://docs.pypi.org/project_metadata/#project-urls
 urls.Documentation = "https://patpy.readthedocs.io/"
@@ -56,6 +124,9 @@ doc = [
   "sphinxcontrib-katex",
   "sphinxext-opengraph",
 ]
+
+[tool.hatch.metadata]
+allow-direct-references = true  # Allow installing packages from git repositories
 
 [tool.hatch.envs.default]
 installer = "uv"
@@ -91,6 +162,9 @@ matrix.deps.env-vars = [
 line-length = 120
 src = [ "src" ]
 extend-include = [ "*.ipynb" ]
+exclude = [
+  "docs/notebooks/**",
+]
 
 format.docstring-code-format = true
 
@@ -132,6 +206,9 @@ strict = true
 testpaths = [ "tests" ]
 addopts = [
   "--import-mode=importlib", # allow using test files with same name
+]
+markers = [
+  "helical: integration tests that load real Helical foundation models (slow, requires helical extra)",
 ]
 
 [tool.coverage.run]
