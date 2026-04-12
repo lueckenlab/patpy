@@ -12,11 +12,7 @@ from scipy.sparse import issparse
 from scipy.stats import pearsonr, spearmanr
 from statsmodels.stats.multitest import multipletests
 
-from patpy.pp import (
-    filter_small_samples,
-    is_count_data,
-    subsample,
-)
+from patpy.pp import filter_small_samples, is_count_data, subsample
 from patpy.tl._base_sample_method import BaseSampleMethod
 from patpy.tl._types import _EVALUATION_METHODS
 
@@ -1969,7 +1965,7 @@ class GloScope_py(SampleRepresentationMethod):
         return distances
 
     def calculate_distance_matrix_cuml(self):
-        “””
+        """
         Calculates symmetric Kullback-Leibler divergence using RAPIDS cuML NearestNeighbors on GPU.
 
         Parameters
@@ -1989,7 +1985,7 @@ class GloScope_py(SampleRepresentationMethod):
         -------
         pd.DataFrame
             The symmetric Kullback-Leibler distance matrix (samples x samples).
-        “””
+        """
         from itertools import combinations_with_replacement
 
         import cupy as cp
@@ -2017,7 +2013,7 @@ class GloScope_py(SampleRepresentationMethod):
         knn_self_dists = {}
 
         for sample, X in embedding_dict.items():
-            nn = NearestNeighbors(n_neighbors=self.k, metric=”euclidean”)
+            nn = NearestNeighbors(n_neighbors=self.k, metric="euclidean")
             nn.fit(X)
             dists, _ = nn.kneighbors(X)
             knn_self_dists[sample] = cp.asnumpy(dists[:, -1])  # Convert back to numpy array
@@ -2038,13 +2034,13 @@ class GloScope_py(SampleRepresentationMethod):
             data_j = embedding_dict[s_j]  # Get embedding for s_i
 
             # Get kNN distances of S_i in S_j
-            nn_j = NearestNeighbors(n_neighbors=self.k, metric=”euclidean”)
+            nn_j = NearestNeighbors(n_neighbors=self.k, metric="euclidean")
             nn_j.fit(data_j)
             dists_ij, _ = nn_j.kneighbors(data_i)
             dists_ij = cp.asnumpy(dists_ij[:, -1])
 
             # Get kNN distances of S_j in S_i
-            nn_i = NearestNeighbors(n_neighbors=self.k, metric=”euclidean”)
+            nn_i = NearestNeighbors(n_neighbors=self.k, metric="euclidean")
             nn_i.fit(data_i)
             dists_ji, _ = nn_i.kneighbors(data_j)
             dists_ji = cp.asnumpy(dists_ji[:, -1])
@@ -2068,7 +2064,7 @@ class GloScope_py(SampleRepresentationMethod):
         return distances
 
     def calculate_distance_matrix(self, force: bool = False):
-        “””Calculate symmetric Kullback-Leibler divergence between samples using GloScope approach”””
+        """Calculate symmetric Kullback-Leibler divergence between samples using GloScope approach"""
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
@@ -2088,7 +2084,7 @@ class GloScope_py(SampleRepresentationMethod):
 
 
 class scLKME(SampleRepresentationMethod):
-    “””
+    """
     Sample representation using scLKME (Single-cell Kernel Mean Embedding).
 
     scLKME first selects a small set of 'anchor' cells via a sketching algorithm,
@@ -2098,11 +2094,11 @@ class scLKME(SampleRepresentationMethod):
 
     References
     ----------
-    - Wang et al. (2001), “Kernel Mean Embedding of Distributions: A Review”.
+    - Wang et al. (2001), "Kernel Mean Embedding of Distributions: A Review".
     - GitHub: https://github.com/CompCy-lab/scLKME
-    “””
+    """
 
-    DISTANCES_UNS_KEY = “X_sclkme_distances”
+    DISTANCES_UNS_KEY = "X_sclkme_distances"
 
     def __init__(
         self,
@@ -2118,26 +2114,26 @@ class scLKME(SampleRepresentationMethod):
         self.anchor_indices: Optional[np.ndarray] = None
 
     def prepare_anndata(self, adata: sc.AnnData):
-        “””
+        """
         Compute the sketch (anchor set) of cells.
 
         - `self.X_anchor` is an (n_sketch × n_features) array of the anchor cells
-        “””
+        """
         super().prepare_anndata(adata)
         import sclkme
 
         sclkme.tl.sketch(self.adata, use_rep=self.layer, n_sketch=self.n_sketch, random_state=self.seed)
 
-        mask = self.adata.obs[“sketch”].astype(bool).values
+        mask = self.adata.obs["sketch"].astype(bool).values
         self.anchor_indices = np.where(mask)[0]
         self.X_anchor = self._get_data()[mask]
 
     def calculate_distance_matrix(
         self,
         force: bool = False,
-        dist: str = “euclidean”,
+        dist: str = "euclidean",
     ):
-        “””
+        """
         Run the kernel mean embedding and compute pairwise distances.
 
         Parameters
@@ -2148,7 +2144,7 @@ class scLKME(SampleRepresentationMethod):
         Returns
         -------
         distances : np.ndarray, shape (n_samples, n_samples)
-        “””
+        """
         distances = super().calculate_distance_matrix(force=force)
         if distances is not None:
             return distances
@@ -2161,10 +2157,10 @@ class scLKME(SampleRepresentationMethod):
             use_rep=self.layer,
         )
 
-        kme_dict = self.adata.uns.get(“kme”, {})
-        key = f”{self.sample_key}_kme”
+        kme_dict = self.adata.uns.get("kme", {})
+        key = f"{self.sample_key}_kme"
         if key not in kme_dict:
-            raise RuntimeError(f”KME embedding not found: expected adata.uns['kme']['{key}']”)
+            raise RuntimeError(f"KME embedding not found: expected adata.uns['kme']['{key}']")
         self.sample_representation = kme_dict[key]
 
         distance_metric = valid_distance_metric(dist)
@@ -2175,12 +2171,12 @@ class scLKME(SampleRepresentationMethod):
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
 
         # stash all the parameters used
-        self.adata.uns[“sclkme_parameters”] = {
-            “sample_key”: self.sample_key,
-            “cell_group_key”: self.cell_group_key,
-            “layer”: self.layer,
-            “n_sketch”: self.n_sketch,
-            “distance_metric”: dist,
+        self.adata.uns["sclkme_parameters"] = {
+            "sample_key": self.sample_key,
+            "cell_group_key": self.cell_group_key,
+            "layer": self.layer,
+            "n_sketch": self.n_sketch,
+            "distance_metric": dist,
         }
 
         return distances
