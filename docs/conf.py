@@ -51,7 +51,9 @@ html_context = {
 # They can be extensions coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
 extensions = [
     "myst_nb",
+    "nbsphinx",
     "sphinx_copybutton",
+    "sphinx_design",
     "sphinx.ext.autodoc",
     "sphinx.ext.intersphinx",
     "sphinx.ext.autosummary",
@@ -100,6 +102,7 @@ intersphinx_mapping = {
     "anndata": ("https://anndata.readthedocs.io/en/stable/", None),
     "scanpy": ("https://scanpy.readthedocs.io/en/stable/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
+    "pandas": ("https://pandas.pydata.org/docs/", None),
 }
 
 # List of patterns, relative to source directory, that match files and
@@ -115,7 +118,7 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "**.ipynb_checkpoints"]
 #
 html_theme = "sphinx_book_theme"
 html_static_path = ["_static"]
-html_css_files = ["css/custom.css"]
+html_css_files = ["css/custom.css", "custom.css"]
 
 html_title = project
 
@@ -123,6 +126,12 @@ html_theme_options = {
     "repository_url": repository_url,
     "use_repository_button": True,
     "path_to_docs": "docs/",
+    "logo": {
+        "image_light": "_static/patpy_logo.png",
+        "image_dark": "_static/patpy_logo.png",
+        "text": project,
+    },
+    "icon_links": [],
     "navigation_with_keys": False,
 }
 
@@ -134,3 +143,49 @@ nitpick_ignore = [
     # you can add an exception to this list.
     #     ("py:class", "igraph.Graph"),
 ]
+
+
+
+def setup(app):
+    """App setup hook."""
+    app.add_config_value(
+        "recommonmark_config",
+        {
+            "auto_toc_tree_section": "Contents",
+            "enable_auto_toc_tree": True,
+            "enable_math": True,
+            "enable_inline_math": False,
+            "enable_eval_rst": True,
+        },
+        True,
+    )
+
+
+nbsphinx_thumbnails = {
+    "notebooks/representation_methods_example": "_static/patpy_logo.png",
+    "notebooks/sources_of_variation_with_gloscope": "_static/patpy_logo.png",
+    "notebooks/Patient_trajectories_example": "_static/patpy_logo.png",
+    "notebooks/supervised_methods_example": "_static/patpy_logo.png",
+    "notebooks/synthetic_data_generation": "_static/patpy_logo.png",
+    "notebooks/distances_test_example": "_static/patpy_logo.png",
+}
+
+# -- nbsphinx configuration --------------------------------------------------
+nbsphinx_prolog = """
+{% set docname = env.doc2path(env.docname, base=None) %}
+
+.. raw:: html
+
+    <div class="admonition note">
+        <p class="admonition-title">Note</p>
+        <p>
+            This page was generated from
+            <a class="reference external" href="https://github.com/lueckenlab/patpy/blob/{{ env.config.release|e }}/docs/{{ docname|e }}">{{ docname|e }}</a>.
+        </p>
+    </div>
+
+.. toctree::
+   :maxdepth: 2
+   :includehidden:
+
+"""
