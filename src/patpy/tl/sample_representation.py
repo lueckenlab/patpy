@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import warnings
 from collections.abc import Callable
 
@@ -5,17 +7,17 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import scipy
-import seaborn as sns
+from pandas.api.types import is_numeric_dtype
+from scipy.sparse import issparse
 from scipy.stats import pearsonr, spearmanr
 from statsmodels.stats.multitest import multipletests
 
 from patpy.pp import (
-    extract_metadata,
-    fill_nan_distances,
     filter_small_samples,
     is_count_data,
     subsample,
 )
+from patpy.tl._base_sample_method import BaseSampleMethod
 from patpy.tl._types import _EVALUATION_METHODS
 
 VALID_AGGREGATES = {"mean": np.mean, "median": np.median, "sum": np.sum}
@@ -69,9 +71,8 @@ def make_matrix_symmetric(matrix):
     import warnings
 
     import numpy as np
-    import scipy.sparse
 
-    is_sparse = scipy.sparse.issparse(matrix)
+    is_sparse = issparse(matrix)
 
     def is_symmetric(mat):
         if is_sparse:
@@ -96,13 +97,16 @@ def make_matrix_symmetric(matrix):
         return symmetrize(matrix)
 
 
-def create_colormap(df, col, palette="Spectral"):
-    """Create a color map for the unique values of the column `col` of data frame `df`"""
-    unique_values = df[col].unique()
+def _remove_negative_distances(distances: np.ndarray) -> np.ndarray:
+    """Replace negative distances with zeros"""
+    # Sometimes, gloscope produces small negative distances
+    # According to developers, they can be treated as zeros: https://github.com/epurdom/GloScope/issues/3
+    # Negative distances cause errors in the downstream methods, so we replace them with zeros here
 
-    colors = sns.color_palette(palette, n_colors=len(unique_values))
-    color_map = dict(zip(unique_values, colors, strict=False))
-    return df[col].map(color_map)
+    if n_negative := (distances < 0).sum():
+        warnings.warn(f"Found {n_negative} negative distances. Replacing them with zeros.", stacklevel=2)
+
+    return np.maximum(distances, 0)
 
 
 def describe_metadata(metadata: pd.DataFrame) -> None:
@@ -113,8 +117,6 @@ def describe_metadata(metadata: pd.DataFrame) -> None:
     metadata : pd.DataFrame
         File with metadata for the samples. Or any pandas data frame you want to describe
     """
-    from pandas.api.types import is_numeric_dtype
-
     n = metadata.shape[0]
 
     numeric_cols = []
@@ -434,178 +436,52 @@ def correlate_cell_type_expression(
     return expression_correlation_df
 
 
-class SampleRepresentationMethod:
+class SampleRepresentationMethod(BaseSampleMethod):
     """Base class for sample representation methods"""
 
     DISTANCES_UNS_KEY = "X_method-name_distances"
 
-    def _get_data(self):
-        """Extract data from correct layer specified by `self.layer`"""
-        if self.adata is None:
-            raise RuntimeError("adata is not yet set. Please, run prepare_anndata() method first")
-
-        if self.layer is None or self.layer == "X":
-            # Assuming, data is stored in .X
-            warnings.warn("Using data from adata.X", stacklevel=1)
-            return self.adata.X
-
-        elif self.adata.obsm and self.layer in self.adata.obsm:
-            warnings.warn(f"Using data from key {self.layer} of adata.obsm", stacklevel=1)
-            return self.adata.obsm[self.layer]
-
-        elif self.adata.layers and self.layer in self.adata.layers:
-            warnings.warn(f"Using data from key {self.layer} of adata.layers", stacklevel=1)
-            return self.adata.layers[self.layer]
-
-        else:
-            raise ValueError(f"Cannot find layer {self.layer} in adata. Please make sure it is specified correctly")
-
-    def _move_layer_to_X(self) -> sc.AnnData:
-        """Some models require data to be stored in `adata.X`. This method moves `self.layer` to `.X`"""
-        if self.layer == "X" or self.layer is None:
-            # The data is already in correct slot
-            return self.adata
-
-        # getting only those layers with the same shape of the new X matrix from adata.layers[self.layer] to be copied in the new anndata below
-        filtered_layers = {
-            key: np.copy(layer)
-            for key, layer in self.adata.layers.items()
-            if key != self.layer and layer.shape == self.adata.layers[self.layer].shape
-        }
-        # Copy everything except from .var* to new adata, with correct layer in X
-        new_adata = sc.AnnData(
-            X=self._get_data(),
-            obs=self.adata.obs,
-            obsm=self.adata.obsm,
-            layers=filtered_layers,
-            uns=self.adata.uns,
-            obsp=self.adata.obsp,
-        )
-        new_adata.obsm["X_old"] = self.adata.X
-
-        return new_adata
-
-    def _extract_metadata(self, columns) -> pd.DataFrame:
-        """Return dataframe with requested `columns` in the correct rows order"""
-        return extract_metadata(self.adata, self.sample_key, columns, samples=self.samples)
-
     def __init__(self, sample_key, cell_group_key, layer=None, seed=67):
-        """Initialize the model
-
-        Parameters
-        ----------
-        sample_key : str
-            Column in .obs containing sample IDs
-        cell_group_key : str
-            Column in .obs containing cell group key (for example, cell type)
-        layer : Optional[str] = None
-            What to use as data in a model. If None or "X", `adata.X` is used. Otherwise, the corresponding key from `adata.obsm` will be used
-        seed : int = 67
-            Number to initialize pseudorandom generator
-        """
-        self.sample_key = sample_key
-        self.cell_group_key = cell_group_key
-        self.layer = layer
-        self.seed = seed
-
-        self.adata = None
-        self.samples = None
-        self.cell_groups = None
-        self.embeddings = {}
+        super().__init__(
+            sample_key=sample_key,
+            cell_group_key=cell_group_key,
+            layer=layer,
+            seed=seed,
+        )
         self.samples_adata = None
 
-    # fit-like method: save data and process it
     def prepare_anndata(self, adata):
-        """fit-like method: prepare adata for the analysis"""
-        self.adata = adata
+        """Prepare *adata* for analysis.
 
-        self.samples = self.adata.obs[self.sample_key].unique()
-
-        if self.cell_group_key is not None and self.cell_group_key in self.adata.obs:
-            self.cell_groups = self.adata.obs[self.cell_group_key].unique()
+        Calls :meth:`BaseSampleMethod.prepare_anndata` and checks that the
+        model is not already fitted (to avoid silent re-use of stale state).
+        Subclasses must call ``super().prepare_anndata(adata)`` first.
+        """
+        super().prepare_anndata(adata)
 
     def calculate_distance_matrix(self, force: bool = False):
         """Transform-like method: returns samples distances matrix"""
+        self._check_adata_loaded()
         if self.DISTANCES_UNS_KEY in self.adata.uns and not force:
             return self.adata.uns[self.DISTANCES_UNS_KEY]
 
     def plot_clustermap(self, metadata_cols=None, figsize=(10, 12), *args, **kwargs):
-        """Plot a clusterized heatmap of distances"""
-        import scipy.cluster.hierarchy as hc
-        import scipy.spatial as sp
-
-        distances = self.calculate_distance_matrix(*args, **kwargs)
-        linkage = hc.linkage(sp.distance.squareform(distances), method="average")
-
-        if not metadata_cols:
-            return sns.clustermap(distances, row_linkage=linkage, col_linkage=linkage)
-
-        metadata = self._extract_metadata(columns=metadata_cols)
-
-        annotation_colors = {}
-
-        for col in metadata_cols:
-            annotation_colors[col] = create_colormap(metadata, col)
-
-        annotation_colors = pd.DataFrame(annotation_colors)
-
-        return sns.clustermap(
-            pd.DataFrame(distances, index=annotation_colors.index, columns=annotation_colors.index),
-            col_colors=annotation_colors,
-            figsize=figsize,
-        )
-
-    def embed(self, method="UMAP", n_jobs: int = -1, verbose: bool = False):
-        """Convert distances to embedding of the samples
+        """Plot a hierarchically-clustered heat-map of the distance matrix.
 
         Parameters
         ----------
-        method : str = "TSNE
-            Method to use for embedding. Currently, "TSNE" and "MDS" are supported
-        n_jobs : int = 1
-            Number of threads to use for computation. Use -1 to run on all processors
-        verbose : bool = False
-            If True, print logging information during the computation
+        metadata_cols : list[str] or None
+            ``.obs`` columns to annotate the heat-map.
+        figsize : tuple
+        *args, **kwargs
+            Passed to :meth:`calculate_distance_matrix`.
 
         Returns
         -------
-        coordinates : array-like
-            Coordinates of samples in the embedding space. 2D for TSNE and MDS
+        seaborn.matrix.ClusterGrid
         """
-        distances = self.adata.uns[self.DISTANCES_UNS_KEY]
-        distances = fill_nan_distances(distances)
-
-        if method == "MDS":
-            from sklearn.manifold import MDS
-
-            mds = MDS(
-                n_components=2, dissimilarity="precomputed", verbose=verbose, n_jobs=n_jobs, random_state=self.seed
-            )
-            coordinates = mds.fit_transform(distances)
-        elif method == "TSNE":
-            from openTSNE import TSNE
-
-            tsne = TSNE(
-                n_components=2,
-                metric="precomputed",
-                neighbors="exact",
-                n_jobs=n_jobs,
-                random_state=self.seed,
-                verbose=verbose,
-                initialization="spectral",  # pca doesn't work with precomputed distances
-            )
-            coordinates = tsne.fit(distances)
-        elif method == "UMAP":
-            from umap import UMAP
-
-            umap = UMAP(n_components=2, metric="precomputed", random_state=self.seed, verbose=verbose, n_jobs=n_jobs)
-            coordinates = umap.fit_transform(distances)
-
-        else:
-            raise ValueError(f'Method {method} is not supported, please use one of ["MDS", "TSNE", "UMAP"]')
-
-        self.embeddings[method] = coordinates
-        return coordinates
+        distances = self.calculate_distance_matrix(*args, **kwargs)
+        return super().plot_clustermap(distances, metadata_cols=metadata_cols, figsize=figsize)
 
     def to_adata(self, metadata: pd.DataFrame = None, *args, **kwargs):
         """Convert samples data to AnnData object
@@ -642,64 +518,6 @@ class SampleRepresentationMethod:
             self.samples_adata.obsm["X_" + method.lower()] = embedding
 
         return self.samples_adata
-
-    def plot_embedding(
-        self,
-        method="UMAP",
-        metadata_cols=None,
-        continuous_palette="viridis",
-        categorical_palette="tab10",
-        na_color="lightgray",
-        axes=None,
-    ):
-        """Plot embedding of samples colored by `metadata_cols`"""
-        import matplotlib.pyplot as plt
-
-        if method not in self.embeddings:
-            self.embed(method=method)
-
-        embedding_df = pd.DataFrame(self.embeddings[method], columns=[f"{method}_0", f"{method}_1"], index=self.samples)
-
-        if metadata_cols is None:
-            # Simply plot the embedding
-            if axes is None:
-                axes = sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1")
-            else:
-                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", ax=axes)
-        else:
-            # Colorize samples by metadata
-            metadata_df = self._extract_metadata(columns=metadata_cols)
-            embedding_df = pd.concat([embedding_df, metadata_df], axis=1)
-
-            if axes is None:
-                _, axes = plt.subplots(
-                    nrows=1, ncols=len(metadata_cols), sharey=True, figsize=(len(metadata_cols) * 5, 5)
-                )
-            else:
-                axes = axes.flatten() if isinstance(axes, np.ndarray) else axes
-
-            for i, col in enumerate(metadata_cols):
-                n_unique_values = len(np.unique(metadata_df[col]))
-                if n_unique_values > 5:
-                    palette = continuous_palette
-                else:
-                    palette = categorical_palette
-
-                # If there is only 1 metadata column, axes is not subscriptable
-                ax = axes[i] if len(metadata_cols) > 1 else axes
-
-                # Plot points with missing values in metadata
-                sns.scatterplot(
-                    embedding_df[metadata_df[col].isna()],
-                    x=f"{method}_0",
-                    y=f"{method}_1",
-                    ax=ax,
-                    color=na_color,
-                )
-                # Plot points with known metadata
-                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", hue=col, ax=ax, palette=palette)
-
-        return axes
 
     def evaluate_representation(
         self,
@@ -917,7 +735,8 @@ class SampleRepresentationMethod:
             for i, cell_group in enumerate(cell_groups):
                 for j, sample in enumerate(samples):
                     cells_data = data[
-                        (self.adata.obs[sample_key] == sample) & (self.adata.obs[cell_group_key] == cell_group)
+                        (self.adata.obs[sample_key].values == sample)
+                        & (self.adata.obs[cell_group_key].values == cell_group)
                     ]
 
                     if cells_data.size == 0:
@@ -930,7 +749,7 @@ class SampleRepresentationMethod:
             pseudobulk_data = np.zeros(shape=(len(samples), data.shape[1]))
 
             for j, sample in enumerate(samples):
-                cells_data = data[self.adata.obs[sample_key] == sample]
+                cells_data = data[(self.adata.obs[sample_key].values == sample)]
 
                 if cells_data.size == 0:
                     pseudobulk_data[j] = fill_value
@@ -990,6 +809,7 @@ class MrVI(SampleRepresentationMethod):
         self.model.train(max_epochs=self.max_epochs)
 
         self.samples = self.model.sample_order
+        self._fitted = True
 
     def calculate_distance_matrix(
         self,
@@ -1089,7 +909,7 @@ class WassersteinTSNE(SampleRepresentationMethod):
 
     DISTANCES_UNS_KEY = "X_wasserstein_distances"
 
-    def __init__(self, sample_key, cell_group_key, replicate_key, layer="X_scvi", seed=67):
+    def __init__(self, sample_key, cell_group_key, replicate_key=None, layer="X_scvi", seed=67):
         """Create Wasserstein distances embedding between samples
 
         Parameters
@@ -1123,6 +943,7 @@ class WassersteinTSNE(SampleRepresentationMethod):
 
         self.model = WT.Dataset2Gaussians(data)
         self.distances_model = WT.GaussianWassersteinDistance(self.model)
+        self._fitted = True
 
     def calculate_distance_matrix(self, covariance_weight=0.5, force: bool = False):
         r"""Return sample by sample distances matrix
@@ -1140,6 +961,7 @@ class WassersteinTSNE(SampleRepresentationMethod):
         -------
         Matrix of distances between samples
         """
+        super().calculate_distance_matrix()
         is_correct_key_in_uns = (
             "wasserstein_covariance_weight" in self.adata.uns
             and self.adata.uns["wasserstein_covariance_weight"] == covariance_weight
@@ -1175,7 +997,7 @@ class PILOT(SampleRepresentationMethod):
         self,
         sample_key,
         cell_group_key,
-        sample_state_col,
+        sample_state_col=None,
         dataset_name="pilot_dataset",
         layer="X_pca",
         seed=67,
@@ -1272,7 +1094,7 @@ class Pseudobulk(SampleRepresentationMethod):
         self.sample_representation = np.zeros(shape=(len(self.samples), data.shape[1]))
 
         for i, sample in enumerate(self.samples):
-            sample_cells = data[self.adata.obs[self.sample_key] == sample, :]
+            sample_cells = data[(self.adata.obs[self.sample_key].values == sample), :]
             self.sample_representation[i] = aggregation_func(sample_cells, axis=0)
 
         distances = scipy.spatial.distance.pdist(self.sample_representation, metric=distance_metric)
@@ -1364,35 +1186,101 @@ class RandomVector(SampleRepresentationMethod):
 
 
 class CellGroupComposition(SampleRepresentationMethod):
-    """A simple baseline, which represents samples as composition of their cell groups (for example, cell type fractions)"""
+    """A simple baseline, which represents samples as composition of their cell groups (for example, cell type fractions).
+
+    Optionally applies centered log-ratio (CLR) transformation, which is the approach used by SETA.
+
+    Source (SETA): https://www.bioconductor.org/packages//release/bioc/html/SETA.html
+    """
 
     DISTANCES_UNS_KEY = "X_composition"
 
-    def __init__(self, sample_key, cell_group_key, layer=None, seed=67):
+    def __init__(self, sample_key, cell_group_key, apply_clr=False, pseudocount=1, layer=None, seed=67):
+        """Initialize CellGroupComposition
+
+        Parameters
+        ----------
+        sample_key : str
+            Column in `.obs` containing sample IDs.
+        cell_group_key : str
+            Column in `.obs` containing cell group annotations (e.g., cell types).
+        apply_clr : bool = False
+            If True, apply centered log-ratio (CLR) transformation to the composition
+            data before computing distances. This is the approach used by SETA.
+        pseudocount : float = 1
+            Value added to counts before log transformation when `apply_clr=True`.
+        layer : str = None
+            Not used by this method. Kept for API consistency.
+        seed : int = 67
+            Random seed. Not used by this method. Kept for API consistency.
+        """
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
+        self.apply_clr = apply_clr
+        self.pseudocount = pseudocount
         self.sample_representation = None
+
+    def _compute_clr(self, sample_col, cell_group_col):
+        """Compute CLR-transformed cell type composition matrix"""
+        # Generate count matrix
+        counts = pd.crosstab(sample_col, cell_group_col)
+
+        # Apply CLR transformation
+        counts_adjusted = counts + self.pseudocount
+        log_counts = np.log(counts_adjusted)
+        gm = np.exp(log_counts.mean(axis=1))
+        clr_mat = log_counts.sub(np.log(gm), axis=0)
+
+        return clr_mat
 
     def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between samples represented as cell group composition vectors"""
-        distances = super().calculate_distance_matrix(force=force)
+        self._check_adata_loaded()
+        is_correct_params_in_uns = (
+            "composition_parameters" in self.adata.uns
+            and self.adata.uns["composition_parameters"].get("apply_clr") == self.apply_clr
+            and self.adata.uns["composition_parameters"].get("pseudocount")
+            == (self.pseudocount if self.apply_clr else None)
+        )
+        is_recalculated = force or not is_correct_params_in_uns
 
-        if distances is not None:
-            return distances
+        if self.DISTANCES_UNS_KEY in self.adata.uns:
+            if is_recalculated:
+                warnings.warn(f"Rewriting uns key {self.DISTANCES_UNS_KEY}", stacklevel=1)
+            else:
+                return self.adata.uns[self.DISTANCES_UNS_KEY]
 
         distance_metric = valid_distance_metric(dist)
 
-        # Calculate proportions of the cell groups for each sample
-        self.sample_representation = pd.crosstab(
-            self.adata.obs[self.sample_key], self.adata.obs[self.cell_group_key], normalize="index"
-        )
+        sample_col = self.adata.obs[self.sample_key]
+        cell_group_col = self.adata.obs[self.cell_group_key]
+
+        # Handle categorical columns with unused categories
+        if hasattr(sample_col, "cat"):
+            sample_col = sample_col.cat.remove_unused_categories()
+        if hasattr(cell_group_col, "cat"):
+            cell_group_col = cell_group_col.cat.remove_unused_categories()
+
+        if self.apply_clr:
+            # CLR transformation (SETA-style)
+            self.sample_representation = self._compute_clr(sample_col, cell_group_col)
+        else:
+            # Standard proportions
+            self.sample_representation = pd.crosstab(sample_col, cell_group_col, normalize="index")
+
         self.sample_representation = self.sample_representation.loc[self.samples]
 
         distances = scipy.spatial.distance.pdist(self.sample_representation.values, metric=distance_metric)
         distances = scipy.spatial.distance.squareform(distances)
 
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
-        self.adata.uns["composition_parameters"] = {"sample_key": self.sample_key, "distance_type": distance_metric}
+        self.adata.uns["composition_parameters"] = {
+            "sample_key": self.sample_key,
+            "cell_group_key": self.cell_group_key,
+            "distance_type": distance_metric,
+            "apply_clr": self.apply_clr,
+            "pseudocount": self.pseudocount if self.apply_clr else None,
+        }
 
         return distances
 
@@ -1464,6 +1352,7 @@ class SCPoli(SampleRepresentationMethod):
         )
 
         self.sample_representation = self.model.get_conditional_embeddings().X
+        self._fitted = True
 
     def calculate_distance_matrix(self, force: bool = False, dist="euclidean"):
         """Calculate distances between scPoli sample embeddings"""
@@ -1543,6 +1432,7 @@ class PhEMD(SampleRepresentationMethod):
         self.samples = sc_labels_df.columns
         self.encoded_labels = sc_labels_df.to_numpy()
         self.encoded_labels = self.encoded_labels / self.encoded_labels.sum(axis=0)
+        self._fitted = True
 
     def calculate_distance_matrix(self, force: bool = False, n_jobs=-1):
         """Calculate distances between samples"""
@@ -1598,6 +1488,7 @@ class DiffusionEarthMoverDistance(SampleRepresentationMethod):
         self.adata.obsp["connectivities"] = make_matrix_symmetric(self.adata.obsp["connectivities"])
 
         self.model = DiffusionCheb(n_scales=self.n_scales)
+        self._fitted = True
 
     def calculate_distance_matrix(self, force: bool = False):
         """Calculate distances between samples"""
@@ -1799,6 +1690,7 @@ class MOFA(SampleRepresentationMethod):
         ent.run()
 
         self.model = ent.model
+        self._fitted = True
 
     def calculate_distance_matrix(self, force=False, store_weights=False, dist="euclidean"):
         """
@@ -1858,7 +1750,15 @@ class GloScope(SampleRepresentationMethod):
     DISTANCES_UNS_KEY = "X_gloscope_distances"
 
     def __init__(
-        self, sample_key, cell_group_key=None, layer=None, seed=67, dist_mat="KL", dens="KNN", k=25, n_workers=1
+        self,
+        sample_key,
+        cell_group_key=None,
+        layer=None,
+        seed=67,
+        dist_mat="KL",
+        dens="KNN",
+        k=25,
+        n_workers=1,
     ):
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
         self.dist_mat = dist_mat
@@ -1869,26 +1769,22 @@ class GloScope(SampleRepresentationMethod):
 
     def prepare_anndata(self, adata):
         """Prepare anndata for GloScope calculation"""
-        import anndata2ri
-        import rpy2.robjects as robjects
+        from rpy2 import robjects
         from rpy2.robjects import numpy2ri, pandas2ri
         from rpy2.robjects.packages import importr
 
-        numpy2ri.activate()
-        # Activate automatic conversion between pandas and R objects
-        pandas2ri.activate()
-        anndata2ri.activate()
-
-        super().prepare_anndata(adata=adata)
+        with (robjects.default_converter + numpy2ri.converter + pandas2ri.converter).context():
+            super().prepare_anndata(adata=adata)
 
         # Load the R packages
         robjects.r("library(GloScope)")
         importr("BiocParallel")
+        self._fitted = True
 
     def calculate_distance_matrix(self, force: bool = False):
         """Calculate distances between samples represented as GloScope embeddings"""
         import rpy2.robjects as robjects
-        from rpy2.robjects import pandas2ri
+        from rpy2.robjects import numpy2ri, pandas2ri
         from rpy2.robjects.vectors import StrVector
 
         distances = super().calculate_distance_matrix(force=force)
@@ -1898,39 +1794,301 @@ class GloScope(SampleRepresentationMethod):
 
         embedding_df = pd.DataFrame(self._get_data(), index=self.adata.obs_names)
 
-        # Assign embedding and sample IDs to R environment
-        robjects.globalenv["embedding_df"] = pandas2ri.py2rpy(embedding_df)
-        robjects.globalenv["sample_ids"] = StrVector(self.adata.obs[self.sample_key].values)
+        with (robjects.default_converter + numpy2ri.converter + pandas2ri.converter).context():
+            # Assign embedding and sample IDs to R environment
+            robjects.globalenv["embedding_df"] = pandas2ri.py2rpy(embedding_df)
+            robjects.globalenv["sample_ids"] = StrVector(self.adata.obs[self.sample_key].values)
 
-        print("Calculating GloScope distance matrix")
+            print("Calculating GloScope distance matrix")
 
-        # Call GloScope function in R
-        robjects.r(
-            f"""
-        dist_matrix <- gloscope(
-            embedding_df,
-            sample_ids,
-            dens = '{self.dens}',
-            dist_mat = '{self.dist_mat}',
-            k = {self.k},
-            BPPARAM = BiocParallel::MulticoreParam(workers = {self.n_workers}, RNGseed = {self.seed})
-        )
+            # Call GloScope function in R
+            robjects.r(
+                f"""
+            dist_matrix <- gloscope(
+                embedding_df,
+                sample_ids,
+                dens = '{self.dens}',
+                dist_mat = '{self.dist_mat}',
+                k = {self.k},
+                BPPARAM = BiocParallel::MulticoreParam(workers = {self.n_workers}, RNGseed = {self.seed})
+            )
+            """
+            )
+
+            # Retrieve the distance matrix from R environment
+            distances = robjects.r("as.data.frame(dist_matrix)")
+
+        self.samples = list(distances.index)
+
+        self.sample_representation = _remove_negative_distances(distances.to_numpy())
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = self.sample_representation
+
+        return self.sample_representation
+
+
+class GloScope_py(SampleRepresentationMethod):
+    """GloScope implementation in Python for CPU and GPU
+
+    Source publication: https://doi.org/10.1186/s13059-024-03398-1
+    """
+
+    def __init__(self, sample_key, cell_group_key=None, layer="X_pca", seed=67, k=25, use_gpu=False, n_components=None):
+        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
+        self.k = k
+        self.use_gpu = use_gpu
+        self.n_components = n_components
+
+        if self.use_gpu:
+            self.DISTANCES_UNS_KEY = "X_gloscope_cuml_distances"
+        else:
+            self.DISTANCES_UNS_KEY = "X_gloscope_pynndescent_distances"
+
+    @staticmethod
+    def kl_divergence(r_i, r_j, m_i, m_j, d) -> float:
         """
-        )
+        Calculates KL(H_i || H_j) (Kullback-Leibler divergence) based on pre-calculated kNN distances.
 
-        # Retrieve the distance matrix from R environment
-        distances = robjects.r("as.data.frame(dist_matrix)")
+        The formula is taken from the paper "Visualizing scRNA-Seq data at population scale with GloScope"
+        (https://doi.org/10.1186/s13059-024-03398-1).
 
-        self.sample_representation = distances
-        self.samples = list(self.sample_representation.index)
+        Parameters
+        ----------
+        r_i : np.ndarray
+            k-nearest neighbor distances of samples in H_i from points in H_i itself.
+        r_j : np.ndarray
+            k-nearest neighbor distances of samples in H_i from points in H_j.
+        m_i : int
+            Number of samples in H_i.
+        m_j : int
+            Number of samples in H_j.
+        d : int
+            Dimensionality of the data.
 
-        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
+        Returns
+        -------
+        float
+            The KL divergence KL(H_i || H_j).
+        """
+        # Logarithm of the ratio of the kNN distances
+        log_ratios = np.log(r_j / r_i)
+
+        # Gloscope formula for KL divergence
+        kl = (d / m_i) * np.sum(log_ratios) + np.log(m_j / (m_i - 1))
+
+        return kl
+
+    def calculate_distance_matrix_pynndescent(self):
+        """
+        Calculates the symmetric Kullback-Leibler divergence using approximate kNN distances.
+
+        Parameters
+        ----------
+        self.adata : AnnData
+            The AnnData object stored in the class instance.
+        self.sample_key : str
+            Column in `.obs` containing sample (patient) IDs.
+        self.k: int, default: 25
+            Number of nearest neighbors for k-nearest neighbor calculation.
+        self.layer : str, default: X_pca
+            Key in `.obsm` for the embeddings.
+        self.n_components : int, default: None
+            Number of embedding components that should be kept.
+
+        Returns
+        -------
+        pd.DataFrame
+            The symmetric Kullback-Leibler distance matrix (samples x samples).
+        """
+        from itertools import combinations_with_replacement
+
+        import pynndescent
+
+        data = self._get_data()
+
+        # Subset the data if n_components is set
+        if self.n_components is not None:
+            data = data[:, : self.n_components]
+
+        # Prepare the embedding (one embedding per sample)
+        is_sparse = issparse(data)
+        if is_sparse:
+            embedding_dict = {s: data[(self.adata.obs[self.sample_key].values == s)] for s in self.samples}
+        else:
+            embedding_dict = {s: np.asarray(data[(self.adata.obs[self.sample_key].values == s)]) for s in self.samples}
+
+        # Precompute kNN index for each sample and kNN distances for each samplle within its own sample
+        #   --> Index can be used multiple times, which helps with the runtime
+        index_dict = {}
+        knn_dict = {}
+
+        for sample, embedding in embedding_dict.items():
+            index = pynndescent.NNDescent(embedding, n_neighbors=self.k, random_state=42)
+            _, dist = index.query(embedding, k=self.k)
+
+            index_dict[sample] = index
+            knn_dict[sample] = dist[:, -1]
+
+        # Empty DataFrame for the result
+        distances = pd.DataFrame(index=self.samples, columns=self.samples, dtype=float)
+        d = data.shape[1]  # Dimensionality of the embedding (needed for KL)
+
+        # Iterate through all sample pairs (e.g., 'AB' -> 'AA', 'AB', 'BB')
+        #   --> use combinations_with_replacement(), so only 'AB' and not 'AB', 'BA' is included
+        for s_i, s_j in combinations_with_replacement(self.samples, r=2):
+            # When s_i == s_j then the distance is zero (diagonal of matrix)
+            if s_i == s_j:
+                distances.loc[s_i, s_j] = 0
+                continue
+
+            data_i = embedding_dict[s_i]  # Get embedding for s_i
+            data_j = embedding_dict[s_j]  # Get embedding for s_j
+
+            # Get kNN distances of S_i in S_j (use precomputed index of s_j)
+            _, dist_ij = index_dict[s_j].query(data_i, k=self.k)
+
+            # Get kNN distances of S_j in S_i (use precomputed index of s_i)
+            _, dist_ji = index_dict[s_i].query(data_j, k=self.k)
+
+            # Get numbers of samples
+            m_i = embedding_dict[s_i].shape[0]
+            m_j = embedding_dict[s_j].shape[0]
+
+            # Calculate Kullback-Leibler divergences
+            kl_ij = GloScope_py.kl_divergence(knn_dict[s_i], dist_ij[:, -1], m_i, m_j, d)
+            kl_ji = GloScope_py.kl_divergence(knn_dict[s_j], dist_ji[:, -1], m_j, m_i, d)
+
+            # Sum up the two divergences to get a distance
+            kl_sym = kl_ij + kl_ji
+
+            # Save distance in matrix
+            #   --> to [i,j] and [j,i] as the matrix is symmetric
+            distances.loc[s_i, s_j] = kl_sym
+            distances.loc[s_j, s_i] = kl_sym
 
         return distances
 
+    def calculate_distance_matrix_cuml(self):
+        “””
+        Calculates symmetric Kullback-Leibler divergence using RAPIDS cuML NearestNeighbors on GPU.
+
+        Parameters
+        ----------
+        self.adata : AnnData
+            The AnnData object stored in the class instance.
+        self.sample_key : str
+            Column in `.obs` containing sample (patient) IDs.
+        self.k: int, default: 25
+            Number of nearest neighbors for k-nearest neighbor calculation.
+        self.layer : str, default: X_pca
+            Key in `.obsm` for the embeddings.
+        self.n_components : int, default: None
+            Number of embedding components that should be kept.
+
+        Returns
+        -------
+        pd.DataFrame
+            The symmetric Kullback-Leibler distance matrix (samples x samples).
+        “””
+        from itertools import combinations_with_replacement
+
+        import cupy as cp
+        from cuml.neighbors import NearestNeighbors
+
+        data = self._get_data()
+
+        # Subset the data if n_components is set
+        if self.n_components is not None:
+            data = data[:, : self.n_components]
+
+        # Prepare the embedding (one embedding per sample)
+        # --> convert into cupy arrays
+        is_sparse = issparse(data)
+        if is_sparse:
+            import cupyx.scipy.sparse as cpx_sp
+
+            embedding_dict = {
+                g: cpx_sp.csr_matrix(data[(self.adata.obs[self.sample_key].values == g)]) for g in self.samples
+            }
+        else:
+            embedding_dict = {g: cp.asarray(data[(self.adata.obs[self.sample_key].values == g)]) for g in self.samples}
+
+        # Self kNN distances for each sample (r in KL)
+        knn_self_dists = {}
+
+        for sample, X in embedding_dict.items():
+            nn = NearestNeighbors(n_neighbors=self.k, metric=”euclidean”)
+            nn.fit(X)
+            dists, _ = nn.kneighbors(X)
+            knn_self_dists[sample] = cp.asnumpy(dists[:, -1])  # Convert back to numpy array
+
+        # Empty DataFrame for the result
+        distances = pd.DataFrame(index=self.samples, columns=self.samples, dtype=float)
+        d = data.shape[1]  # Dimensionality of the embedding (needed for KL)
+
+        # Iterate through all sample pairs (e.g., 'AB' -> 'AA', 'AB', 'BB')
+        #   --> use combinations_with_replacement(), so only 'AB' and not 'AB', 'BA' is included
+        for s_i, s_j in combinations_with_replacement(self.samples, r=2):
+            # When s_i == s_j then the distance is zero (diagonal of matrix)
+            if s_i == s_j:
+                distances.loc[s_i, s_j] = 0
+                continue
+
+            data_i = embedding_dict[s_i]  # Get embedding for s_i
+            data_j = embedding_dict[s_j]  # Get embedding for s_i
+
+            # Get kNN distances of S_i in S_j
+            nn_j = NearestNeighbors(n_neighbors=self.k, metric=”euclidean”)
+            nn_j.fit(data_j)
+            dists_ij, _ = nn_j.kneighbors(data_i)
+            dists_ij = cp.asnumpy(dists_ij[:, -1])
+
+            # Get kNN distances of S_j in S_i
+            nn_i = NearestNeighbors(n_neighbors=self.k, metric=”euclidean”)
+            nn_i.fit(data_i)
+            dists_ji, _ = nn_i.kneighbors(data_j)
+            dists_ji = cp.asnumpy(dists_ji[:, -1])
+
+            # Get numbers of samples
+            m_i = data_i.shape[0]
+            m_j = data_j.shape[0]
+
+            # Calculate Kullback-Leibler divergences
+            kl_ij = GloScope_py.kl_divergence(knn_self_dists[s_i], dists_ij, m_i, m_j, d)
+            kl_ji = GloScope_py.kl_divergence(knn_self_dists[s_j], dists_ji, m_j, m_i, d)
+
+            # Sum up the two divergences to get a distance
+            kl_sym = kl_ij + kl_ji
+
+            # Save distance in matrix
+            #   --> to [i,j] and [j,i] as the matrix is symmetric
+            distances.loc[s_i, s_j] = kl_sym
+            distances.loc[s_j, s_i] = kl_sym
+
+        return distances
+
+    def calculate_distance_matrix(self, force: bool = False):
+        “””Calculate symmetric Kullback-Leibler divergence between samples using GloScope approach”””
+        distances = super().calculate_distance_matrix(force=force)
+
+        if distances is not None:
+            return distances
+
+        if self.use_gpu:
+            distances = self.calculate_distance_matrix_cuml()
+        else:
+            distances = self.calculate_distance_matrix_pynndescent()
+
+        self.samples = list(distances.index)
+        self.sample_representation = _remove_negative_distances(distances.to_numpy())
+
+        self.adata.uns[self.DISTANCES_UNS_KEY] = self.sample_representation
+
+        return self.sample_representation
+
 
 class scLKME(SampleRepresentationMethod):
-    """
+    “””
     Sample representation using scLKME (Single-cell Kernel Mean Embedding).
 
     scLKME first selects a small set of 'anchor' cells via a sketching algorithm,
@@ -1942,9 +2100,9 @@ class scLKME(SampleRepresentationMethod):
     ----------
     - Wang et al. (2001), “Kernel Mean Embedding of Distributions: A Review”.
     - GitHub: https://github.com/CompCy-lab/scLKME
-    """
+    “””
 
-    DISTANCES_UNS_KEY = "X_sclkme_distances"
+    DISTANCES_UNS_KEY = “X_sclkme_distances”
 
     def __init__(
         self,
@@ -1960,26 +2118,26 @@ class scLKME(SampleRepresentationMethod):
         self.anchor_indices: Optional[np.ndarray] = None
 
     def prepare_anndata(self, adata: sc.AnnData):
-        """
+        “””
         Compute the sketch (anchor set) of cells.
 
         - `self.X_anchor` is an (n_sketch × n_features) array of the anchor cells
-        """
+        “””
         super().prepare_anndata(adata)
         import sclkme
 
         sclkme.tl.sketch(self.adata, use_rep=self.layer, n_sketch=self.n_sketch, random_state=self.seed)
 
-        mask = self.adata.obs["sketch"].astype(bool).values
+        mask = self.adata.obs[“sketch”].astype(bool).values
         self.anchor_indices = np.where(mask)[0]
         self.X_anchor = self._get_data()[mask]
 
     def calculate_distance_matrix(
         self,
         force: bool = False,
-        dist: str = "euclidean",
+        dist: str = “euclidean”,
     ):
-        """
+        “””
         Run the kernel mean embedding and compute pairwise distances.
 
         Parameters
@@ -1990,7 +2148,7 @@ class scLKME(SampleRepresentationMethod):
         Returns
         -------
         distances : np.ndarray, shape (n_samples, n_samples)
-        """
+        “””
         distances = super().calculate_distance_matrix(force=force)
         if distances is not None:
             return distances
@@ -2003,10 +2161,10 @@ class scLKME(SampleRepresentationMethod):
             use_rep=self.layer,
         )
 
-        kme_dict = self.adata.uns.get("kme", {})
-        key = f"{self.sample_key}_kme"
+        kme_dict = self.adata.uns.get(“kme”, {})
+        key = f”{self.sample_key}_kme”
         if key not in kme_dict:
-            raise RuntimeError(f"KME embedding not found: expected adata.uns['kme']['{key}']")
+            raise RuntimeError(f”KME embedding not found: expected adata.uns['kme']['{key}']”)
         self.sample_representation = kme_dict[key]
 
         distance_metric = valid_distance_metric(dist)
@@ -2017,12 +2175,12 @@ class scLKME(SampleRepresentationMethod):
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
 
         # stash all the parameters used
-        self.adata.uns["sclkme_parameters"] = {
-            "sample_key": self.sample_key,
-            "cell_group_key": self.cell_group_key,
-            "layer": self.layer,
-            "n_sketch": self.n_sketch,
-            "distance_metric": dist,
+        self.adata.uns[“sclkme_parameters”] = {
+            “sample_key”: self.sample_key,
+            “cell_group_key”: self.cell_group_key,
+            “layer”: self.layer,
+            “n_sketch”: self.n_sketch,
+            “distance_metric”: dist,
         }
 
         return distances

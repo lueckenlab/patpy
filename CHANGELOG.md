@@ -8,6 +8,112 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.14.0
+
+### Added
+
+- Sparse matrix support in sample representation methods
+- Tests with input layers containing sparse matrices
+
+## 0.14.0
+
+### Added
+- CLR-transformation to the composition baseline to bridge it with SETA: https://www.bioconductor.org/packages//release/bioc/html/SETA.html
+
+## 0.13.0
+
+### Added
+
+- **`SupervisedSampleMethod`** base class (`tl/_base_sample_method.py`) providing a shared scaffold for unsupervised and supervised sample-level methods.
+- **`MixMIL`** wrapper (`tl/supervised/_mixmil.py`) for the attention-based
+  multi-instance mixed model by Engelmann et al. 2024
+  (<https://arxiv.org/abs/2311.02455>).
+- **`PULSAR`** wrapper (`tl/supervised/_pulsar.py`) for the zero-shot foundation model by Pang et al. 2025 (<https://doi.org/10.1101/2025.11.24.685470>).
+- Tests for all supervised methods in `tests/test_supervised_methods.py`,
+  including fixtures with deterministic mock backends (no network access or
+  GPU required), multi-label MixMIL tests, and PULSAR linear probe tests.
+- Base class for sample methods: (`tl/_base_sample_method/BaseSampleMethod`)
+- `fit_linear_probe()` method for sample-level methods
+- `fine_tune()` method for supervised sample-level methods with linear probing as a default
+- `predict()` method for supervised sample-level methods
+- States for sample-level methods with `_check_adata_loaded()` and `_check_fitted()`
+- Tests for supervised methods
+
+### Changed
+
+- Both `SupervisedSampleMethod` and `SampleRepresentationMethod` now inherit basic functionality from `BaseSampleMethod`
+
+## 0.12.0
+
+### Added
+
+- Foundational model interface with `helical` at `pp/basic.py`
+- Tests for helical embeddings
+
+## 0.11.4
+
+### Added
+
+- Tests for all sample representation methods
+- Tests for preprocessing functions in `pp/basic.py`
+- Tests for evaluation utilities in `tl/evaluation.py`
+- `conftest.py` with reusable fixtures
+
+### Fixed
+
+- `prepare_data_for_phemd` now handles dense matrices in addition to sparse ones
+
+## 0.11.3
+
+### Added
+
+- An utils function `_remove_negative_distances`
+
+### Changed
+
+- In Python implementations of GloScope, remove negative distances
+
+## 0.11.2
+
+### Added
+
+- GloScope tutorial
+
+### Changed
+
+- Update the rpy2 interface for R implementation of GloScope
+
+## 0.11.1
+
+### Fixed
+
+- Fix bug in `tl/sample_representation/GloScope_py` with always accessing layer in obsm instead of a general slot
+
+## 0.11.0
+
+### Added
+- Function `tl/evaluation/trajectory_correlation` to compute a corresponding SPARE metric
+- Function `tl/evaluation/knn_prediction_score` to compute a corresponding SPARE metric
+- Function `tl/evaluation/replicate_robustness` to compute a corresponding SPARE metric
+- Utils function `tl/evaluation/_get_col_from_adata`
+- Utils funciton `tl/evaluation/_identity_up_to_suffix`
+
+## 0.10.0
+
+### Added
+
+- `GloScope_py` sample representation method (reimplementation of the original GloScope in Python for CPU and GPU)
+
+### Changed
+
+- `GloScope.calculate_distance_matrix` now returns a NumPy array instead of a pandas DataFrame
+
+## 0.9.3
+
+### Changed
+
+-   Update rpy2 conversion in `Gloscope.prepare_anndata()`
+
 ## 0.9.2
 
 ### Changed

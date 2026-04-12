@@ -4,24 +4,23 @@ requires = [ "hatchling" ]
 
 [project]
 name = "patpy"
-version = "0.9.2"
+version = "0.14.1"
 description = "A toolbox for patient or sample representation from single-cell data"
 readme = "README.md"
 license = { file = "LICENSE" }
 maintainers = [
   { name = "Vladimir Shitov", email = "vladimir.shitov@helmholtz-munich.de" },
 ]
-
 authors = [
   { name = "Vladimir Shitov" },
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
   "anndata>=0.8",
@@ -34,10 +33,7 @@ dependencies = [
   "plottable",
   "scipy>=1.10",
   "seaborn>=0.12",
-  # for debug logging (referenced from the issue template)
-  "session-info2",
 ]
-
 optional-dependencies.dev = [
   # CLI for bumping the version number
   "pre-commit",
@@ -65,12 +61,28 @@ optional-dependencies.doc = [
   "sphinxcontrib-bibtex>=1",
   "sphinxext-opengraph",
 ]
+optional-dependencies.gloscope-py-cpu = [
+  "pynndescent",
+]
+optional-dependencies.gloscope-py-gpu = [
+  "cuml",
+  "cupy",
+]
+optional-dependencies.helical = [
+  "helical>=1.8.3",
+]
+optional-dependencies.mixmil = [
+  "mixmil>=0.1.2",
+]
 optional-dependencies.mrvi = [
   "scvi-tools>=1.2",
   "torch>=1.13",
 ]
 optional-dependencies.pilot = [
   "pilotpy",
+]
+optional-dependencies.pulsar = [
+  "pulsar @ git+https://github.com/snap-stanford/PULSAR.git@main",
 ]
 optional-dependencies.scpoli = [
   "scarches>=0.5.1",
@@ -88,15 +100,40 @@ urls.Documentation = "https://patpy.readthedocs.io/"
 urls.Homepage = "https://github.com/lueckenlab/patpy"
 urls.Source = "https://github.com/lueckenlab/patpy"
 
+[dependency-groups]
+dev = [
+  "pre-commit",
+  "twine>=4.0.2",
+]
+test = [
+  "coverage>=7.10",
+  "pytest",
+  "pytest-cov",     # For VS Code’s coverage functionality
+]
+doc = [
+  "ipykernel",
+  "ipython",
+  "myst-nb>=1.1",
+  "pandas",
+  "sphinx>=8.1",
+  "sphinx-autodoc-typehints",
+  "sphinx-book-theme>=1",
+  "sphinx-copybutton",
+  "sphinx-tabs",
+  "sphinxcontrib-bibtex>=1",
+  "sphinxcontrib-katex",
+  "sphinxext-opengraph",
+]
+
 [tool.hatch.metadata]
 allow-direct-references = true # Allow installing packages from git repositories
 
 [tool.hatch.envs.default]
 installer = "uv"
-features = [ "dev" ]
+dependency-groups = [ "dev" ]
 
 [tool.hatch.envs.docs]
-features = [ "doc" ]
+dependency-groups = [ "doc" ]
 scripts.build = "sphinx-build -M html docs docs/_build -W {args}"
 scripts.open = "python -m webbrowser -t docs/_build/html/index.html"
 scripts.clean = "git clean -fdX -- {args:docs}"
@@ -104,15 +141,15 @@ scripts.clean = "git clean -fdX -- {args:docs}"
 # Test the lowest and highest supported Python versions with normal deps
 [[tool.hatch.envs.hatch-test.matrix]]
 deps = [ "stable" ]
-python = [ "3.10", "3.13" ]
+python = [ "3.11", "3.14" ]
 
 # Test the newest supported Python version also with pre-release deps
 [[tool.hatch.envs.hatch-test.matrix]]
 deps = [ "pre" ]
-python = [ "3.13" ]
+python = [ "3.14" ]
 
 [tool.hatch.envs.hatch-test]
-features = [ "test" ]
+dependency-groups = [ "dev", "test" ]
 
 [tool.hatch.envs.hatch-test.overrides]
 # If the matrix variable `deps` is set to "pre",
@@ -120,10 +157,6 @@ features = [ "test" ]
 matrix.deps.env-vars = [
   { key = "UV_PRERELEASE", value = "allow", if = [ "pre" ] },
 ]
-
-[tool.black]
-line-length = 120
-target-version = [ "py38" ]
 
 [tool.ruff]
 line-length = 120
@@ -155,9 +188,9 @@ lint.ignore = [
   "D105", # __magic__ methods are often self-explanatory, allow missing docstrings
   "D107", # Missing docstring in __init__
   # Disable one in each pair of mutually incompatible rules
-  "D203", # We don't want a blank line before a class docstring
+  "D203", # We don’t want a blank line before a class docstring
   "D213", # <> We want docstrings to start immediately after the opening triple quote
-  "D400", # first line should end with a period [Bug: doesn't work with single-line docstrings]
+  "D400", # first line should end with a period [Bug: doesn’t work with single-line docstrings]
   "D401", # First line should be in imperative mood; try rephrasing
   "E501", # line too long -> we accept long comment lines; formatter gets rid of long code lines
   "E731", # Do not assign a lambda expression, use a def -> lambda expression assignments are convenient
@@ -168,15 +201,19 @@ lint.per-file-ignores."docs/*" = [ "I" ]
 lint.per-file-ignores."tests/*" = [ "D" ]
 lint.pydocstyle.convention = "numpy"
 
-[tool.pytest.ini_options]
+[tool.pytest]
+strict = true
 testpaths = [ "tests" ]
-xfail_strict = true
 addopts = [
   "--import-mode=importlib", # allow using test files with same name
+]
+markers = [
+  "helical: integration tests that load real Helical foundation models (slow, requires helical extra)",
 ]
 
 [tool.coverage.run]
 source = [ "patpy" ]
+patch = [ "subprocess" ]
 omit = [
   "**/test_*.py",
 ]

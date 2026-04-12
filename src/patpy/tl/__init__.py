@@ -12,6 +12,7 @@ from .sample_representation import (
     CellGroupComposition,
     DiffusionEarthMoverDistance,
     GloScope,
+    GloScope_py,
     GroupedPseudobulk,
     MrVI,
     Pseudobulk,
@@ -23,4 +24,8 @@ from .sample_representation import (
     correlate_composition,
     describe_metadata,
     scLKME,
+)
+from .supervised import (
+    PULSAR,
+    MixMIL,
 )
