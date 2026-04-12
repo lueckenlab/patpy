@@ -3,6 +3,7 @@ import importlib.util
 import numpy as np
 import pandas as pd
 import pytest
+import scipy.sparse
 from anndata import AnnData
 
 from patpy.tl._base_sample_method import _create_colormap
@@ -471,6 +472,92 @@ def test_pseudobulk_non_default_params(aggregate, dist, synthetic_adata):
     distances = method.calculate_distance_matrix(force=True, aggregate=aggregate, dist=dist)
     assert distances.shape == (n_samples, n_samples)
     assert np.allclose(distances, distances.T)
+
+
+# ---------------------------------------------------------------------------
+# Sparse layer support — Pseudobulk and GroupedPseudobulk
+# ---------------------------------------------------------------------------
+
+
+def _make_sparse_adata(adata):
+    """Return a copy of adata with X and a 'sparse_counts' layer stored as CSR matrices."""
+    adata = adata.copy()
+    adata.layers["sparse_counts"] = scipy.sparse.csr_matrix(adata.X)
+    adata.layers["dense_counts"] = adata.X.copy()
+    adata.X = scipy.sparse.csr_matrix(adata.X)
+    return adata
+
+
+@pytest.mark.parametrize("aggregate", ["mean", "sum"])
+def test_pseudobulk_sparse_layer_matches_dense(aggregate, synthetic_adata):
+    """Pseudobulk with a sparse layer should produce the same distances as with a dense layer."""
+    adata_sparse = _make_sparse_adata(synthetic_adata)
+    adata_dense = synthetic_adata.copy()
+    adata_dense.layers["dense_counts"] = adata_dense.X.copy()
+
+    method_sparse = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="sparse_counts")
+    method_sparse.prepare_anndata(adata_sparse)
+    distances_sparse = method_sparse.calculate_distance_matrix(force=True, aggregate=aggregate)
+
+    method_dense = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="dense_counts")
+    method_dense.prepare_anndata(adata_dense)
+    distances_dense = method_dense.calculate_distance_matrix(force=True, aggregate=aggregate)
+
+    assert distances_sparse.shape == distances_dense.shape
+    np.testing.assert_allclose(distances_sparse, distances_dense, rtol=1e-10)
+
+
+def test_pseudobulk_sparse_X_matches_dense(synthetic_adata):
+    """Pseudobulk with sparse adata.X (layer='X') should match dense adata.X."""
+    adata_dense = synthetic_adata.copy()
+    adata_sparse = _make_sparse_adata(synthetic_adata)
+
+    method_dense = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X")
+    method_dense.prepare_anndata(adata_dense)
+    distances_dense = method_dense.calculate_distance_matrix(force=True)
+
+    method_sparse = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X")
+    method_sparse.prepare_anndata(adata_sparse)
+    distances_sparse = method_sparse.calculate_distance_matrix(force=True)
+
+    assert distances_sparse.shape == distances_dense.shape
+    np.testing.assert_allclose(distances_sparse, distances_dense, rtol=1e-10)
+
+
+@pytest.mark.parametrize("aggregate", ["mean", "sum"])
+def test_grouped_pseudobulk_sparse_layer_matches_dense(aggregate, synthetic_adata):
+    """GroupedPseudobulk with a sparse layer should produce the same distances as with a dense layer."""
+    adata_sparse = _make_sparse_adata(synthetic_adata)
+    adata_dense = synthetic_adata.copy()
+    adata_dense.layers["dense_counts"] = adata_dense.X.copy()
+
+    method_sparse = GroupedPseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="sparse_counts")
+    method_sparse.prepare_anndata(adata_sparse)
+    distances_sparse = method_sparse.calculate_distance_matrix(force=True, aggregate=aggregate)
+
+    method_dense = GroupedPseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="dense_counts")
+    method_dense.prepare_anndata(adata_dense)
+    distances_dense = method_dense.calculate_distance_matrix(force=True, aggregate=aggregate)
+
+    assert distances_sparse.shape == distances_dense.shape
+    np.testing.assert_allclose(distances_sparse, distances_dense, rtol=1e-10)
+
+
+def test_grouped_pseudobulk_sparse_X_matches_dense(synthetic_adata):
+    """GroupedPseudobulk with sparse adata.X (layer='X') should match dense adata.X."""
+    adata_dense = synthetic_adata.copy()
+    adata_sparse = _make_sparse_adata(synthetic_adata)
+
+    method_dense = GroupedPseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X")
+    method_dense.prepare_anndata(adata_dense)
+    distances_dense = method_dense.calculate_distance_matrix(force=True)
+
+    method_sparse = GroupedPseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X")
+    method_sparse.prepare_anndata(adata_sparse)
+    distances_sparse = method_sparse.calculate_distance_matrix(force=True)
+
+    assert distances_sparse.shape == distances_dense.shape
+    np.testing.assert_allclose(distances_sparse, distances_dense, rtol=1e-10)
 
 
 # ---------------------------------------------------------------------------
