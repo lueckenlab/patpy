@@ -29,8 +29,8 @@ dependencies = [
 ]
 # https://docs.pypi.org/project_metadata/#project-urls
 urls.Documentation = "https://patpy.readthedocs.io/"
-urls.Homepage = "https://github.com/VladimirShitov/patpy"
-urls.Source = "https://github.com/VladimirShitov/patpy"
+urls.Homepage = "https://github.com/lueckenlab/patpy"
+urls.Source = "https://github.com/lueckenlab/patpy"
 
 [dependency-groups]
 dev = [
