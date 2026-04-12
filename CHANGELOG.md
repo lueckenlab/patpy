@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.15.0
+
+### Added
+
+- **`PaSCient`** method wrapper (`tl/supervised/PaSCient`) for training and fine-tuning PaSCent foundational model
+- Example of running paSCient to `docs/notebooks/supervised_methods_example.ipynb`
+
 ## 0.13.0
 
 ### Added
