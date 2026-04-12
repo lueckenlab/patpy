@@ -7,7 +7,6 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import scipy
-import seaborn as sns
 from pandas.api.types import is_numeric_dtype
 from scipy.sparse import issparse
 from scipy.stats import pearsonr, spearmanr

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning][].
 
 ## 0.14.0
 
-### Added 
+### Added
 
 - Sparse matrix support in sample representation methods
 - Tests with input layers containing sparse matrices
