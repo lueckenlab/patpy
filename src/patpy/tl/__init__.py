@@ -5,7 +5,7 @@ from .evaluation import (
     predict_knn,
     test_distances_significance,
     test_proportions,
-    associate_pcs_with_covariates,
+    associate_embedding_with_covariates,
 )
 from .sample_representation import (
     MOFA,

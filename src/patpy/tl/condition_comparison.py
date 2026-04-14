@@ -213,8 +213,9 @@ class ConditionComparison:
 
     After :meth:`run` completes, fitted model instances are available via
     :attr:`models_` and :meth:`get_model`, giving full access to pertpy's
-    plotting API (``plot_volcano``, ``plot_fold_change``,
-    ``plot_multicomparison_fc``, ``plot_paired``) for any individual contrast.
+    plotting API via the named wrappers :meth:`plot_volcano`,
+    :meth:`plot_fold_change`, and :meth:`plot_multicomparison_fc`, or via the
+    internal :meth:`_plot` dispatcher for any other pertpy plot method.
 
     There are two ways to use this class:
 
@@ -248,31 +249,32 @@ class ConditionComparison:
 
     Examples
     --------
-    Run and then use pertpy's plotting methods:
+    Run and then use pertpy's plotting methods via the named wrappers:
 
     >>> import pertpy as pt
-    >>> import patpy.tl.condition_comparison as pcc
+    >>> import patpy.tl.condition_comparison as ptc
     >>>
-    >>> cc = pcc.ConditionComparison(pt.tl.PyDESeq2, layer="counts")
+    >>> cc = ptc.ConditionComparison(pt.tl.PyDESeq2, layer="counts")
     >>> res = cc.run(pdata, condition_cols=["Source"])
     >>>
-    >>> # Access the fitted model instance for any contrast
+    >>> # Named plot wrappers — no need to know pertpy's internal method names
+    >>> cc.plot_volcano("COVID_SEV_vs_HV", results_df=res)
+    >>> cc.plot_fold_change("COVID_SEV_vs_HV", results_df=res, n_top_vars=20)
+    >>> cc.plot_multicomparison_fc("COVID_SEV_vs_HV", results_df=res)
+    >>>
+    >>> # Or retrieve the model instance directly for full control
     >>> model = cc.get_model("COVID_SEV_vs_HV")
     >>> model.plot_volcano(res[res["contrast"] == "COVID_SEV_vs_HV"])
-    >>> model.plot_fold_change(res[res["contrast"] == "COVID_SEV_vs_HV"])
-    >>>
-    >>> # Or use the convenience wrapper that filters the DataFrame for you
-    >>> cc.plot("plot_volcano", contrast="COVID_SEV_vs_HV", results_df=res)
 
     Reuse model and settings across multiple condition axes:
 
-    >>> cc = pcc.ConditionComparison(pt.tl.EdgeR, layer="counts", paired_by="patient_id")
+    >>> cc = ptc.ConditionComparison(pt.tl.EdgeR, layer="counts", paired_by="patient_id")
     >>> res_source = cc.run(pdata, condition_cols=["Source"])
     >>> res_sex    = cc.run(pdata, condition_cols=["Sex"])
 
     One-off analysis with model access:
 
-    >>> res, models = pcc.ConditionComparison.run_once(
+    >>> res, models = ptc.ConditionComparison.run_once(
     ...     pt.tl.PyDESeq2, pdata, condition_cols=["Source"], layer="counts"
     ... )
     >>> models["COVID_SEV_vs_HV"].plot_volcano(res[res["contrast"] == "COVID_SEV_vs_HV"])
@@ -296,9 +298,9 @@ class ConditionComparison:
         """Run the stored method across all pairwise contrasts of ``condition_cols``.
 
         After this call, :attr:`models_` is populated with a fitted model
-        instance per contrast, giving access to pertpy's full plotting API.
-        Use :meth:`get_model` to retrieve an instance by contrast label, or
-        :meth:`plot` to call a pertpy plot method directly.
+        instance per contrast, giving access to pertpy's full plotting API
+        via :meth:`plot_volcano`, :meth:`plot_fold_change`,
+        :meth:`plot_multicomparison_fc`, or :meth:`get_model`.
 
         Parameters
         ----------
@@ -330,13 +332,9 @@ class ConditionComparison:
         >>> cc = ConditionComparison(pt.tl.PyDESeq2, layer="counts")
         >>> res = cc.run(pdata, condition_cols=["Source"])
         >>>
-        >>> # Use pertpy's plotting API via the stored model instance
-        >>> cc.get_model("COVID_SEV_vs_HV").plot_volcano(
-        ...     res[res["contrast"] == "COVID_SEV_vs_HV"]
-        ... )
-        >>>
-        >>> # Or use the convenience wrapper
-        >>> cc.plot("plot_volcano", contrast="COVID_SEV_vs_HV", results_df=res)
+        >>> # Named plot wrappers
+        >>> cc.plot_volcano("COVID_SEV_vs_HV", results_df=res)
+        >>> cc.plot_fold_change("COVID_SEV_vs_HV", results_df=res, n_top_vars=20)
         """
         merged_kwargs = {**self.default_kwargs, **kwargs}
         results, models = _iter_contrasts(
@@ -356,14 +354,9 @@ class ConditionComparison:
 
         The instance is constructed with the same subset AnnData and design
         formula used by ``compare_groups`` for that contrast. Use it to call
-        any pertpy instance plotting method directly:
-
-        .. code-block:: python
-
-            model = cc.get_model("COVID_SEV_vs_HV")
-            model.plot_volcano(res[res["contrast"] == "COVID_SEV_vs_HV"])
-            model.plot_fold_change(res[res["contrast"] == "COVID_SEV_vs_HV"])
-            model.plot_multicomparison_fc(res)
+        any pertpy instance plotting method directly, or use the convenience
+        wrappers :meth:`plot_volcano`, :meth:`plot_fold_change`, and
+        :meth:`plot_multicomparison_fc`.
 
         Parameters
         ----------
@@ -392,21 +385,149 @@ class ConditionComparison:
             )
         return self.models_[contrast]
 
-    def plot(self, method: str, *, contrast: str, results_df: pd.DataFrame, **plot_kwargs: Any) -> Any:
-        """Call a pertpy plotting method for a specific contrast.
+    # ------------------------------------------------------------------
+    # Named plot wrappers
+    # ------------------------------------------------------------------
 
-        Convenience wrapper around :meth:`get_model` that also filters
-        ``results_df`` to the requested contrast automatically.
+    def plot_volcano(
+        self,
+        contrast: str,
+        *,
+        results_df: pd.DataFrame,
+        **plot_kwargs: Any,
+    ) -> Any:
+        """Call pertpy's ``plot_volcano`` for a specific contrast.
+
+        Retrieves the stored model instance for ``contrast``, filters
+        ``results_df`` to that contrast, and calls ``model.plot_volcano``.
+
+        Parameters
+        ----------
+        contrast : str
+            Contrast label identifying the model instance and used to filter
+            ``results_df``.
+        results_df : pd.DataFrame
+            Full results DataFrame returned by :meth:`run`.
+        **plot_kwargs
+            Additional keyword arguments forwarded to pertpy's
+            ``plot_volcano``.
+
+        Returns
+        -------
+        Whatever pertpy's ``plot_volcano`` returns (usually ``None`` or a
+        Figure).
+
+        Examples
+        --------
+        >>> cc = ConditionComparison(pt.tl.PyDESeq2, layer="counts")
+        >>> res = cc.run(pdata, condition_cols=["Source", "Sex"])
+        >>> cc.plot_volcano("COVID_SEV_0_vs_HV_0", results_df=res)
+        """
+        return self._plot("plot_volcano", contrast=contrast, results_df=results_df, **plot_kwargs)
+
+    def plot_fold_change(
+        self,
+        contrast: str,
+        *,
+        results_df: pd.DataFrame,
+        **plot_kwargs: Any,
+    ) -> Any:
+        """Call pertpy's ``plot_fold_change`` for a specific contrast.
+
+        Retrieves the stored model instance for ``contrast``, filters
+        ``results_df`` to that contrast, and calls ``model.plot_fold_change``.
+
+        Parameters
+        ----------
+        contrast : str
+            Contrast label identifying the model instance and used to filter
+            ``results_df``.
+        results_df : pd.DataFrame
+            Full results DataFrame returned by :meth:`run`.
+        **plot_kwargs
+            Additional keyword arguments forwarded to pertpy's
+            ``plot_fold_change``.
+
+        Returns
+        -------
+        Whatever pertpy's ``plot_fold_change`` returns (usually ``None`` or a
+        Figure).
+
+        Examples
+        --------
+        >>> cc = ConditionComparison(pt.tl.PyDESeq2, layer="counts")
+        >>> res = cc.run(pdata, condition_cols=["Source", "Sex"])
+        >>> cc.plot_fold_change("COVID_SEV_0_vs_HV_0", results_df=res, n_top_vars=20)
+        """
+        return self._plot("plot_fold_change", contrast=contrast, results_df=results_df, **plot_kwargs)
+
+    def plot_multicomparison_fc(
+        self,
+        contrast: str,
+        *,
+        results_df: pd.DataFrame,
+        **plot_kwargs: Any,
+    ) -> Any:
+        """Call pertpy's ``plot_multicomparison_fc`` using a stored model instance.
+
+        Unlike :meth:`plot_volcano` and :meth:`plot_fold_change`, this method
+        passes the **full** ``results_df`` unfiltered, since
+        ``plot_multicomparison_fc`` is designed to visualise multiple contrasts
+        side by side. The ``contrast`` argument is used only to select which
+        model instance to call the method on.
+
+        Parameters
+        ----------
+        contrast : str
+            Contrast label used to look up the model instance (any contrast
+            in :attr:`models_` is valid). The full ``results_df`` is passed
+            to the method regardless.
+        results_df : pd.DataFrame
+            Full results DataFrame returned by :meth:`run`.
+        **plot_kwargs
+            Additional keyword arguments forwarded to pertpy's
+            ``plot_multicomparison_fc``.
+
+        Returns
+        -------
+        Whatever pertpy's ``plot_multicomparison_fc`` returns.
+
+        Examples
+        --------
+        >>> cc = ConditionComparison(pt.tl.PyDESeq2, layer="counts")
+        >>> res = cc.run(pdata, condition_cols=["Source", "Sex"])
+        >>> cc.plot_multicomparison_fc(list(cc.models_)[0], results_df=res)
+        """
+        model = self.get_model(contrast)
+        plot_fn = getattr(model, "plot_multicomparison_fc", None)
+        if plot_fn is None:
+            raise AttributeError(
+                f"Model class '{type(model).__name__}' has no method "
+                f"'plot_multicomparison_fc'."
+            )
+        return plot_fn(results_df, **plot_kwargs)
+
+    # ------------------------------------------------------------------
+    # Internal generic dispatcher (escape hatch for advanced users)
+    # ------------------------------------------------------------------
+
+    def _plot(self, method: str, *, contrast: str, results_df: pd.DataFrame, **plot_kwargs: Any) -> Any:
+        """Call an arbitrary pertpy plot method for a specific contrast.
+
+        This is the internal dispatcher used by the named wrappers
+        (:meth:`plot_volcano`, :meth:`plot_fold_change`). Prefer those over
+        calling this directly. For ``plot_multicomparison_fc``, use
+        :meth:`plot_multicomparison_fc` instead, as the full DataFrame is
+        passed unfiltered in that case.
 
         Parameters
         ----------
         method : str
-            Name of the pertpy plotting method to call, e.g.
-            ``"plot_volcano"``, ``"plot_fold_change"``,
-            ``"plot_multicomparison_fc"``.
+            Name of the pertpy plotting method, e.g. ``"plot_volcano"``,
+            ``"plot_fold_change"``, ``"plot_paired"``.
         contrast : str
-            Contrast label to retrieve the model instance for and to filter
-            ``results_df`` by.
+            Contrast label used to retrieve the model instance and to filter
+            ``results_df``.
         results_df : pd.DataFrame
             Full results DataFrame returned by :meth:`run`. Will be filtered
             to ``contrast`` before being passed to the plot method.
@@ -416,17 +537,6 @@ class ConditionComparison:
         Returns
         -------
         Whatever the pertpy plot method returns (usually ``None`` or a Figure).
-
-        Examples
-        --------
-        >>> cc = ConditionComparison(pt.tl.PyDESeq2, layer="counts")
-        >>> res = cc.run(pdata, condition_cols=["Source"])
-        >>>
-        >>> cc.plot("plot_volcano", contrast="COVID_SEV_vs_HV", results_df=res)
-        >>> cc.plot("plot_fold_change", contrast="COVID_SEV_vs_HV", results_df=res, n_top_vars=20)
-        >>>
-        >>> # plot_multicomparison_fc makes most sense with the full multi-contrast DataFrame
-        >>> cc.plot("plot_multicomparison_fc", contrast=list(cc.models_)[0], results_df=res)
         """
         model = self.get_model(contrast)
         plot_fn = getattr(model, method, None)
@@ -471,7 +581,7 @@ class ConditionComparison:
             # Equivalent using an instance (preferred when running more than once)
             cc = ConditionComparison(pt.tl.PyDESeq2, layer="counts")
             res = cc.run(pdata, ["Source"])
-            cc.get_model("COVID_SEV_vs_HV").plot_volcano(res[res["contrast"] == "COVID_SEV_vs_HV"])
+            cc.plot_volcano("COVID_SEV_vs_HV", results_df=res)
 
         Parameters
         ----------
@@ -510,9 +620,9 @@ class ConditionComparison:
         Examples
         --------
         >>> import pertpy as pt
-        >>> import patpy.tl.condition_comparison as pcc
+        >>> import patpy.tl.condition_comparison as ptc
         >>>
-        >>> res, models = pcc.ConditionComparison.run_once(
+        >>> res, models = ptc.ConditionComparison.run_once(
         ...     pt.tl.PyDESeq2,
         ...     pdata,
         ...     condition_cols=["Source"],
