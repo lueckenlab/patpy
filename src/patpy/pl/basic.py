@@ -97,7 +97,7 @@ def correlation_volcano(
     return fig, ax
 
  
-def pc_covariate_heatmap(
+def embedding_covariate_heatmap(
     assoc_df: pd.DataFrame,
     *,
     covariate_col: str = "covariate",
@@ -106,87 +106,118 @@ def pc_covariate_heatmap(
     p_thresh: float = 0.05,
     cmap: str = "Reds",
     figsize: tuple[int, int] | None = None,
-    title: str = "PC association with covariates (-log10 p)",
+    title: str = "Embedding association with covariates (-log10 p)",
     return_fig: bool = False,
 ) -> Figure | None:
-    """Heatmap of PC–covariate association statistics.
- 
-    Companion plot for :func:`patpy.tl.associate_pcs_with_covariates`. Each
+    """Heatmap of embedding–covariate association statistics.
+
+    Companion plot for :func:`patpy.tl.associate_embedding_with_covariates`. Each
     cell shows the ``-log10(p-value)`` from a one-way ANOVA or Kruskal-Wallis
-    test of that PC against that covariate. A dashed contour marks the
-    significance threshold.
- 
+    test of that component against that covariate. Cells are annotated with
+    significance stars (``***`` p < 0.001, ``**`` p < 0.01, ``*`` p < 0.05,
+    ``.`` p < 0.10).
+
     Parameters
     ----------
     assoc_df : pd.DataFrame
-        Output of :func:`patpy.tl.associate_pcs_with_covariates`.
+        Output of :func:`patpy.tl.associate_embedding_with_covariates`.
     covariate_col : str, default ``"covariate"``
         Column in ``assoc_df`` identifying the covariate (y-axis).
     pc_col : str, default ``"PC"``
-        Column in ``assoc_df`` identifying the principal component (x-axis).
+        Column in ``assoc_df`` identifying the embedding component (x-axis).
     value_col : str, default ``"-log10p"``
         Column to use as heatmap values.
     p_thresh : float, default ``0.05``
-        Significance threshold. Cells above ``-log10(p_thresh)`` are outlined.
+        Significance threshold used to derive star annotations. Cells with
+        p-value below this threshold are annotated.
     cmap : str, default ``"Reds"``
-        Matplotlib colormap.
+        Matplotlib/seaborn colormap name.
     figsize : tuple[int, int], optional
-        Figure size. Defaults to ``(n_pcs + 2, n_covariates + 1)``.
+        Figure size. Defaults to ``(n_components + 2, n_covariates + 1)``.
     title : str
         Plot title.
     return_fig : bool, default ``False``
         If ``True``, return the figure instead of calling ``plt.show()``.
- 
+
     Returns
     -------
     Figure | None
         The figure if ``return_fig=True``, otherwise ``None``.
- 
+
     Examples
     --------
-    >>> assoc = patpy.tl.associate_pcs_with_covariates(pdata, ["Source", "Sex"])
-    >>> patpy.pl.pc_covariate_heatmap(assoc)
+    >>> assoc = patpy.tl.associate_embedding_with_covariates(
+    ...     pdata, ["Source", "Sex"], obsm_key="X_pca"
+    ... )
+    >>> patpy.pl.embedding_covariate_heatmap(assoc)
     """
+    import seaborn as sns
+
     pivot = assoc_df.pivot(index=covariate_col, columns=pc_col, values=value_col)
- 
+
     # Sort columns numerically (PC1, PC2, … PC10, not PC1, PC10, PC2)
-    pc_order = sorted(pivot.columns, key=lambda s: int(s.replace("PC", "")))
+    try:
+        col_label = pivot.columns[0]
+        prefix = "".join(c for c in col_label if not c.isdigit())
+        pc_order = sorted(pivot.columns, key=lambda s: int(s.replace(prefix, "")))
+    except (ValueError, IndexError):
+        pc_order = list(pivot.columns)
     pivot = pivot[pc_order]
- 
+
+    # Build matching p-value pivot for star annotations
+    if "p_value" in assoc_df.columns:
+        p_pivot = assoc_df.pivot(
+            index=covariate_col, columns=pc_col, values="p_value"
+        )[pc_order]
+    else:
+        # Reconstruct p-values from -log10p
+        p_pivot = 10 ** (-pivot)
+
+    def _stars(p: float) -> str:
+        if p < 0.001:
+            return "***"
+        if p < 0.01:
+            return "**"
+        if p < 0.05:
+            return "*"
+        if p < 0.10:
+            return "."
+        return ""
+
+    annot = p_pivot.applymap(_stars)
+
     n_covariates, n_pcs = pivot.shape
     if figsize is None:
         figsize = (max(6, n_pcs + 2), max(2, n_covariates + 1))
- 
+
     fig, ax = plt.subplots(figsize=figsize)
-    im = ax.imshow(pivot.values, aspect="auto", cmap=cmap)
- 
-    # Axis ticks
-    ax.set_xticks(range(n_pcs))
-    ax.set_xticklabels(pivot.columns, rotation=45, ha="right", fontsize=10)
-    ax.set_yticks(range(n_covariates))
-    ax.set_yticklabels(pivot.index, fontsize=10)
- 
-    # Outline significant cells
-    thresh = -np.log10(p_thresh)
-    for row_idx in range(n_covariates):
-        for col_idx in range(n_pcs):
-            if pivot.values[row_idx, col_idx] >= thresh:
-                ax.add_patch(
-                    plt.Rectangle(
-                        (col_idx - 0.5, row_idx - 0.5),
-                        1,
-                        1,
-                        fill=False,
-                        edgecolor="black",
-                        linewidth=1.5,
-                        linestyle="--",
-                    )
-                )
- 
-    plt.colorbar(im, ax=ax, label=value_col)
+    sns.heatmap(
+        pivot,
+        annot=annot,
+        fmt="",
+        cmap=cmap,
+        ax=ax,
+        cbar_kws={"label": value_col},
+        linewidths=0.5,
+        linecolor="lightgrey",
+    )
     ax.set_title(title, fontsize=12, pad=10)
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+
+    # Star legend as figure subtitle
+    fig.text(
+        0.5, -0.02,
+        "Significance: *** p<0.001   ** p<0.01   * p<0.05   . p<0.10",
+        ha="center",
+        va="top",
+        fontsize=9,
+        color="grey",
+        style="italic",
+    )
+
     plt.tight_layout()
- 
+
     if return_fig:
         return fig
     plt.show()
