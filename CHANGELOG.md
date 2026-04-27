@@ -8,7 +8,13 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
-## [0.15.1]
+## 0.15.2
+
+### Deleted
+
+- Git dependencies `pulsar` and `pascient` to fix PyOI integration, changed installation instructions
+
+## 0.15.1
 
 ### Added — `patpy.tl.condition_utils`
 
