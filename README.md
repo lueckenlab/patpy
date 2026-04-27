@@ -77,6 +77,17 @@ pip install patpy[pilot]
 
 All the available dependency groups: `diffusionemd`, `mrvi`, `pilot`, `scpoli`, `wassersteintsne`.
 
+Some sample representation tools depend on packages not published on PyPI. To use them, install the extra and the upstream package from git:
+
+```bash
+# pascient
+pip install patpy[pascient]
+pip install git+https://github.com/genentech/pascient.git@main
+
+# pulsar
+pip install git+https://github.com/snap-stanford/PULSAR.git@main
+```
+
 ## Release notes
 
 See the [changelog][changelog].
@@ -119,7 +130,7 @@ Shitov, V. (2024). patpy – sample-level analysis framework for single-cell dat
   title = {patpy – sample-level analysis framework for single-cell data},
   year = {2024},
   url = {https://github.com/lueckenlab/patpy/},
-  note = {Version 0.15.1}
+  note = {Version 0.15.2}
 }
 ```
 

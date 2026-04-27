@@ -1036,7 +1036,9 @@ class PULSAR(SupervisedSampleMethod):
             from pulsar.model import PULSAR as _PulsarModel
             from pulsar.utils import extract_donor_embeddings_from_h5ad
         except ImportError as e:
-            raise ImportError("pulsar is required. Install from: https://github.com/snap-stanford/PULSAR") from e
+            raise ImportError(
+                "pulsar is required. Install with: pip install git+https://github.com/snap-stanford/PULSAR.git@main"
+            ) from e
 
         super().prepare_anndata(adata)
 
@@ -1372,7 +1374,10 @@ class PaSCient(SupervisedSampleMethod):
         try:
             import pascient
         except ImportError as e:
-            raise ImportError("pascient is required. Install with: pip install patpy[pascient]") from e
+            raise ImportError(
+                "pascient is required. Install with: pip install patpy[pascient] && "
+                "pip install git+https://github.com/genentech/pascient.git@main"
+            ) from e
 
         # PaSCient was originally packaged as "cellm"; Hydra configs may
         # reference the old name, so register it as an alias.
@@ -1512,7 +1517,10 @@ class PaSCient(SupervisedSampleMethod):
             from pascient.components.masking import DummyMasking
             from pascient.model.sample_predictor import SamplePredictor
         except ImportError as e:
-            raise ImportError("pascient is required. Install with: pip install patpy[pascient]") from e
+            raise ImportError(
+                "pascient is required. Install with: pip install patpy[pascient] && "
+                "pip install git+https://github.com/genentech/pascient.git@main"
+            ) from e
 
         latent_dim = self.latent_dim  # 1024
         emb_dim = self.patient_emb_dim  # 512

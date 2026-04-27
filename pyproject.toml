@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "patpy"
-version = "0.15.1"
+version = "0.15.2"
 description = "A toolbox for patient or sample representation from single-cell data"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -86,17 +86,17 @@ optional-dependencies.mrvi = [
   "torch>=1.13",
 ]
 optional-dependencies.pascient = [
+  # `pascient` itself is not on PyPI; install it manually:
+  #   pip install git+https://github.com/genentech/pascient.git@main
   "hydra-core>=1.3",
   "lightning",
-  "pascient @ git+https://github.com/genentech/pascient.git@main",
   "s3fs",
 ]
 optional-dependencies.pilot = [
   "pilotpy",
 ]
-optional-dependencies.pulsar = [
-  "pulsar @ git+https://github.com/snap-stanford/PULSAR.git@main",
-]
+# `pulsar` is not on PyPI; install it manually:
+#   pip install git+https://github.com/snap-stanford/PULSAR.git@main
 optional-dependencies.scpoli = [
   "scarches>=0.5.1",
 ]
