@@ -1,15 +1,15 @@
 from __future__ import annotations
- 
+
 from typing import TYPE_CHECKING
- 
+
 import matplotlib.pyplot as plt
 import numpy as np
- 
+
 if TYPE_CHECKING:
     import pandas as pd
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
- 
+
 
 def correlation_volcano(
     correlation_df,
@@ -96,7 +96,7 @@ def correlation_volcano(
     plt.tight_layout()
     return fig, ax
 
- 
+
 def embedding_covariate_heatmap(
     assoc_df: pd.DataFrame,
     *,
