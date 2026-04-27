@@ -72,11 +72,11 @@ optional-dependencies.gloscope-py-gpu = [
   "cuml",
   "cupy",
 ]
-optional-dependencies.milo-edger = [
-  "pertpy[milo-edger]>=1.0.5",
-]
 optional-dependencies.helical = [
   "helical>=1.8.3",
+]
+optional-dependencies.milo-edger = [
+  "pertpy[milo-edger]>=1.0.5",
 ]
 optional-dependencies.mixmil = [
   "mixmil>=0.1.2",

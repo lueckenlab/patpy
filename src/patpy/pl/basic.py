@@ -7,7 +7,6 @@ import numpy as np
 
 if TYPE_CHECKING:
     import pandas as pd
-    from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
 
@@ -146,9 +145,7 @@ def embedding_covariate_heatmap(
 
     Examples
     --------
-    >>> assoc = patpy.tl.associate_embedding_with_covariates(
-    ...     pdata, ["Source", "Sex"], obsm_key="X_pca"
-    ... )
+    >>> assoc = patpy.tl.associate_embedding_with_covariates(pdata, ["Source", "Sex"], obsm_key="X_pca")
     >>> patpy.pl.embedding_covariate_heatmap(assoc)
     """
     import seaborn as sns
@@ -166,9 +163,7 @@ def embedding_covariate_heatmap(
 
     # Build matching p-value pivot for star annotations
     if "p_value" in assoc_df.columns:
-        p_pivot = assoc_df.pivot(
-            index=covariate_col, columns=pc_col, values="p_value"
-        )[pc_order]
+        p_pivot = assoc_df.pivot(index=covariate_col, columns=pc_col, values="p_value")[pc_order]
     else:
         # Reconstruct p-values from -log10p
         p_pivot = 10 ** (-pivot)
@@ -207,7 +202,8 @@ def embedding_covariate_heatmap(
 
     # Star legend as figure subtitle
     fig.text(
-        0.5, -0.02,
+        0.5,
+        -0.02,
         "Significance: *** p<0.001   ** p<0.01   * p<0.05   . p<0.10",
         ha="center",
         va="top",

@@ -198,8 +198,7 @@ def _iter_contrasts(
 
     if not results:
         raise RuntimeError(
-            "All contrasts failed or returned no results. "
-            "Check your data, design, and condition columns."
+            "All contrasts failed or returned no results. Check your data, design, and condition columns."
         )
 
     return pd.concat(results, ignore_index=True), models
@@ -270,13 +269,11 @@ class ConditionComparison:
 
     >>> cc = ptc.ConditionComparison(pt.tl.EdgeR, layer="counts", paired_by="patient_id")
     >>> res_source = cc.run(pdata, condition_cols=["Source"])
-    >>> res_sex    = cc.run(pdata, condition_cols=["Sex"])
+    >>> res_sex = cc.run(pdata, condition_cols=["Sex"])
 
     One-off analysis with model access:
 
-    >>> res, models = ptc.ConditionComparison.run_once(
-    ...     pt.tl.PyDESeq2, pdata, condition_cols=["Source"], layer="counts"
-    ... )
+    >>> res, models = ptc.ConditionComparison.run_once(pt.tl.PyDESeq2, pdata, condition_cols=["Source"], layer="counts")
     >>> models["COVID_SEV_vs_HV"].plot_volcano(res[res["contrast"] == "COVID_SEV_vs_HV"])
     """
 
@@ -501,10 +498,7 @@ class ConditionComparison:
         model = self.get_model(contrast)
         plot_fn = getattr(model, "plot_multicomparison_fc", None)
         if plot_fn is None:
-            raise AttributeError(
-                f"Model class '{type(model).__name__}' has no method "
-                f"'plot_multicomparison_fc'."
-            )
+            raise AttributeError(f"Model class '{type(model).__name__}' has no method 'plot_multicomparison_fc'.")
         return plot_fn(results_df, **plot_kwargs)
 
     # ------------------------------------------------------------------
@@ -573,9 +567,7 @@ class ConditionComparison:
         .. code-block:: python
 
             # run_once — everything in one call
-            res, models = ConditionComparison.run_once(
-                pt.tl.PyDESeq2, pdata, ["Source"], layer="counts"
-            )
+            res, models = ConditionComparison.run_once(pt.tl.PyDESeq2, pdata, ["Source"], layer="counts")
             models["COVID_SEV_vs_HV"].plot_volcano(res[res["contrast"] == "COVID_SEV_vs_HV"])
 
             # Equivalent using an instance (preferred when running more than once)

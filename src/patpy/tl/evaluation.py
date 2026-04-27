@@ -1,13 +1,14 @@
 import warnings
 
+import anndata as ad
 import numpy as np
 import pandas as pd
 import scanpy as sc
-import anndata as ad
 from scipy import stats
 from scipy.stats import trim_mean
 
 from patpy.tl._types import _EVALUATION_METHODS, _NORMALIZATION_TYPES, _PREDICTION_TASKS
+
 
 def _upper_diagonal(matrix):
     """Return upper diagonal of the matrix excluding the diagonal itself"""
@@ -834,11 +835,7 @@ def associate_embedding_with_covariates(
         groups = adata.obs[covariate].astype(str)
         for comp_idx in range(n_components):
             scores = embedding[:, comp_idx]
-            group_vals = [
-                scores[groups == g]
-                for g in groups.unique()
-                if (groups == g).sum() > 1
-            ]
+            group_vals = [scores[groups == g] for g in groups.unique() if (groups == g).sum() > 1]
             if len(group_vals) < 2:
                 continue
             stat, p = test_fn(*group_vals)
