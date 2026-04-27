@@ -27,4 +27,5 @@ from .sample_representation import (
 from .supervised import (
     PULSAR,
     MixMIL,
+    PaSCient,
 )
