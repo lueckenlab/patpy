@@ -1037,8 +1037,7 @@ class PULSAR(SupervisedSampleMethod):
             from pulsar.utils import extract_donor_embeddings_from_h5ad
         except ImportError as e:
             raise ImportError(
-                "pulsar is required. Install with: "
-                "pip install git+https://github.com/snap-stanford/PULSAR.git@main"
+                "pulsar is required. Install with: pip install git+https://github.com/snap-stanford/PULSAR.git@main"
             ) from e
 
         super().prepare_anndata(adata)
