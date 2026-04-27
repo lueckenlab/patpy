@@ -113,7 +113,7 @@ def embedding_covariate_heatmap(
     Companion plot for :func:`patpy.tl.associate_embedding_with_covariates`. Each
     cell shows the ``-log10(p-value)`` from a one-way ANOVA or Kruskal-Wallis
     test of that component against that covariate. Cells are annotated with
-    significance stars (``***`` p < 0.001, ``**`` p < 0.01, ``*`` p < 0.05,
+    significance stars (``∗∗∗`` p < 0.001, ``∗∗`` p < 0.01, ``∗`` p < 0.05,
     ``.`` p < 0.10).
 
     Parameters
@@ -170,13 +170,13 @@ def embedding_covariate_heatmap(
 
     def _stars(p: float) -> str:
         if p < 0.001:
-            return "***"
+            return "∗∗∗"
         if p < 0.01:
-            return "**"
+            return "∗∗"
         if p < 0.05:
-            return "*"
+            return "∗"
         if p < 0.10:
-            return "."
+            return "·"
         return ""
 
     annot = p_pivot.applymap(_stars)
@@ -204,7 +204,7 @@ def embedding_covariate_heatmap(
     fig.text(
         0.5,
         -0.02,
-        "Significance: *** p<0.001   ** p<0.01   * p<0.05   . p<0.10",
+        "Significance: ∗∗∗ p<0.001   ∗∗ p<0.01   ∗ p<0.05   · p<0.10",
         ha="center",
         va="top",
         fontsize=9,
