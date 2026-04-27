@@ -4,7 +4,7 @@ import pytest
 from anndata import AnnData
 from scipy.spatial.distance import pdist, squareform
 
-from datasets.synthetic import bootstrap_genes
+from patpy.datasets.synthetic import bootstrap_genes
 
 
 @pytest.fixture(scope="session")

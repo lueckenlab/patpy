@@ -30,4 +30,8 @@ from .condition_comparison import (
     build_all_pairwise_contrasts,
     build_condition_combinations,
     filter_adata_to_conditions,
+from .supervised import (
+    PULSAR,
+    MixMIL,
+    PaSCient,
 )
