@@ -1,5 +1,6 @@
 import warnings
 
+import anndata as ad
 import numpy as np
 import pandas as pd
 import scanpy as sc
@@ -735,3 +736,117 @@ def replicate_robustness(distances_df: pd.DataFrame, replicate_identity_function
         replicate_indexes[i] = replicate_idx
 
     return 1 - np.mean(replicate_indexes)
+
+
+def associate_embedding_with_covariates(
+    adata: ad.AnnData,
+    covariates: list[str],
+    *,
+    obsm_key: str = None,
+    n_components: int = 10,
+    test: str = "anova",
+    component_label: str | None = None,
+) -> pd.DataFrame:
+    """Test association between embedding components and categorical covariates.
+
+    For each (covariate, component) pair, runs a one-way ANOVA (or
+    Kruskal-Wallis) across the groups defined by that covariate and returns a
+    tidy DataFrame of association statistics. Works with any low-dimensional
+    embedding stored in ``adata.obsm`` — PCA, MOFA factors, diffusion
+    components, etc.
+
+    Parameters
+    ----------
+    adata : AnnData
+        Annotated data object. Must contain ``adata.obsm[obsm_key]``.
+    covariates : list[str]
+        Categorical columns in ``adata.obs`` to test.
+    obsm_key : str
+        Key in ``adata.obsm`` containing the embedding to test against.
+    n_components : int, default ``10``
+        Number of components to test.
+    test : {"anova", "kruskal"}
+        Statistical test to use. ``"anova"`` runs a one-way F-test;
+        ``"kruskal"`` runs a Kruskal-Wallis H-test (non-parametric
+        alternative).
+    component_label : str, optional
+        Prefix used to name each component column in the output (e.g.
+        ``"PC"`` → ``"PC1"``, ``"PC2"``; ``"Factor"`` → ``"Factor1"``).
+        Defaults to ``"PC"`` when ``obsm_key`` contains ``"pca"`` and
+        ``"Factor"`` when it contains ``"mofa"``, otherwise ``"Component"``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Tidy DataFrame with columns ``["covariate", "<component_label>",
+        "statistic", "p_value", "-log10p"]``, one row per
+        (covariate, component) pair.
+
+    Raises
+    ------
+    ValueError
+        If ``obsm_key`` is not found in ``adata.obsm``, a covariate column is
+        missing from ``adata.obs``, or ``test`` is not a recognised value.
+
+    Examples
+    --------
+    >>> import patpy.tl as ptl
+    >>> # PCA
+    >>> assoc = ptl.associate_embedding_with_covariates(
+    ...     pdata, covariates=["Source", "Sex"], obsm_key="X_pca", n_components=10
+    ... )
+    >>> # MOFA factors
+    >>> assoc = ptl.associate_embedding_with_covariates(
+    ...     pdata, covariates=["Source", "Sex"], obsm_key="X_mofa", n_components=5
+    ... )
+
+    Plot the result as a heatmap with :func:`patpy.pl.pc_covariate_heatmap`:
+
+    >>> import patpy.pl as ppl
+    >>> ppl.pc_covariate_heatmap(assoc)
+    """
+    if obsm_key not in adata.obsm:
+        raise ValueError(f"'{obsm_key}' not found in adata.obsm.")
+
+    valid_tests = {"anova", "kruskal"}
+    if test not in valid_tests:
+        raise ValueError(f"test must be one of {valid_tests}, got '{test}'.")
+
+    for col in covariates:
+        if col not in adata.obs.columns:
+            raise ValueError(f"Covariate '{col}' not found in adata.obs.")
+
+    # Auto-derive component label from obsm_key
+    if component_label is None:
+        key_lower = obsm_key.lower()
+        if "pca" in key_lower or "pc" in key_lower:
+            component_label = "PC"
+        elif "mofa" in key_lower or "factor" in key_lower:
+            component_label = "Factor"
+        else:
+            component_label = "Component"
+
+    embedding = adata.obsm[obsm_key]
+    n_components = min(n_components, embedding.shape[1])
+    test_fn = stats.f_oneway if test == "anova" else stats.kruskal
+
+    rows = []
+    for covariate in covariates:
+        groups = adata.obs[covariate].astype(str)
+        for comp_idx in range(n_components):
+            scores = embedding[:, comp_idx]
+            group_vals = [scores[groups == g] for g in groups.unique() if (groups == g).sum() > 1]
+            if len(group_vals) < 2:
+                continue
+            stat, p = test_fn(*group_vals)
+            rows.append(
+                {
+                    "covariate": covariate,
+                    component_label: f"{component_label}{comp_idx + 1}",
+                    "statistic": stat,
+                    "p_value": p,
+                    "-log10p": -np.log10(p + 1e-300),
+                }
+            )
+
+    return pd.DataFrame(rows)

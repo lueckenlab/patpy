@@ -1,4 +1,11 @@
+from .condition_comparison import (
+    ConditionComparison,
+    build_all_pairwise_contrasts,
+    build_condition_combinations,
+    filter_adata_to_conditions,
+)
 from .evaluation import (
+    associate_embedding_with_covariates,
     evaluate_prediction,
     evaluate_representation,
     persistence_evaluation,
@@ -24,8 +31,4 @@ from .sample_representation import (
     correlate_composition,
     describe_metadata,
 )
-from .supervised import (
-    PULSAR,
-    MixMIL,
-    PaSCient,
-)
+from .supervised import PULSAR, MixMIL, PaSCient
