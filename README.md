@@ -77,6 +77,17 @@ pip install patpy[pilot]
 
 All the available dependency groups: `diffusionemd`, `mrvi`, `pilot`, `scpoli`, `wassersteintsne`.
 
+Some sample representation tools depend on packages not published on PyPI. To use them, install the extra and the upstream package from git:
+
+```bash
+# pascient
+pip install patpy[pascient]
+pip install git+https://github.com/genentech/pascient.git@main
+
+# pulsar
+pip install git+https://github.com/snap-stanford/PULSAR.git@main
+```
+
 ## Release notes
 
 See the [changelog][changelog].
