@@ -165,6 +165,7 @@ nbsphinx_thumbnails = {
     "notebooks/sources_of_variation_with_gloscope": "_static/patpy_logo.png",
     "notebooks/Patient_trajectories_example": "_static/patpy_logo.png",
     "notebooks/supervised_methods_example": "_static/patpy_logo.png",
+    "notebooks/differential_analysis": "_static/patpy_logo.png",
     "notebooks/synthetic_data_generation": "_static/patpy_logo.png",
     "notebooks/distances_test_example": "_static/patpy_logo.png",
 }
