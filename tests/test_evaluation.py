@@ -2,9 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from anndata import AnnData
-from scipy.spatial.distance import pdist, squareform
 
-from patpy.tl import evaluation as evaluation_module
 from patpy.tl.evaluation import (
     _filter_missing,
     _get_normalized_distances,

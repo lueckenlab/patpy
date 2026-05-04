@@ -689,7 +689,11 @@ def knn_prediction_score(
                         distances = distances.loc[meta_adata.obs_names][meta_adata.obs_names].values
 
                     result = evaluate_representation(
-                        distances=distances, target=meta_adata.obs[col], method="knn", task=task, n_neighbors=n_neighbors
+                        distances=distances,
+                        target=meta_adata.obs[col],
+                        method="knn",
+                        task=task,
+                        n_neighbors=n_neighbors,
                     )
                 except (KeyError, ValueError, RuntimeError) as e:
                     print("Representation:", representation)
