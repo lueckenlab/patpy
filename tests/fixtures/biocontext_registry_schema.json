@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/biocontext-ai/registry-dev/main/schema.json",
+  "title": "BioContextAI Registry",
+  "description": "Schema.org SoftwareApplication compliant registry for biomedical MCP servers",
+  "type": "object",
+  "properties": {
+    "@context": {
+      "description": "JSON-LD context",
+      "type": "string",
+      "const": "https://schema.org"
+    },
+    "@type": {
+      "description": "Primary Schema.org type",
+      "type": "string",
+      "const": "SoftwareApplication"
+    },
+    "@id": {
+      "description": "Unique identifier URI for this MCP server",
+      "type": "string",
+      "format": "uri"
+    },
+    "additionalType": {
+      "description": "Additional Schema.org types for extended functionality",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "https://schema.org/ScholarlyArticle",
+          "https://schema.org/SoftwareSourceCode"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "identifier": {
+      "description": "Unique identifier in format 'owner/repository'",
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$"
+    },
+    "name": {
+      "description": "The name of the MCP server",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "description": {
+      "description": "A description of the MCP server",
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 1000
+    },
+    "codeRepository": {
+      "description": "URL of the source code repository (e.g., GitHub, GitLab, Bitbucket, etc.)",
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://(github.com|gitlab.com|bitbucket.org|codeberg.com)(/[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+|/record/[0-9]+)(/.*)?$"
+    },
+    "url": {
+      "description": "URL of the remotely hosted MCP server (if available)",
+      "type": "string",
+      "format": "uri"
+    },
+    "softwareHelp": {
+      "description": "Documentation/help resource for the MCP server",
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string",
+          "const": "CreativeWork"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "required": ["@type", "url"],
+      "additionalProperties": false
+    },
+    "maintainer": {
+      "description": "A maintainer of the MCP server",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "@type": {
+            "type": "string",
+            "enum": ["Person", "Organization"]
+          },
+          "name": {
+            "type": "string"
+          },
+          "identifier": {
+            "description": "GitHub username, ORCID, or other identifier",
+            "type": "string"
+          },
+          "url": {
+            "description": "GitHub user profile or ORCID profile",
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": ["@type", "name"],
+        "additionalProperties": false
+      }
+    },
+    "license": {
+      "description": "Link to an OSI-approved license in the format https://spdx.org/licenses/<spdx-identifier>.html, see https://spdx.org/licenses/ for possible options",
+      "type": "string",
+      "format": "uri"
+    },
+    "keywords": {
+      "description": "Keywords or tags used to describe the MCP server",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 30
+      },
+      "minItems": 1,
+      "maxItems": 10,
+      "uniqueItems": true
+    },
+    "datePublished": {
+      "description": "Date of first publication or release in the BioContextAI registry",
+      "type": "string",
+      "format": "date"
+    },
+    "applicationCategory": {
+      "description": "Type of software application",
+      "type": "string",
+      "enum": [
+        "HealthApplication",
+        "EducationApplication",
+        "ReferenceApplication",
+        "DeveloperApplication",
+        "UtilitiesApplication"
+      ],
+      "default": "HealthApplication"
+    },
+    "operatingSystem": {
+      "description": "Operating systems supported",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["Windows", "macOS", "Linux", "Unix", "Cross-platform"]
+      },
+      "default": ["Cross-platform"],
+      "uniqueItems": true
+    },
+    "programmingLanguage": {
+      "description": "The computer programming language",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "Python",
+          "TypeScript",
+          "JavaScript",
+          "R",
+          "Julia",
+          "Java",
+          "Go",
+          "Rust",
+          "C#",
+          "C++",
+          "Other"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "featureList": {
+      "description": "Features (e.g., prompts, resources or tools) provided by this MCP server",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    }
+  },
+
+  "required": [
+    "@context",
+    "@type",
+    "@id",
+    "identifier",
+    "name",
+    "description",
+    "codeRepository",
+    "maintainer",
+    "license",
+    "applicationCategory",
+    "keywords",
+    "programmingLanguage"
+  ],
+
+  "additionalProperties": false
+}

@@ -37,6 +37,7 @@ Thank you for your patience and interest. Stay tuned for updates!
 [![Coverage][badge-coverage]][link-coverage]
 [![PyPI][badge-pypi]][link-pypi]
 [![Documentation][badge-docs]][link-docs]
+[![BioContextAI - Registry](https://img.shields.io/badge/Registry-package?style=flat&label=BioContextAI&labelColor=%23fff&color=%233555a1&link=https://biocontext.ai/registry)](https://biocontext.ai/registry)
 
 [badge-tests]: https://img.shields.io/github/actions/workflow/status/lueckenlab/patpy/test.yaml?branch=main
 [link-tests]: https://github.com/lueckenlab/patpy/actions/workflows/test.yml
@@ -90,6 +91,28 @@ pip install git+https://github.com/genentech/pascient.git@main
 # pulsar
 pip install git+https://github.com/snap-stanford/PULSAR.git@main
 ```
+
+## MCP server
+
+patpy ships an MCP (Model Context Protocol) server that lets any MCP-capable
+agent (Claude Desktop, Cursor, Goose, mcp-cli + Ollama, ...) search and download
+single-cell datasets from public registries — starting with CellxGene Discover.
+The server is part of the [BioContextAI Registry](https://biocontext.ai/registry)
+and is designed to chain with sibling registry servers
+([`MaxMLang/cxg-census-mcp`](https://github.com/MaxMLang/cxg-census-mcp) for
+Census slice queries and
+[`biocontext-ai/anndata-mcp`](https://github.com/biocontext-ai/anndata-mcp) for
+AnnData inspection) instead of duplicating them.
+
+```bash
+pip install 'patpy[mcp]'
+patpy-mcp
+```
+
+Configuration snippets for popular agents and a sample workflow live in
+[the documentation](https://patpy.readthedocs.io/en/latest/mcp.html). The
+registry artifacts (`meta.yaml`, `Dockerfile`) are kept under
+[`mcp/`](./mcp/).
 
 ## Release notes
 

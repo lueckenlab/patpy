@@ -1,0 +1,56 @@
+"@context": https://schema.org
+"@type": SoftwareApplication
+"@id": https://github.com/lueckenlab/patpy
+
+additionalType:
+  - https://schema.org/SoftwareSourceCode
+
+identifier: lueckenlab/patpy
+
+name: patpy-mcp
+
+description: >
+  MCP server for sample-level single-cell dataset discovery. Searches and downloads
+  datasets from CellxGene Discover by disease, tissue, assay, or ontology term, with
+  a multi-source plugin architecture (HCA / GEO / Single Cell Portal coming).
+  Designed to chain with MaxMLang/cxg-census-mcp for Census slice queries and
+  biocontext-ai/anndata-mcp for AnnData inspection rather than duplicating them.
+
+codeRepository: https://github.com/lueckenlab/patpy
+
+softwareHelp:
+  "@type": CreativeWork
+  url: https://patpy.readthedocs.io/en/latest/mcp.html
+  name: Documentation
+
+maintainer:
+  - "@type": Person
+    name: Vladimir Shitov
+    identifier: VladimirShitov
+    url: https://github.com/VladimirShitov
+
+license: https://spdx.org/licenses/BSD-3-Clause.html
+
+applicationCategory: HealthApplication
+
+keywords:
+  - bioinformatics
+  - single-cell
+  - cellxgene
+  - patient-representation
+  - sample-representation
+  - scverse
+
+datePublished: "2026-05-04"
+
+operatingSystem:
+  - Cross-platform
+
+programmingLanguage:
+  - Python
+
+featureList:
+  - CellxGene Discover dataset search
+  - CellxGene Discover dataset download with checksum
+  - Ontology term helpers for disease and tissue
+  - Multi-source plugin architecture
