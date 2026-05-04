@@ -705,7 +705,7 @@ def knn_prediction_score(
                 result["covariate_type"] = covariate_type
 
                 # Inverse technical score to interpret them as batch effect removal
-                if covariate_type == "technical":
+                if reverse_technical_score and covariate_type == "technical":
                     result["score"] = 1 - result["score"]
 
                 if result["metric"] == "spearman_r":
