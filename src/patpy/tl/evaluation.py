@@ -689,7 +689,11 @@ def knn_prediction_score(
                         distances = distances.loc[meta_adata.obs_names][meta_adata.obs_names].values
 
                     result = evaluate_representation(
-                        distances=distances, target=meta_adata.obs[col], method="knn", task=task, n_neighbors=3
+                        distances=distances,
+                        target=meta_adata.obs[col],
+                        method="knn",
+                        task=task,
+                        n_neighbors=n_neighbors,
                     )
                 except (KeyError, ValueError, RuntimeError) as e:
                     print("Representation:", representation)
@@ -705,7 +709,7 @@ def knn_prediction_score(
                 result["covariate_type"] = covariate_type
 
                 # Inverse technical score to interpret them as batch effect removal
-                if covariate_type == "technical":
+                if reverse_technical_score and covariate_type == "technical":
                     result["score"] = 1 - result["score"]
 
                 if result["metric"] == "spearman_r":
