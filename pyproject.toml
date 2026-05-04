@@ -75,6 +75,11 @@ optional-dependencies.gloscope-py-gpu = [
 optional-dependencies.helical = [
   "helical>=1.8.3",
 ]
+optional-dependencies.mcp = [
+  "mcp[cli]>=1.2",
+  "pyyaml>=6",
+  "requests>=2.31",
+]
 optional-dependencies.milo-edger = [
   "pertpy[milo-edger]>=1.0.5",
 ]
@@ -112,6 +117,9 @@ optional-dependencies.wassersteintsne = [
 urls.Documentation = "https://patpy.readthedocs.io/"
 urls.Homepage = "https://github.com/lueckenlab/patpy"
 urls.Source = "https://github.com/lueckenlab/patpy"
+
+[project.scripts]
+patpy-mcp = "patpy.mcp.server:main"
 
 [dependency-groups]
 dev = [
