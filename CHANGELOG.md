@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.15.3
+
+### Fixed
+
+- The `n_neighbors` and `reverse_technical_score` parameters in `patpy.tl.evaluation/knn_prediction_score` were not used
+
+### Added
+
+- Tests for the fixed bugs
+
 ## 0.15.2
 
 ### Deleted
