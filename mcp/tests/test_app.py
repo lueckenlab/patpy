@@ -15,14 +15,14 @@ import pytest
 pytest.importorskip("fastmcp", reason="fastmcp is required for these tests.")
 pytest.importorskip("click", reason="click is required for these tests.")
 
-import click.testing  # noqa: E402
+import click.testing
 
 # Importing main has the side-effect of registering every tool because
 # main.py performs ``from .tools import *``.
-from patpy_mcp import __version__  # noqa: E402
-from patpy_mcp.main import run_app  # noqa: E402
-from patpy_mcp.mcp import mcp  # noqa: E402
-from patpy_mcp.sources import AVAILABLE_SOURCES  # noqa: E402
+from patpy_mcp import __version__
+from patpy_mcp.main import run_app
+from patpy_mcp.mcp import mcp
+from patpy_mcp.sources import AVAILABLE_SOURCES
 
 EXPECTED_GENERIC_TOOLS = {"list_sources", "describe_source"}
 EXPECTED_CELLXGENE_TOOLS = {

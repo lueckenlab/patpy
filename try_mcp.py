@@ -16,14 +16,13 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastmcp import Client
-
-from patpy_mcp.mcp import mcp
 import patpy_mcp.tools  # noqa: F401  side-effect: register every tool
+from fastmcp import Client
+from patpy_mcp.mcp import mcp
 
 
 def _summarise(call_result) -> object:
-    """fastmcp 2.x returns ``CallToolResult`` whose ``.data`` is the parsed payload."""
+    """Fastmcp 2.x returns ``CallToolResult`` whose ``.data`` is the parsed payload."""
     data = getattr(call_result, "data", None)
     return data if data is not None else getattr(call_result, "content", call_result)
 
@@ -41,9 +40,7 @@ async def demo() -> None:
         print(json.dumps(_summarise(out), indent=2)[:500], "…")
 
         print("\n=== cellxgene_list_disease_terms(prefix='lung') ===")
-        out = await client.call_tool(
-            "cellxgene_list_disease_terms", {"prefix": "lung", "limit": 5}
-        )
+        out = await client.call_tool("cellxgene_list_disease_terms", {"prefix": "lung", "limit": 5})
         for t in _summarise(out):
             print(f"  {t['ontology_term_id']:<20} {t['label']}")
 

@@ -38,9 +38,7 @@ def schema() -> dict:
 
 def test_meta_yaml_validates_against_registry_schema(meta: dict, schema: dict) -> None:
     """``mcp/meta.yaml`` must satisfy biocontext-ai/registry/schema.json."""
-    jsonschema = pytest.importorskip(
-        "jsonschema", reason="jsonschema is required for registry meta validation."
-    )
+    jsonschema = pytest.importorskip("jsonschema", reason="jsonschema is required for registry meta validation.")
     jsonschema.validate(instance=meta, schema=schema)
 
 
