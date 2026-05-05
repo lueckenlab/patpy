@@ -1,0 +1,45 @@
+name: Check Build patpy-mcp
+
+# Mirrors biocontext-ai/mcp-server-cookiecutter's `build.yaml`, but builds the
+# patpy-mcp subproject under ``mcp/`` instead of the parent patpy package.
+# Catches a broken `mcp/pyproject.toml` on PRs instead of at release-tag time.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mcp/**"
+      - ".github/workflows/build-patpy-mcp.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "mcp/**"
+      - ".github/workflows/build-patpy-mcp.yaml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          filter: blob:none
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          cache-dependency-glob: mcp/pyproject.toml
+
+      - name: Build patpy-mcp package
+        working-directory: mcp
+        run: uv build
+
+      - name: Check patpy-mcp distributions
+        run: uvx twine check --strict mcp/dist/*.whl mcp/dist/*.tar.gz

@@ -19,18 +19,75 @@ released to PyPI independently of the parent `patpy` package.
 
 ## Quick start
 
-```bash
-# Recommended: run the latest release on demand without polluting your env
-uvx patpy-mcp
+You need Python ≥ 3.11. If you don't have Python yet, install [`uv`](https://github.com/astral-sh/uv) — it bootstraps Python and runs `patpy-mcp` in one step.
 
-# Or install from PyPI:
-pip install patpy-mcp
-patpy-mcp                       # stdio MCP server (default)
+There are four equivalent ways to install / run `patpy-mcp`, mirroring the four patterns from the BioContextAI [`mcp-server-cookiecutter`](https://github.com/biocontext-ai/mcp-server-cookiecutter):
+
+### 1. Run the latest published release on demand (recommended)
+
+```bash
+uvx patpy-mcp
+```
+
+### 2. Add it to a client that supports the `mcp.json` standard
+
+Cursor, Claude Desktop, Continue.dev, mcp-cli, Goose, etc. all read this exact JSON shape — copy it verbatim from [`mcp.json`](mcp.json) and drop it into your client config.
+
+**From PyPI** (after release):
+
+```json
+{
+  "mcpServers": {
+    "lueckenlab/patpy-mcp": {
+      "command": "uvx",
+      "args": ["patpy-mcp"]
+    }
+  }
+}
+```
+
+**From the GitHub `main` branch** (before any release tag):
+
+```json
+{
+  "mcpServers": {
+    "lueckenlab/patpy-mcp": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/lueckenlab/patpy.git@main#subdirectory=mcp",
+        "patpy-mcp"
+      ]
+    }
+  }
+}
+```
+
+**From a local checkout** (development):
+
+```json
+{
+  "mcpServers": {
+    "lueckenlab/patpy-mcp": {
+      "command": "uvx",
+      "args": ["--refresh", "--from", "/abs/path/to/patpy/mcp", "patpy-mcp"]
+    }
+  }
+}
+```
+
+### 3. Install with `pip`
+
+```bash
+pip install --user patpy-mcp
+patpy-mcp                       # stdio transport (default)
 patpy-mcp --transport http      # HTTP transport for remote clients
 patpy-mcp --version
 ```
 
-Or via Docker, from the repo root (so the shared `LICENSE` is in the context):
+### 4. Run via Docker
+
+Build context is the repo root (so the shared top-level `LICENSE` is present):
 
 ```bash
 docker build -t patpy-mcp -f mcp/Dockerfile .
@@ -74,7 +131,8 @@ mcp/
 ├── pyproject.toml          # standalone PyPI package (build = hatchling)
 ├── README.md               # this file
 ├── CITATION.cff
-├── meta.yaml               # BioContextAI Registry entry
+├── meta.yaml               # BioContextAI Registry entry (Schema.org metadata)
+├── mcp.json                # BioContextAI Registry entry (MCP client config snippet)
 ├── Dockerfile              # slim deploy image
 ├── src/patpy_mcp/
 │   ├── __init__.py
@@ -92,16 +150,34 @@ mcp/
 
 ## Submitting / updating the BioContextAI Registry entry
 
-1. Validate `meta.yaml` against the registry schema:
+A registry entry is a directory under
+[`biocontext-ai/registry/servers/<owner>-<name>/`](https://github.com/biocontext-ai/registry/tree/main/servers)
+containing **two files**:
+
+- `meta.yaml` — Schema.org / JSON-LD metadata (validated against the
+  upstream JSON schema).
+- `mcp.json` — a small MCP client-config snippet that tells any
+  MCP-compatible LLM agent how to launch this server in one line, e.g.
+  `uvx patpy-mcp`.
+
+To submit / update:
+
+1. Validate `meta.yaml` against the registry schema locally:
 
    ```bash
    pytest mcp/tests/test_registry_meta.py
    ```
 
 2. Fork [`biocontext-ai/registry`](https://github.com/biocontext-ai/registry)
-   and copy this `mcp/meta.yaml` to
-   `servers/lueckenlab-patpy/meta.yaml`.
-3. Open a PR; the upstream `pre-commit` hook re-validates the file.
+   and copy both files into
+   `servers/lueckenlab-patpy-mcp/`:
+
+   ```text
+   servers/lueckenlab-patpy-mcp/meta.yaml   # from mcp/meta.yaml
+   servers/lueckenlab-patpy-mcp/mcp.json    # from mcp/mcp.json
+   ```
+
+3. Open a PR; the upstream `pre-commit` hook re-validates the entry.
 
 ## Releasing to PyPI
 

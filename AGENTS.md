@@ -11,7 +11,10 @@ Two related projects share this monorepo:
 1. **`patpy`** — a Python package for **sample-level** (donor / patient) representation learning from single-cell data. Operates on `anndata.AnnData` objects where each row is a single cell and each donor contributes many cells. Source: `src/patpy/`. Released to PyPI as [`patpy`](https://pypi.org/project/patpy/).
 2. **`patpy-mcp`** — a standalone Model Context Protocol server that exposes CellxGene Discover dataset search and download as MCP tools. Source: `mcp/`. Released to PyPI **independently** as [`patpy-mcp`](https://pypi.org/project/patpy-mcp/) — it does **not** depend on `patpy`. Built with the [BioContextAI cookiecutter](https://github.com/biocontext-ai/mcp-server-cookiecutter) and registered in the [BioContextAI Registry](https://biocontext.ai/registry).
 
-Both ship from this single repo and can be released independently (different PyPI tags, separate `.github/workflows/release*.yaml`).
+Both ship from this single repo and can be released independently:
+
+- `patpy` — workflows `.github/workflows/test.yaml`, `build.yaml`, `release.yaml`; release tag `v*`.
+- `patpy-mcp` — workflows `.github/workflows/test-patpy-mcp.yaml`, `build-patpy-mcp.yaml`, `release-patpy-mcp.yaml`; release tag `patpy-mcp-v*`. All three only run when `mcp/**` changes (path-filtered).
 
 ## Repository layout
 
@@ -22,6 +25,9 @@ Both ship from this single repo and can be released independently (different PyP
 │   └── skills/                    # SKILL.md files — see "Skills" below
 ├── mcp/                           # the patpy-mcp standalone subproject
 │   ├── pyproject.toml             # patpy-mcp's own packaging (separate from the parent)
+│   ├── meta.yaml                  # BioContextAI Registry: Schema.org metadata
+│   ├── mcp.json                   # BioContextAI Registry: MCP client config snippet ({ mcpServers: { ... } })
+│   ├── Dockerfile                 # slim deploy image (build context = repo root for shared LICENSE)
 │   ├── src/patpy_mcp/             # package code (cookiecutter layout)
 │   │   ├── main.py                # click CLI entrypoint (run_app)
 │   │   ├── mcp.py                 # module-level FastMCP instance
