@@ -1,0 +1,10 @@
+{
+  "asset_id": "h5ad",
+  "dataset_id": "f12ab0e6-383c-4362-b1c6-922de09ccbc9",
+  "fetched_at": 1777966862.757689,
+  "schema_version": 1,
+  "sha256": "c09c2af261a9f32ba73410c1d8d9be0319eb7ab1525212af2ad095ec346bc351",
+  "size_bytes": 62732290,
+  "source": "cellxgene",
+  "source_url": "https://datasets.cellxgene.cziscience.com/ba6bb225-3275-4712-b864-9250b5f3cb36.h5ad"
+}

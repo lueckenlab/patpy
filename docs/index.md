@@ -47,6 +47,7 @@ It provides:
 
 installation
 api/index
+mcp
 contributing
 changelog
 references

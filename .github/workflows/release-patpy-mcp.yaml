@@ -1,0 +1,44 @@
+name: Release patpy-mcp
+
+# Triggered by tags of the form `patpy-mcp-v0.1.0`, so the patpy-mcp
+# subproject can be released independently of the parent patpy package.
+# Mirrors biocontext-ai/mcp-server-cookiecutter's release.yaml, but the
+# build step runs inside ``mcp/`` so only the subproject ships to PyPI.
+on:
+  push:
+    tags:
+      - "patpy-mcp-v*"
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  release:
+    name: Upload patpy-mcp release to PyPI
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/patpy-mcp-v')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/patpy-mcp
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          filter: blob:none
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          cache-dependency-glob: mcp/pyproject.toml
+
+      - name: Build patpy-mcp package
+        working-directory: mcp
+        run: uv build
+
+      - name: Publish patpy-mcp distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: mcp/dist
