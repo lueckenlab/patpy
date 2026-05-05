@@ -34,6 +34,7 @@ Thank you for your patience and interest. Stay tuned for updates!
 [![Coverage][badge-coverage]][link-coverage]
 [![PyPI][badge-pypi]][link-pypi]
 [![Documentation][badge-docs]][link-docs]
+[![BioContextAI - Registry](https://img.shields.io/badge/Registry-package?style=flat&label=BioContextAI&labelColor=%23fff&color=%233555a1&link=https://biocontext.ai/registry)](https://biocontext.ai/registry)
 
 [badge-tests]: https://img.shields.io/github/actions/workflow/status/lueckenlab/patpy/test.yaml?branch=main
 [link-tests]: https://github.com/lueckenlab/patpy/actions/workflows/test.yml
@@ -106,6 +107,36 @@ claude mcp add patpy --scope project -- patpy-skills-mcp
 ```
 
 Example Claude and MCP configuration files live under `examples/mcp/`.
+
+## MCP server (`patpy-mcp`)
+
+`patpy-mcp` is a separate, BioContextAI-compatible Model Context Protocol
+server that lets any MCP-capable agent (Claude Desktop, Cursor, Goose,
+mcp-cli + Ollama, …) search and download single-cell datasets from
+public registries — starting with CellxGene Discover. It lives in this
+monorepo under [`mcp/`](./mcp/) and follows the
+[`biocontext-ai/mcp-server-cookiecutter`](https://github.com/biocontext-ai/mcp-server-cookiecutter)
+layout so it is recognisable to BioContextAI maintainers and is
+released independently to PyPI as
+[`patpy-mcp`](https://pypi.org/project/patpy-mcp/).
+
+```bash
+# Run without installing anything (recommended):
+uvx patpy-mcp
+
+# Or install from PyPI:
+pip install patpy-mcp
+patpy-mcp
+```
+
+It is designed to chain with sibling BioContextAI servers
+([`MaxMLang/cxg-census-mcp`](https://github.com/MaxMLang/cxg-census-mcp) for
+Census slice queries and
+[`biocontext-ai/anndata-mcp`](https://github.com/biocontext-ai/anndata-mcp) for
+AnnData inspection) instead of duplicating them. Configuration snippets
+for popular agents and a sample workflow live in
+[`docs/mcp.md`](./docs/mcp.md) (online: [patpy.readthedocs.io/en/latest/mcp.html](https://patpy.readthedocs.io/en/latest/mcp.html))
+and the package-level documentation in [`mcp/README.md`](./mcp/README.md).
 
 ## Release notes
 

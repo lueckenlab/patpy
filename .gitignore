@@ -5,11 +5,14 @@ buck-out/
 
 # Compiled files
 .venv/
+.venv-*/
 __pycache__/
 .*cache/
+.cache-*/
 
 # Distribution / packaging
 /dist/
+/mcp/dist/
 
 # Tests and coverage
 /data/
@@ -19,3 +22,9 @@ __pycache__/
 # docs
 /docs/generated/
 /docs/_build/
+
+# patpy-mcp scratch outputs (never commit downloaded datasets or run logs)
+/outputs/
+/outputs_run.log
+/.cellxgene-test-target.json
+/run_*.py

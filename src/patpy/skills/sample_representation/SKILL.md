@@ -14,6 +14,8 @@ distances = method.calculate_distance_matrix()       # (n_samples, n_samples), o
 sample_adata = method.to_adata(metadata=meta_df)     # sample-level AnnData with .obsm embeddings
 ```
 
+> **`cell_group_key` is positional, not optional.** Most classes here (`Pseudobulk`, `GroupedPseudobulk`, `CellGroupComposition`, …) require both `sample_key` and `cell_group_key` to be passed even though `cell_group_key=None` is meaningful (= "no grouping; one pseudobulk per sample"). Calling `Pseudobulk(sample_key="donor")` raises `TypeError: missing 1 required positional argument: 'cell_group_key'`. Pass `cell_group_key=None` explicitly when you don't want grouping.
+
 ## Method catalog
 
 | Class | What it does | `layer` default | Required extra |
@@ -43,7 +45,12 @@ sample_adata = method.to_adata(metadata=meta_df)     # sample-level AnnData with
 import patpy
 
 # adata has obs["donor_id"], obs["cell_type"], obsm["X_pca"]
-method = patpy.tl.Pseudobulk(sample_key="donor_id", cell_group_key="cell_type", layer="X_pca", seed=0)
+method = patpy.tl.Pseudobulk(
+    sample_key="donor_id",
+    cell_group_key="cell_type",   # required; pass None for un-grouped pseudobulk
+    layer="X_pca",
+    seed=0,
+)
 method.prepare_anndata(adata)
 D = method.calculate_distance_matrix()           # ndarray, shape = (n_samples, n_samples)
 samples = method.samples                          # row/col order of D

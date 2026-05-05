@@ -1,0 +1,66 @@
+name: Test patpy-mcp
+
+# Mirrors biocontext-ai/mcp-server-cookiecutter's `test.yaml`, but scoped to the
+# patpy-mcp subproject under ``mcp/`` so the parent patpy package and the MCP
+# subproject can be tested independently.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mcp/**"
+      - ".github/workflows/test-patpy-mcp.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "mcp/**"
+      - ".github/workflows/test-patpy-mcp.yaml"
+  schedule:
+    - cron: "0 5 1,15 * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+    working-directory: mcp
+
+jobs:
+  test:
+    name: pytest (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          filter: blob:none
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache-dependency-glob: mcp/pyproject.toml
+
+      - name: Install patpy-mcp[test]
+        run: uv pip install --system -e ".[test]"
+
+      - name: Run pytest
+        env:
+          MPLBACKEND: agg
+        run: pytest -v --color=yes
+
+  check:
+    name: All patpy-mcp tests pass
+    if: always()
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
