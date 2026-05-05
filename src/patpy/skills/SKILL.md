@@ -11,6 +11,7 @@ description: Patient/sample-level representation learning from single-cell data.
 
 | User goal | Skill |
 |---|---|
+| Find / download a public single-cell dataset by disease, tissue, or assay (CellxGene Discover) | [cellxgene/SKILL.md](cellxgene/SKILL.md) |
 | Compute QC, filter samples / cell groups, prepare AnnData | [preprocessing/SKILL.md](preprocessing/SKILL.md) |
 | Get a sample×sample distance matrix from cells (unsupervised) | [sample_representation/SKILL.md](sample_representation/SKILL.md) |
 | Predict donor-level labels from per-cell features (supervised) | [supervised_methods/SKILL.md](supervised_methods/SKILL.md) |
