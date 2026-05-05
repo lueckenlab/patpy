@@ -75,7 +75,7 @@ To install specific dependencies for some sample representation tools, use the f
 pip install patpy[pilot]
 ```
 
-All the available dependency groups: `diffusionemd`, `mrvi`, `pilot`, `scpoli`, `wassersteintsne`.
+All the available dependency groups: `diffusionemd`, `mcp`, `mrvi`, `pilot`, `scpoli`, `wassersteintsne`.
 
 Some sample representation tools depend on packages not published on PyPI. To use them, install the extra and the upstream package from git:
 
@@ -87,6 +87,25 @@ pip install git+https://github.com/genentech/pascient.git@main
 # pulsar
 pip install git+https://github.com/snap-stanford/PULSAR.git@main
 ```
+
+## Agent integrations
+
+Export the packaged patpy skills for Claude Code or Codex:
+
+```bash
+patpy-export-skills --target claude-code --dest /path/to/project
+patpy-export-skills --target codex --dest /path/to/project
+patpy-export-biocontext --dest /path/to/output
+```
+
+Install the local MCP server entry point and add it to Claude clients:
+
+```bash
+pip install patpy[mcp]
+claude mcp add patpy --scope project -- patpy-skills-mcp
+```
+
+Example Claude and MCP configuration files live under `examples/mcp/`.
 
 ## Release notes
 

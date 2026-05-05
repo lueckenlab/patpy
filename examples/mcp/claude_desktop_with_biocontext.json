@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "patpy": {
+      "command": "patpy-skills-mcp",
+      "args": [],
+      "env": {}
+    },
+    "biocontext7": {
+      "command": "biocontext7",
+      "args": [],
+      "env": {}
+    }
+  }
+}

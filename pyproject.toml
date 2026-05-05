@@ -81,6 +81,9 @@ optional-dependencies.milo-edger = [
 optional-dependencies.mixmil = [
   "mixmil>=0.1.2",
 ]
+optional-dependencies.mcp = [
+  "mcp>=1.0",
+]
 optional-dependencies.mrvi = [
   "scvi-tools>=1.2",
   "torch>=1.13",
@@ -112,6 +115,11 @@ optional-dependencies.wassersteintsne = [
 urls.Documentation = "https://patpy.readthedocs.io/"
 urls.Homepage = "https://github.com/lueckenlab/patpy"
 urls.Source = "https://github.com/lueckenlab/patpy"
+
+[project.scripts]
+patpy-export-biocontext = "patpy.skills.cli:export_biocontext_main"
+patpy-export-skills = "patpy.skills.cli:main"
+patpy-skills-mcp = "patpy.mcp.server:main"
 
 [dependency-groups]
 dev = [
