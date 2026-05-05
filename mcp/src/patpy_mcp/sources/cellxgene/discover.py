@@ -44,7 +44,7 @@ DEFAULT_TIMEOUT = (10, 60)
 def _require_requests():
     """Lazy import so :mod:`patpy_mcp` can be imported without ``requests`` installed."""
     try:
-        import requests  # noqa: PLC0415
+        import requests
     except ImportError as err:  # pragma: no cover  (covered via runtime install check)
         raise ImportError(
             "The 'requests' package is required for the CellxGene MCP source. "
@@ -183,9 +183,7 @@ class DiscoverClient:
         if query:
             q = query.lower()
             items = [
-                c
-                for c in items
-                if q in (c.get("name") or "").lower() or q in (c.get("description") or "").lower()
+                c for c in items if q in (c.get("name") or "").lower() or q in (c.get("description") or "").lower()
             ]
         return [_collection_summary(c) for c in items[:limit]]
 
@@ -255,8 +253,7 @@ class DiscoverClient:
         if asset is None:
             available = sorted({(a.get("filetype") or "?") for a in meta.get("assets") or []})
             raise ValueError(
-                f"No {asset_format} asset found for dataset {dataset_id}. "
-                f"Available formats: {available or 'none'}"
+                f"No {asset_format} asset found for dataset {dataset_id}. Available formats: {available or 'none'}"
             )
 
         asset_id = asset.get("filename") or asset.get("dataset_asset_id") or asset_format.lower()
@@ -329,7 +326,7 @@ def _stream_to_file(
         if not response.ok:
             response.raise_for_status()
 
-        import hashlib  # noqa: PLC0415
+        import hashlib
 
         h = hashlib.sha256()
         size = 0
@@ -349,9 +346,7 @@ def _stream_to_file(
                         continue
                     size += len(chunk)
                     if max_size_bytes and size > max_size_bytes:
-                        raise ValueError(
-                            f"Download exceeded max_size_bytes={max_size_bytes} while streaming {url}"
-                        )
+                        raise ValueError(f"Download exceeded max_size_bytes={max_size_bytes} while streaming {url}")
                     tmp_fd.write(chunk)
                     h.update(chunk)
             shutil.move(str(tmp_path), str(target))

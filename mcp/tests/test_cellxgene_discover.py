@@ -17,9 +17,9 @@ from urllib.parse import urlsplit
 import pytest
 
 pytest.importorskip("requests", reason="patpy-mcp test extras require 'requests'.")
-import requests  # noqa: E402
+import requests
 
-from patpy_mcp.sources.cellxgene.discover import API_BASE, DiscoverClient  # noqa: E402
+from patpy_mcp.sources.cellxgene.discover import API_BASE, DiscoverClient
 
 
 def _fixture_collection() -> dict[str, Any]:
@@ -225,8 +225,7 @@ def test_get_dataset_uses_nested_collection_endpoint(client, fake_session):
     client.get_dataset("d-breast-1")
     paths_hit = [path for _, path, _, _ in session.calls]
     assert any(p.endswith("collections/col-1/datasets/d-breast-1") for p in paths_hit), (
-        f"Expected the nested /collections/{{cid}}/datasets/{{dsid}} endpoint to be used, "
-        f"got: {paths_hit}"
+        f"Expected the nested /collections/{{cid}}/datasets/{{dsid}} endpoint to be used, got: {paths_hit}"
     )
     assert not any(p == "datasets/d-breast-1" for p in paths_hit), (
         f"The flat /datasets/{{id}} endpoint must NOT be used; got: {paths_hit}"

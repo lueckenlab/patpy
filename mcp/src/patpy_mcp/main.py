@@ -15,7 +15,7 @@ import sys
 
 import click
 
-from .tools import *  # noqa: F401, F403  side-effect: registers every tool
+from .tools import *  # noqa: F403  side-effect: registers every tool
 
 
 class EnvironmentType(enum.Enum):
