@@ -4,6 +4,7 @@ from importlib.resources import files
 def test_skill_markdown_files_are_packaged():
     expected_files = [
         "SKILL.md",
+        "cellxgene/SKILL.md",
         "datasets/SKILL.md",
         "evaluation/SKILL.md",
         "plotting/SKILL.md",

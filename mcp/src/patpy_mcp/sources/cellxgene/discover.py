@@ -13,7 +13,7 @@ helpers used by the patpy MCP tools:
 Server-side filters on the Curation API are limited so most filtering is
 applied client-side after fetching the (paginated) full dataset list.
 The full list is small enough to cache for 24 h, which we do via
-``patpy.mcp.cache.index_path``.
+:func:`patpy_mcp.cache.index_path`.
 """
 
 from __future__ import annotations
@@ -22,11 +22,12 @@ import json
 import logging
 import shutil
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any
 
-from patpy.mcp import cache
+from patpy_mcp import cache
 
 if TYPE_CHECKING:
     import requests
@@ -41,13 +42,13 @@ DEFAULT_TIMEOUT = (10, 60)
 
 
 def _require_requests():
-    """Lazy import so ``patpy.mcp`` can be imported without the ``mcp`` extra."""
+    """Lazy import so :mod:`patpy_mcp` can be imported without ``requests`` installed."""
     try:
         import requests  # noqa: PLC0415
     except ImportError as err:  # pragma: no cover  (covered via runtime install check)
         raise ImportError(
             "The 'requests' package is required for the CellxGene MCP source. "
-            "Install MCP extras with: pip install 'patpy[mcp]'"
+            "Install patpy-mcp with: pip install patpy-mcp"
         ) from err
     return requests
 
@@ -143,9 +144,38 @@ class DiscoverClient:
         """Return the raw ``GET /collections/{id}`` payload."""
         return self._get_json(f"collections/{collection_id}")
 
-    def get_dataset_raw(self, dataset_id: str) -> dict[str, Any]:
-        """Return the raw ``GET /datasets/{id}`` payload, including assets."""
-        return self._get_json(f"datasets/{dataset_id}")
+    def _resolve_collection_id(self, dataset_id: str) -> str:
+        """Find a dataset's parent collection by scanning the cached dataset list.
+
+        The CellxGene Curation API only exposes per-dataset metadata
+        under ``/collections/{cid}/datasets/{dsid}`` -- there is no
+        flat ``/datasets/{dsid}`` endpoint. Since :meth:`list_datasets_raw`
+        already caches the full dataset directory for 24 h, looking up
+        the collection id is a cheap dict scan in the common case.
+        """
+        for d in self.list_datasets_raw():
+            if (d.get("dataset_id") or d.get("id")) == dataset_id:
+                cid = d.get("collection_id")
+                if cid:
+                    return cid
+                break
+        raise ValueError(
+            f"Could not locate collection for dataset {dataset_id!r}. "
+            "It may have been removed from CellxGene Discover or be "
+            "private; pass an explicit collection_id via "
+            "DiscoverClient.get_collection_raw if you have one."
+        )
+
+    def get_dataset_raw(self, dataset_id: str, collection_id: str | None = None) -> dict[str, Any]:
+        """Return the raw per-dataset payload, including assets.
+
+        Hits ``GET /curation/v1/collections/{collection_id}/datasets/{dataset_id}``.
+        ``collection_id`` is resolved from the cached dataset list when not
+        supplied explicitly.
+        """
+        if collection_id is None:
+            collection_id = self._resolve_collection_id(dataset_id)
+        return self._get_json(f"collections/{collection_id}/datasets/{dataset_id}")
 
     def list_collections(self, query: str | None = None, limit: int = 25) -> list[dict[str, Any]]:
         """List collections, optionally filtered by free-text substring on name/description."""
@@ -160,6 +190,7 @@ class DiscoverClient:
         return [_collection_summary(c) for c in items[:limit]]
 
     def get_collection(self, collection_id: str) -> dict[str, Any]:
+        """Return a normalised collection record including its dataset summaries."""
         return _collection_summary(self.get_collection_raw(collection_id), include_datasets=True)
 
     def search_datasets(
@@ -195,6 +226,7 @@ class DiscoverClient:
         return [_dataset_summary(d) for d in items]
 
     def get_dataset(self, dataset_id: str) -> dict[str, Any]:
+        """Return a normalised dataset record including assets and explorer URL."""
         return _dataset_metadata(self.get_dataset_raw(dataset_id))
 
     def list_disease_terms(self, prefix: str | None = None, limit: int = 200) -> list[dict[str, str]]:
@@ -292,12 +324,12 @@ def _stream_to_file(
     Writes to a temp file first and atomically replaces ``target`` on
     success so a partial download never poisons the cache.
     """
-    requests = _require_requests()
+    _require_requests()
     with session.get(url, stream=True, timeout=timeout) as response:
         if not response.ok:
             response.raise_for_status()
 
-        import hashlib  # noqa: PLC0415  (kept local to keep top-level imports tidy)
+        import hashlib  # noqa: PLC0415
 
         h = hashlib.sha256()
         size = 0

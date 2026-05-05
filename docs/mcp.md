@@ -1,8 +1,12 @@
 # MCP server
 
-patpy ships an MCP (Model Context Protocol) server, `patpy-mcp`, that lets any
+`patpy-mcp` is a standalone Model Context Protocol server that lets any
 MCP-capable LLM agent search and download single-cell datasets from public
-registries on your behalf.
+registries on your behalf. It lives in this monorepo under
+[`mcp/`](https://github.com/lueckenlab/patpy/tree/main/mcp), follows the
+[`biocontext-ai/mcp-server-cookiecutter`](https://github.com/biocontext-ai/mcp-server-cookiecutter)
+layout, and is published independently to PyPI as
+[`patpy-mcp`](https://pypi.org/project/patpy-mcp/).
 
 The server is part of the
 [BioContextAI Registry](https://biocontext.ai/registry) and is designed to be
@@ -20,12 +24,26 @@ parallel and chain their outputs.
 
 ## Install and run
 
+The recommended path is `uvx`, which fetches `patpy-mcp` from PyPI on demand
+without polluting your environment:
+
 ```bash
-pip install 'patpy[mcp]'
-patpy-mcp                       # launches the stdio MCP server
+uvx patpy-mcp                   # launches the stdio MCP server
+uvx patpy-mcp --transport http  # or HTTP / SSE for remote clients
 ```
 
-Or via Docker:
+Pinned install:
+
+```bash
+pip install patpy-mcp
+patpy-mcp
+```
+
+The package does **not** depend on `patpy` itself — `patpy-mcp` is a
+self-contained data-discovery server that can be installed and released
+independently of the analysis library.
+
+Or via Docker (build context = repo root, so the shared `LICENSE` is available):
 
 ```bash
 docker build -t patpy-mcp -f mcp/Dockerfile .
@@ -63,12 +81,15 @@ Add the three BioContextAI servers to your client's MCP config:
 ```json
 {
   "mcpServers": {
-    "patpy":   { "command": "patpy-mcp" },
+    "patpy":   { "command": "uvx", "args": ["patpy-mcp"] },
     "cxg":     { "command": "uvx", "args": ["cxg-census-mcp"] },
     "anndata": { "command": "uvx", "args": ["anndata-mcp"] }
   }
 }
 ```
+
+If you've already installed `patpy-mcp` with `pip`, the equivalent shorter
+form is `{ "command": "patpy-mcp" }`.
 
 ### Local open-source agents (Llama, Mistral, ... via Ollama)
 

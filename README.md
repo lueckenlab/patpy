@@ -92,27 +92,35 @@ pip install git+https://github.com/genentech/pascient.git@main
 pip install git+https://github.com/snap-stanford/PULSAR.git@main
 ```
 
-## MCP server
+## MCP server (`patpy-mcp`)
 
-patpy ships an MCP (Model Context Protocol) server that lets any MCP-capable
-agent (Claude Desktop, Cursor, Goose, mcp-cli + Ollama, ...) search and download
-single-cell datasets from public registries — starting with CellxGene Discover.
-The server is part of the [BioContextAI Registry](https://biocontext.ai/registry)
-and is designed to chain with sibling registry servers
-([`MaxMLang/cxg-census-mcp`](https://github.com/MaxMLang/cxg-census-mcp) for
-Census slice queries and
-[`biocontext-ai/anndata-mcp`](https://github.com/biocontext-ai/anndata-mcp) for
-AnnData inspection) instead of duplicating them.
+`patpy-mcp` is a separate, BioContextAI-compatible Model Context Protocol
+server that lets any MCP-capable agent (Claude Desktop, Cursor, Goose,
+mcp-cli + Ollama, …) search and download single-cell datasets from
+public registries — starting with CellxGene Discover. It lives in this
+monorepo under [`mcp/`](./mcp/) and follows the
+[`biocontext-ai/mcp-server-cookiecutter`](https://github.com/biocontext-ai/mcp-server-cookiecutter)
+layout so it is recognisable to BioContextAI maintainers and is
+released independently to PyPI as
+[`patpy-mcp`](https://pypi.org/project/patpy-mcp/).
 
 ```bash
-pip install 'patpy[mcp]'
+# Run without installing anything (recommended):
+uvx patpy-mcp
+
+# Or install from PyPI:
+pip install patpy-mcp
 patpy-mcp
 ```
 
-Configuration snippets for popular agents and a sample workflow live in
-[the documentation](https://patpy.readthedocs.io/en/latest/mcp.html). The
-registry artifacts (`meta.yaml`, `Dockerfile`) are kept under
-[`mcp/`](./mcp/).
+It is designed to chain with sibling BioContextAI servers
+([`MaxMLang/cxg-census-mcp`](https://github.com/MaxMLang/cxg-census-mcp) for
+Census slice queries and
+[`biocontext-ai/anndata-mcp`](https://github.com/biocontext-ai/anndata-mcp) for
+AnnData inspection) instead of duplicating them. Configuration snippets
+for popular agents and a sample workflow live in
+[`docs/mcp.md`](./docs/mcp.md) (online: [patpy.readthedocs.io/en/latest/mcp.html](https://patpy.readthedocs.io/en/latest/mcp.html))
+and the package-level documentation in [`mcp/README.md`](./mcp/README.md).
 
 ## Release notes
 

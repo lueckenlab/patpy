@@ -1,0 +1,115 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling" ]
+
+[project]
+name = "patpy-mcp"
+version = "0.1.0"
+description = "MCP server for sample-level single-cell dataset discovery (CellxGene Discover)."
+readme = "README.md"
+license = { file = "../LICENSE" }
+maintainers = [
+  { name = "Vladimir Shitov", email = "vladimir.shitov@helmholtz-munich.de" },
+]
+authors = [
+  { name = "Vladimir Shitov" },
+]
+requires-python = ">=3.11"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+  "click",
+  "fastmcp>=2",
+  "pyyaml>=6",
+  "requests>=2.31",
+]
+
+optional-dependencies.dev = [
+  "pre-commit",
+  "twine>=4.0.2",
+]
+optional-dependencies.test = [
+  "coverage",
+  "jsonschema>=4",
+  "pytest",
+  "pytest-asyncio",
+]
+
+# https://docs.pypi.org/project_metadata/#project-urls
+urls.Documentation = "https://patpy.readthedocs.io/en/latest/mcp.html"
+urls.Homepage = "https://github.com/lueckenlab/patpy/tree/main/mcp"
+urls.Source = "https://github.com/lueckenlab/patpy"
+
+scripts.patpy-mcp = "patpy_mcp.main:run_app"
+
+[tool.hatch.build.targets.wheel]
+packages = [ "src/patpy_mcp" ]
+
+[tool.hatch.envs.default]
+installer = "uv"
+features = [ "dev" ]
+
+[tool.hatch.envs.hatch-test]
+features = [ "test" ]
+
+[[tool.hatch.envs.hatch-test.matrix]]
+python = [ "3.11", "3.13" ]
+
+[tool.ruff]
+line-length = 120
+src = [ "src" ]
+extend-include = [ "*.ipynb" ]
+
+format.docstring-code-format = true
+
+lint.select = [
+  "B",      # flake8-bugbear
+  "BLE",    # flake8-blind-except
+  "C4",     # flake8-comprehensions
+  "D",      # pydocstyle
+  "E",      # Error detected by Pycodestyle
+  "F",      # Errors detected by Pyflakes
+  "I",      # isort
+  "RUF100", # Report unused noqa directives
+  "TID",    # flake8-tidy-imports
+  "UP",     # pyupgrade
+  "W",      # Warning detected by Pycodestyle
+]
+lint.ignore = [
+  "B008",
+  "D100",
+  "D104",
+  "D105",
+  "D107",
+  "D203",
+  "D213",
+  "D400",
+  "D401",
+  "E501",
+  "E731",
+  "E741",
+]
+lint.per-file-ignores."*/__init__.py" = [ "F401" ]
+lint.per-file-ignores."tests/*" = [ "D" ]
+lint.pydocstyle.convention = "numpy"
+
+[tool.pytest.ini_options]
+pythonpath = "src"
+testpaths = [ "tests" ]
+python_files = "test_*.py"
+python_functions = "test_*"
+xfail_strict = true
+addopts = [
+  "--import-mode=importlib",
+]
+
+[tool.coverage.run]
+source = [ "src/patpy_mcp" ]
+omit = [
+  "*/tests/test_*.py",
+]

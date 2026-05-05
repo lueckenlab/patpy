@@ -1,11 +1,11 @@
 """Validate the BioContextAI Registry meta.yaml against the upstream schema.
 
 The schema is committed as a fixture at
-``tests/fixtures/biocontext_registry_schema.json`` so this test runs offline.
+``mcp/tests/fixtures/biocontext_registry_schema.json`` so this test runs offline.
 Re-fetch it with::
 
     curl -sSL https://raw.githubusercontent.com/biocontext-ai/registry/main/schema.json \\
-      -o tests/fixtures/biocontext_registry_schema.json
+      -o mcp/tests/fixtures/biocontext_registry_schema.json
 """
 
 from __future__ import annotations
@@ -15,8 +15,9 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-META_PATH = REPO_ROOT / "mcp" / "meta.yaml"
+# tests live at mcp/tests/, meta.yaml at mcp/meta.yaml
+MCP_ROOT = Path(__file__).resolve().parent.parent
+META_PATH = MCP_ROOT / "meta.yaml"
 SCHEMA_FIXTURE = Path(__file__).parent / "fixtures" / "biocontext_registry_schema.json"
 
 
@@ -36,7 +37,7 @@ def schema() -> dict:
 
 
 def test_meta_yaml_validates_against_registry_schema(meta: dict, schema: dict) -> None:
-    """mcp/meta.yaml must satisfy biocontext-ai/registry/schema.json."""
+    """``mcp/meta.yaml`` must satisfy biocontext-ai/registry/schema.json."""
     jsonschema = pytest.importorskip(
         "jsonschema", reason="jsonschema is required for registry meta validation."
     )

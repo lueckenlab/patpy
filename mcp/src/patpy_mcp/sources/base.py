@@ -1,18 +1,16 @@
-"""Abstractions shared by every patpy MCP data source.
+"""Abstractions shared by every patpy-mcp data source descriptor.
 
-A *source* is a thin adapter around an external dataset registry
-(CellxGene, HCA, GEO, ...). It exposes its functionality to MCP-capable
-agents by registering tools on a FastMCP server. The protocol below is
-intentionally minimal — sources are free to register additional
-source-specific tools (and most will).
+Tools are registered via the cookiecutter convention (one file per tool
+under :mod:`patpy_mcp.tools` with ``@mcp.tool``), so a source no longer
+needs to ``register(mcp)`` itself. The :class:`DataSource` dataclass
+below is purely a metadata descriptor consumed by the cross-source
+``list_sources`` / ``describe_source`` tools.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict, runtime_checkable
-
-if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+from dataclasses import dataclass
+from typing import Any, TypedDict
 
 
 class DatasetSummary(TypedDict, total=False):
@@ -67,23 +65,18 @@ class DownloadResult(TypedDict):
     source_url: str
 
 
-@runtime_checkable
-class DataSource(Protocol):
-    """Minimal protocol every source plugin must satisfy."""
+@dataclass(frozen=True)
+class DataSource:
+    """Metadata descriptor for a registered data source."""
 
     name: str
     """Stable short identifier, used as a tool-name prefix (e.g. ``cellxgene``)."""
 
     description: str
-    """One-sentence human-readable summary, surfaced via ``describe_source``."""
+    """One-paragraph summary of the source, surfaced via ``describe_source``."""
 
     capabilities: tuple[str, ...]
-    """Short tags such as ``("search", "download", "ontology_terms")``."""
+    """Short tags such as ``("search_datasets", "download_dataset")``."""
 
-    def register(self, mcp: FastMCP) -> None:
-        """Register all source-specific MCP tools on ``mcp``.
-
-        Implementations should namespace tool names by ``self.name`` to
-        avoid clashes when multiple sources are loaded into the same
-        server.
-        """
+    homepage: str = ""
+    """Optional human-facing URL to the underlying registry."""

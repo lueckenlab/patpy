@@ -3,7 +3,7 @@
 We avoid pulling in `responses` or `pytest-httpx` as test dependencies by
 hand-rolling a tiny ``FakeSession`` that satisfies the subset of the
 ``requests.Session`` API actually used by
-:class:`patpy.mcp.sources.cellxgene.discover.DiscoverClient`.
+:class:`patpy_mcp.sources.cellxgene.discover.DiscoverClient`.
 """
 
 from __future__ import annotations
@@ -16,18 +16,10 @@ from urllib.parse import urlsplit
 
 import pytest
 
-pytest.importorskip("requests", reason="patpy[mcp] extras are required for these tests.")
+pytest.importorskip("requests", reason="patpy-mcp test extras require 'requests'.")
 import requests  # noqa: E402
 
-from patpy.mcp.sources.cellxgene.discover import API_BASE, DiscoverClient  # noqa: E402
-
-
-@pytest.fixture(autouse=True)
-def isolated_cache(monkeypatch, tmp_path):
-    """Force the MCP cache into ``tmp_path`` for every test."""
-    monkeypatch.setenv("PATPY_MCP_CACHE", str(tmp_path / "cache"))
-    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
-    yield
+from patpy_mcp.sources.cellxgene.discover import API_BASE, DiscoverClient  # noqa: E402
 
 
 def _fixture_collection() -> dict[str, Any]:
@@ -144,7 +136,6 @@ class _FakeSession:
                 return _FakeResponse(status_code=404)
             return _FakeResponse(content=content)
 
-        # Normalise the API path so test fixtures key on suffix only.
         if url.startswith(API_BASE):
             path = url[len(API_BASE) :].strip("/")
         if path in self.json_routes:
@@ -159,7 +150,10 @@ def fake_session():
         "datasets": _fixture_datasets(),
         "collections": [_fixture_collection()],
         "collections/col-1": _fixture_collection(),
-        "datasets/d-breast-1": _fixture_datasets()[0],
+        # CellxGene Curation API only exposes per-dataset metadata via the
+        # nested collection path; the flat /datasets/{id} endpoint does NOT
+        # exist (regression test for that mistake below).
+        "collections/col-1/datasets/d-breast-1": _fixture_datasets()[0],
     }
     downloads = {"https://files.example/asset-h5ad": payload_bytes}
     return _FakeSession(json_routes=routes, download_routes=downloads), payload_bytes
@@ -218,6 +212,30 @@ def test_get_dataset_returns_assets_block(client):
     meta = client.get_dataset("d-breast-1")
     assert meta["dataset_id"] == "d-breast-1"
     assert meta["assets"] and meta["assets"][0]["filetype"] == "H5AD"
+
+
+def test_get_dataset_uses_nested_collection_endpoint(client, fake_session):
+    """Regression: per-dataset metadata must be fetched via the nested URL.
+
+    The flat ``/datasets/{id}`` endpoint returns 404 against the real
+    CellxGene Curation API; we must always go through
+    ``/collections/{cid}/datasets/{dsid}``.
+    """
+    session, _ = fake_session
+    client.get_dataset("d-breast-1")
+    paths_hit = [path for _, path, _, _ in session.calls]
+    assert any(p.endswith("collections/col-1/datasets/d-breast-1") for p in paths_hit), (
+        f"Expected the nested /collections/{{cid}}/datasets/{{dsid}} endpoint to be used, "
+        f"got: {paths_hit}"
+    )
+    assert not any(p == "datasets/d-breast-1" for p in paths_hit), (
+        f"The flat /datasets/{{id}} endpoint must NOT be used; got: {paths_hit}"
+    )
+
+
+def test_get_dataset_raises_for_unknown_dataset(client):
+    with pytest.raises(ValueError, match="Could not locate collection"):
+        client.get_dataset("does-not-exist")
 
 
 def test_download_writes_file_with_correct_sha256(client, fake_session, tmp_path):
