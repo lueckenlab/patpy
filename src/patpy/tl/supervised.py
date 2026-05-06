@@ -2468,7 +2468,9 @@ class SampleCLR(SupervisedSampleMethod):
         sampleclr_tasks: dict[str, list[str]] = {}
         for label, task in zip(self.label_keys, self.tasks, strict=True):
             if task not in self._SAMPLECLR_TASK_MAP:
-                raise ValueError(f"Unsupported task '{task}' for SampleCLR. Use one of {list(self._SAMPLECLR_TASK_MAP)}.")
+                raise ValueError(
+                    f"Unsupported task '{task}' for SampleCLR. Use one of {list(self._SAMPLECLR_TASK_MAP)}."
+                )
             sclr_key = self._SAMPLECLR_TASK_MAP[task]
             sampleclr_tasks.setdefault(sclr_key, []).append(label)
         return sampleclr_tasks
@@ -2501,8 +2503,7 @@ class SampleCLR(SupervisedSampleMethod):
             from sampleclr.models.contrastive_model import ContrastiveModel
         except ImportError as e:
             raise ImportError(
-                "sampleclr is required. Install it from the SampleCLR repository "
-                "(it is not yet on PyPI)."
+                "sampleclr is required. Install it from the SampleCLR repository (it is not yet on PyPI)."
             ) from e
 
         super().prepare_anndata(adata)
@@ -2547,7 +2548,15 @@ class SampleCLR(SupervisedSampleMethod):
         self.samples = np.array(self._sclr_model.train_dataset.unique_categories)
 
         pretrain_keys = {"num_epochs", "num_warmup_epochs", "val_metric", "verbose", "max_training_time_minutes"}
-        ft_keys = {"num_epochs", "num_warmup_epochs", "stage", "val_metric", "verbose", "max_training_time_minutes", "epoch_offset"}
+        ft_keys = {
+            "num_epochs",
+            "num_warmup_epochs",
+            "stage",
+            "val_metric",
+            "verbose",
+            "max_training_time_minutes",
+            "epoch_offset",
+        }
 
         if pretrain:
             pretrain_kwargs = {k: v for k, v in kwargs.items() if k in pretrain_keys}
@@ -2607,12 +2616,26 @@ class SampleCLR(SupervisedSampleMethod):
                 "linear probes on the frozen donor embedding for these labels.",
                 stacklevel=2,
             )
-            super().fine_tune(labels_list, tasks_list, **{k: v for k, v in kwargs.items() if k not in {
-                "num_epochs", "num_warmup_epochs", "stage", "val_metric", "max_training_time_minutes"
-            }})
+            super().fine_tune(
+                labels_list,
+                tasks_list,
+                **{
+                    k: v
+                    for k, v in kwargs.items()
+                    if k not in {"num_epochs", "num_warmup_epochs", "stage", "val_metric", "max_training_time_minutes"}
+                },
+            )
             return
 
-        ft_keys = {"num_epochs", "num_warmup_epochs", "stage", "val_metric", "verbose", "max_training_time_minutes", "epoch_offset"}
+        ft_keys = {
+            "num_epochs",
+            "num_warmup_epochs",
+            "stage",
+            "val_metric",
+            "verbose",
+            "max_training_time_minutes",
+            "epoch_offset",
+        }
         ft_kwargs = {k: v for k, v in kwargs.items() if k in ft_keys}
         self._sclr_model.fine_tune(**ft_kwargs)
         self._compute_sample_representations()
@@ -2628,7 +2651,8 @@ class SampleCLR(SupervisedSampleMethod):
     ) -> pd.DataFrame:
         """Run the trained projector + aggregator over ``self.adata`` to extract per-donor embeddings.
 
-        Wraps :func:`sampleclr.utils.get_sample_representations_from_adata` 
+        Wraps :func:`sampleclr.utils.get_sample_representations_from_adata`
+
         Parameters
         ----------
         subset_size
