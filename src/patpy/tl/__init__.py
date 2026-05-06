@@ -31,4 +31,6 @@ from .sample_representation import (
     correlate_composition,
     describe_metadata,
 )
+from .benchmark import MILBenchmark, RepresentationBenchmark, run_mil_benchmark
+from .mil_models import ABMIL, DSMIL, MultiMIL, TorchMILWrapper, TransMIL
 from .supervised import PULSAR, MixMIL, PaSCient

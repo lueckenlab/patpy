@@ -14,6 +14,66 @@ from patpy.tl._types import _PREDICTION_TASKS
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Module-level utility shared by all supervised methods
+# ---------------------------------------------------------------------------
+
+
+def _logits_to_prediction(
+    label_logits: np.ndarray,
+    task: str,
+    label: str,
+    sample_ids: np.ndarray,
+    label_mappings: dict,
+) -> pd.Series | pd.DataFrame:
+    """Convert raw logits to a patpy-style prediction object.
+
+    Parameters
+    ----------
+    label_logits
+        Array of shape ``(n_donors, n_dims)`` where ``n_dims`` is 1 for
+        binary classification / regression and ``n_classes`` for multi-class.
+    task
+        ``"classification"`` or ``"regression"``/``"ranking"``.
+    label
+        Label key name (used for column naming).
+    sample_ids
+        Donor IDs for the index.
+    label_mappings
+        Dict mapping label key → (classes, encode_dict).
+
+    Returns
+    -------
+    pd.Series (regression) or pd.DataFrame (classification).
+    """
+    import scipy.special
+
+    if task == "classification":
+        if label_logits.shape[1] == 1:
+            proba_pos = scipy.special.expit(label_logits.ravel())
+            proba = np.column_stack([1 - proba_pos, proba_pos])
+        else:
+            proba = scipy.special.softmax(label_logits, axis=1)
+
+        if label in label_mappings:
+            classes, _ = label_mappings[label]
+        else:
+            classes = list(range(proba.shape[1]))
+
+        result = pd.DataFrame(
+            {f"prob_{c}": proba[:, i] for i, c in enumerate(classes)},
+            index=sample_ids,
+        )
+        y_pred_idx = proba.argmax(axis=1)
+        result[f"{label}_pred"] = (
+            [classes[i] for i in y_pred_idx] if label in label_mappings else y_pred_idx
+        )
+        return result
+    else:
+        raw = label_logits[:, 0] if label_logits.shape[1] > 0 else label_logits.ravel()
+        return pd.Series(raw, index=sample_ids, name=label)
+
+
 class SupervisedSampleMethod(BaseSampleMethod):
     """Base class for supervised sample-level representation methods.
 
@@ -350,6 +410,78 @@ class SupervisedSampleMethod(BaseSampleMethod):
         distances = scipy.spatial.distance.pdist(representations.values, metric=dist)
         return scipy.spatial.distance.squareform(distances)
 
+    def predict_on_adata(self, adata: sc.AnnData, label: str) -> pd.Series | pd.DataFrame:
+        """Predict on new, unseen donors in *adata* without retraining.
+
+        Subclasses that support inductive inference should override this method.
+        The base implementation raises :class:`NotImplementedError`.
+
+        Parameters
+        ----------
+        adata
+            AnnData containing held-out donors.  Must have :attr:`sample_key`
+            in ``.obs`` and per-cell features under :attr:`layer`.
+        label
+            Label to predict.  Must be in :attr:`label_keys`.
+
+        Returns
+        -------
+        pd.Series (regression) or pd.DataFrame (classification with probability columns).
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement inductive prediction. "
+            "Override predict_on_adata() to enable held-out evaluation."
+        )
+
+    def _build_bags_from_adata(
+        self, adata: sc.AnnData
+    ) -> tuple[list, np.ndarray]:
+        """Build per-donor bag tensors from *adata* without modifying internal state.
+
+        Parameters
+        ----------
+        adata
+            AnnData to extract bags from.
+
+        Returns
+        -------
+        bags : list[torch.Tensor]
+            One ``(n_cells_i, in_dim)`` tensor per donor, in alphabetical order
+            of donor IDs.
+        sample_ids : np.ndarray
+            Donor IDs aligned to *bags*.
+        """
+        import torch
+        import scipy.sparse
+
+        dtype_str = getattr(self, "dtype", "float32")
+        dtype_np = np.dtype(dtype_str)
+
+        if self.layer in adata.obsm:
+            X = adata.obsm[self.layer]
+        elif self.layer in adata.layers:
+            X = adata.layers[self.layer]
+            if scipy.sparse.issparse(X):
+                X = X.toarray()
+        elif self.layer in (None, "X"):
+            X = adata.X
+            if scipy.sparse.issparse(X):
+                X = X.toarray()
+        else:
+            raise ValueError(f"layer='{self.layer}' not found in adata.obsm or adata.layers.")
+
+        sort_idx = np.argsort(adata.obs[self.sample_key].values)
+        X_sorted = np.asarray(X[sort_idx], dtype=dtype_np)
+        sorted_donors = adata.obs[self.sample_key].values[sort_idx]
+
+        cat = pd.Categorical(sorted_donors)
+        indptr = np.concatenate([[0], np.bincount(cat.codes).cumsum()])
+        bags = [
+            torch.from_numpy(X_sorted[s:e])
+            for s, e in zip(indptr[:-1], indptr[1:], strict=True)
+        ]
+        return bags, np.array(cat.categories)
+
     def _donor_col(self, col: str) -> np.ndarray:
         """Return a per-donor array for *col*, aligned to :attr:`samples`."""
         self._check_adata_loaded()
@@ -679,6 +811,40 @@ class MixMIL(SupervisedSampleMethod):
             # Regression or ranking
             raw = label_logits[:, 0] if label_logits.shape[1] > 0 else label_logits.ravel()
             return pd.Series(raw, index=self.samples, name=label)
+
+    def predict_on_adata(self, adata: sc.AnnData, label: str) -> pd.Series | pd.DataFrame:
+        """Run trained MixMIL on new, unseen donors in *adata*.
+
+        Builds bags from *adata* without retraining and passes them through
+        the already-fitted model.
+
+        Parameters
+        ----------
+        adata
+            AnnData containing held-out donors.
+        label
+            Must be in :attr:`label_keys`.
+
+        Returns
+        -------
+        pd.Series or pd.DataFrame
+            Same format as :meth:`predict`.
+        """
+        import torch
+
+        self._check_fitted()
+        if label not in self.label_keys:
+            raise ValueError(f"`label='{label}'` is not found in model label keys.")
+
+        Xs, sample_ids = self._build_bags_from_adata(adata)
+
+        with torch.no_grad():
+            logits = self._model.predict(Xs).numpy()  # (n_donors, P)
+
+        task = self.tasks[self.label_keys.index(label)]
+        label_logits = logits[:, self._label_dim_slices[label]]
+
+        return _logits_to_prediction(label_logits, task, label, sample_ids, self._label_mappings)
 
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
         """Per-donor posterior predictions from MixMIL.

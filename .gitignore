@@ -20,3 +20,9 @@ __pycache__/
 /docs/generated/
 /docs/_build/
 /docs/notebooks/data/
+
+# Local scripts, results, and AI tooling — not for public repo
+/scripts/
+/results/
+.claude/
+CLAUDE.md

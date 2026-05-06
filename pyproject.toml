@@ -81,6 +81,19 @@ optional-dependencies.milo-edger = [
 optional-dependencies.mixmil = [
   "mixmil>=0.1.2",
 ]
+optional-dependencies.torchmil = [
+  "torchmil",
+  "tensordict",
+]
+optional-dependencies.multimil = [
+  "multimil",
+]
+optional-dependencies.benchmark = [
+  "mixmil>=0.1.2",
+  "scikit-learn>=1.0",
+  "torchmil",
+  "tensordict",
+]
 optional-dependencies.mrvi = [
   "scvi-tools>=1.2",
   "torch>=1.13",
