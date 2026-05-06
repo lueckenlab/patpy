@@ -387,7 +387,12 @@ class TorchMILWrapper(SupervisedSampleMethod):
         return self.adata.obs[[col]]
 
     def get_sample_representations(self) -> pd.DataFrame:
-        """Bag embeddings captured at the classifier input (one vector per patient)."""
+        """Attention-weighted bag embeddings (one vector per patient).
+
+        Uses ``return_rep=True`` in the model's forward pass when supported,
+        falling back to a classifier-input hook otherwise.
+        """
+        import inspect
         import torch
 
         self._check_fitted()
@@ -399,23 +404,29 @@ class TorchMILWrapper(SupervisedSampleMethod):
         X_padded, mask = _bags_to_padded(bags, self.max_cells_per_bag)
         X_padded, mask = X_padded.to(device), mask.to(device)
 
-        captured: list[torch.Tensor] = []
-
-        def _hook(module, inp, out):
-            captured.append(inp[0].detach().cpu())
-
-        handle = model.classifier.register_forward_hook(_hook)
         model.eval()
         with torch.no_grad():
-            _model_forward(model, X_padded, mask)
-        handle.remove()
+            if "return_rep" in inspect.signature(model.forward).parameters:
+                out = _model_forward(model, X_padded, mask, return_rep=True)
+                # out is (logits, rep) when return_rep=True
+                rep = out[1].cpu()
+            else:
+                # fallback: hook on classifier input
+                captured: list[torch.Tensor] = []
 
-        if not captured:
-            raise RuntimeError(
-                f"Forward hook did not capture embeddings for {self.model_class_name}."
-            )
+                def _hook(module, inp, out):
+                    captured.append(inp[0].detach().cpu())
 
-        return pd.DataFrame(captured[0].numpy(), index=sample_ids)
+                handle = model.classifier.register_forward_hook(_hook)
+                _model_forward(model, X_padded, mask)
+                handle.remove()
+                if not captured:
+                    raise RuntimeError(
+                        f"Could not extract bag embeddings from {self.model_class_name}."
+                    )
+                rep = captured[0]
+
+        return pd.DataFrame(rep.numpy(), index=sample_ids)
 
     # ------------------------------------------------------------------
     # Internal helpers
