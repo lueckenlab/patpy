@@ -999,51 +999,50 @@ class PILOTGMVAE(SampleRepresentationMethod):
 
     Source: https://academic.oup.com/bib/article/26/5/bbaf547/8287234?login=true
     """
-    
-    DISTANCES_UNS_KEY = "X_pilotgmvae_distances"
-    
-    def __init__(
-    self,
-    sample_key: str,
-    sample_state_col: str,
-    layer: str = "X_pca",
-    seed: int = 67,
-    # train_gmvae params
-    num_classes: int = 11,
-    gaussian_size: int = 64,
-    dataset_name: str = "pilot_gm_vae_data",
-    epochs: int = 50,
-    train_proportion: float = 0.8,
-    batch_size: int = 32,
-    batch_size_val: int = 200,
-    learning_rate: float = 1e-3,
-    decay_epoch: int = -1,
-    lr_decay: float = 0.5,
-    init_temp: float = 1.0,
-    decay_temp: int = 1,
-    hard_gumbel: int = 0,
-    min_temp: float = 0.5,
-    decay_temp_rate: float = 0.013862944,
-    w_gauss: float = 1.0,
-    w_categ: float = 1.0,
-    w_rec: float = 2.0,
-    rec_type: str = "mse",
-    cuda: int = 0,
-    verbose: int = 0,
-    save_model: bool = True,
-    load_weights: bool = False,
-    # gmmvae_wasserstein_distance params
-    metric: str = "cosine",
-    regulizer: float = 0.2,
-    normalization: bool = True,
-    regularized: str = "unreg",
-    reg: float = 0.1,
-    covariance_type: str = "full",
-    epsilon: float = 1e-4,
-):
 
+    DISTANCES_UNS_KEY = "X_pilotgmvae_distances"
+
+    def __init__(
+        self,
+        sample_key: str,
+        sample_state_col: str,
+        layer: str = "X_pca",
+        seed: int = 67,
+        # train_gmvae params
+        num_classes: int = 11,
+        gaussian_size: int = 64,
+        dataset_name: str = "pilot_gm_vae_data",
+        epochs: int = 50,
+        train_proportion: float = 0.8,
+        batch_size: int = 32,
+        batch_size_val: int = 200,
+        learning_rate: float = 1e-3,
+        decay_epoch: int = -1,
+        lr_decay: float = 0.5,
+        init_temp: float = 1.0,
+        decay_temp: int = 1,
+        hard_gumbel: int = 0,
+        min_temp: float = 0.5,
+        decay_temp_rate: float = 0.013862944,
+        w_gauss: float = 1.0,
+        w_categ: float = 1.0,
+        w_rec: float = 2.0,
+        rec_type: str = "mse",
+        cuda: int = 0,
+        verbose: int = 0,
+        save_model: bool = True,
+        load_weights: bool = False,
+        # gmmvae_wasserstein_distance params
+        metric: str = "cosine",
+        regulizer: float = 0.2,
+        normalization: bool = True,
+        regularized: str = "unreg",
+        reg: float = 0.1,
+        covariance_type: str = "full",
+        epsilon: float = 1e-4,
+    ):
         """Create pairwise distance matrix between samples using PILOT_GM_VAE.
-        
+
         Parameters
         ----------
         sample_key : str
@@ -1063,9 +1062,8 @@ class PILOTGMVAE(SampleRepresentationMethod):
         epochs : int = 50
             Number of epochs for training
         """
-    
         super().__init__(sample_key=sample_key, cell_group_key=None, layer=layer, seed=seed)
-        
+
         self.sample_state_col = sample_state_col
         self.num_classes = num_classes
         self.gaussian_size = gaussian_size
@@ -1098,12 +1096,11 @@ class PILOTGMVAE(SampleRepresentationMethod):
         self.covariance_type = covariance_type
         self.epsilon = epsilon
 
-        
     def prepare_anndata(self, adata):
         super().prepare_anndata(adata)
-        
+
         from pilotgm.core import train_gmvae
-        
+
         train_gmvae(
             adata=self.adata,
             dataset_name=self.dataset_name,
@@ -1133,18 +1130,16 @@ class PILOTGMVAE(SampleRepresentationMethod):
             load_weights=self.load_weights,
         )
 
-        
         self._fitted = True
-        
+
     def calculate_distance_matrix(self, force: bool = False):
-        
         from pilotgm.core import gmmvae_wasserstein_distance
-        
+
         # Check if already calculated
         distances = super().calculate_distance_matrix(force=force)
         if distances is not None:
             return distances
-        
+
         # Distance & sample repr added to adata.uns
         gmmvae_wasserstein_distance(
             self.adata,
@@ -1161,7 +1156,6 @@ class PILOTGMVAE(SampleRepresentationMethod):
             epsilon=self.epsilon,
         )
 
-        
         # Distance
         distances = self.adata.uns["EMD_df"].loc[self.samples, self.samples].to_numpy()
         distances = make_matrix_symmetric(distances)
@@ -1207,7 +1201,7 @@ class PILOTGMVAE(SampleRepresentationMethod):
 
         return distances
 
-        
+
 class PILOT(SampleRepresentationMethod):
     """Optimal transport based method to compute the Wasserstein distance between two single single-cell experiments.
 
