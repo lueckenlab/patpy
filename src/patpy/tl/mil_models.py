@@ -614,6 +614,7 @@ class TransMIL(TorchMILWrapper):
         weight_decay: float = 1e-4,
         device: str = "auto",
         seed: int = 42,
+        max_cells_per_bag: int | None = None,
     ) -> None:
         super().__init__(
             model_class_name="TransMIL",
@@ -634,6 +635,7 @@ class TransMIL(TorchMILWrapper):
             weight_decay=weight_decay,
             device=device,
             seed=seed,
+            max_cells_per_bag=max_cells_per_bag,
         )
 
 
@@ -675,6 +677,7 @@ class DSMIL(TorchMILWrapper):
         weight_decay: float = 1e-4,
         device: str = "auto",
         seed: int = 42,
+        max_cells_per_bag: int | None = None,
     ) -> None:
         super().__init__(
             model_class_name="DSMIL",
@@ -690,6 +693,7 @@ class DSMIL(TorchMILWrapper):
             weight_decay=weight_decay,
             device=device,
             seed=seed,
+            max_cells_per_bag=max_cells_per_bag,
         )
 
 
