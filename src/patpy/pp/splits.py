@@ -39,7 +39,9 @@ def make_sample_splits(
     test_size
         Fraction of samples held out as the test set.
     val_size
-        Fraction of *remaining* (non-test) samples held out for validation.
+        Fraction of *all* samples held out for validation (computed before the
+        test split, so the effective fraction of remaining samples is
+        ``val_size / (1 - test_size)``).
     covariate_keys
         Additional ``adata.obs`` columns to include in the composite
         stratification key (e.g. ``["sex", "study"]``).

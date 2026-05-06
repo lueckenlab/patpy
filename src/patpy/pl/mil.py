@@ -1,17 +1,6 @@
-"""Attention-weight visualizations for MIL models.
-
-Functions
----------
-plot_attention_umap
-    Scatter UMAP coloured by per-cell attention weight, one panel per class.
-plot_attention_by_cell_type
-    Violin / dot plot of attention weights aggregated by cell type.
-"""
 from __future__ import annotations
 
-import inspect
 import logging
-import warnings
 
 import numpy as np
 import pandas as pd
@@ -20,19 +9,13 @@ import scanpy as sc
 logger = logging.getLogger(__name__)
 
 
-def _get_cell_importance(model, label: str, normalized: bool) -> pd.DataFrame:
-    """Call model.get_cell_importance(), handling models that lack `normalized`."""
-    sig = inspect.signature(model.get_cell_importance)
-    if "normalized" in sig.parameters:
-        return model.get_cell_importance(label=label, normalized=normalized)
-    # Model (e.g. MixMIL) always returns softmax-normalised weights
-    if not normalized:
-        warnings.warn(
-            f"{type(model).__name__}.get_cell_importance() does not support "
-            "raw pre-softmax scores — returning softmax-normalised weights instead.",
-            stacklevel=3,
-        )
-    return model.get_cell_importance(label=label)
+def _store_importance(adata: sc.AnnData, model, label: str, normalized: bool) -> str:
+    """Write per-cell importance scores into ``adata.obs`` and return the column name."""
+    att_col = f"{label}_importance"
+    imp_df = model.get_cell_importance(label=label, normalized=normalized)
+    # imp_df is indexed by model.adata.obs_names; reindex to align with passed adata
+    adata.obs[att_col] = imp_df[att_col].reindex(adata.obs_names)
+    return att_col
 
 
 def plot_attention_umap(
@@ -73,6 +56,10 @@ def plot_attention_umap(
         Key in ``adata.obsm`` containing UMAP coordinates (shape ``(n, 2)``).
     sample_key
         Column with donor IDs.  Defaults to ``model.sample_key``.
+    normalized
+        Passed to :meth:`get_cell_importance`.
+        ``False`` (default) uses raw pre-softmax scores; ``True`` uses
+        post-softmax weights that sum to 1 per bag.
     n_cols
         Number of columns in the subplot grid.
     figsize_per_panel
@@ -85,10 +72,6 @@ def plot_attention_umap(
         Scatter point transparency.
     title_prefix
         Optional prefix added to each panel title.
-    normalized
-        Passed to :meth:`~patpy.tl.mil_models.TorchMILWrapper.get_cell_importance`.
-        ``False`` (default) uses raw pre-softmax scores; ``True`` uses
-        post-softmax weights that sum to 1 per bag.
 
     Returns
     -------
@@ -107,73 +90,52 @@ def plot_attention_umap(
     if label not in adata.obs.columns:
         raise ValueError(f"label='{label}' not found in adata.obs.")
 
-    att_df = _get_cell_importance(model, label=label, normalized=normalized)
-    att_col = f"{label}_importance"
-    weight_label = "Attention weight (softmax)" if normalized else "Attention score (pre-softmax)"
+    att_col = _store_importance(adata, model, label, normalized)
 
-    # Merge attention weights into a working frame
-    frame = pd.DataFrame(
-        {
-            "umap_0": adata.obsm[umap_key][:, 0],
-            "umap_1": adata.obsm[umap_key][:, 1],
-            "cell_type": adata.obs[cell_type_key].values,
-            sample_key: adata.obs[sample_key].values,
-            label: adata.obs[label].values,
-        },
-        index=adata.obs_names,
-    )
-    # Attach attention weights (NaN for cells not covered by the model)
-    frame[att_col] = att_df[att_col] if att_col in att_df.columns else np.nan
+    # sc.pl.umap requires the embedding to be at obsm["X_umap"]; alias if needed
+    _orig_umap = adata.obsm.get("X_umap")
+    if umap_key != "X_umap":
+        adata.obsm["X_umap"] = adata.obsm[umap_key]
 
-    classes = sorted(frame[label].dropna().unique())
-    n_rows = int(np.ceil(len(classes) / n_cols))
-    fig_w = figsize_per_panel[0] * n_cols
-    fig_h = figsize_per_panel[1] * n_rows
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h), squeeze=False)
-
-    vmin = frame[att_col].quantile(0.02)
-    vmax = frame[att_col].quantile(0.98)
-
-    for idx, cls in enumerate(classes):
-        row, col = divmod(idx, n_cols)
-        ax = axes[row][col]
-
-        # Background: all cells in grey
-        ax.scatter(
-            frame["umap_0"], frame["umap_1"],
-            c="lightgrey", s=size * 0.5, alpha=0.3, rasterized=True
+    try:
+        classes = sorted(adata.obs[label].dropna().unique())
+        n_rows = int(np.ceil(len(classes) / n_cols))
+        fig, axes = plt.subplots(
+            n_rows, n_cols,
+            figsize=(figsize_per_panel[0] * n_cols, figsize_per_panel[1] * n_rows),
+            squeeze=False,
         )
 
-        # Foreground: cells from donors of this class, coloured by attention
-        donor_ids_in_class = (
-            frame.groupby(sample_key)[label].first()
-            .pipe(lambda s: s[s == cls].index)
-        )
-        mask = frame[sample_key].isin(donor_ids_in_class) & frame[att_col].notna()
-        sub = frame[mask]
+        for idx, cls in enumerate(classes):
+            donor_ids = (
+                adata.obs.groupby(sample_key)[label].first()
+                .pipe(lambda s: s[s == cls].index)
+            )
+            adata_cls = adata[adata.obs[sample_key].isin(donor_ids)].copy()
 
-        sc_plot = ax.scatter(
-            sub["umap_0"], sub["umap_1"],
-            c=sub[att_col],
-            cmap=palette,
-            vmin=vmin, vmax=vmax,
-            s=size, alpha=alpha,
-            rasterized=True,
-        )
-        plt.colorbar(sc_plot, ax=ax, label=weight_label, fraction=0.04)
-        title = f"{title_prefix}{label} = {cls}"
-        ax.set_title(title, fontsize=11)
-        ax.set_xlabel("UMAP 1", fontsize=9)
-        ax.set_ylabel("UMAP 2", fontsize=9)
-        ax.tick_params(labelsize=8)
+            row, col = divmod(idx, n_cols)
+            ax = axes[row][col]
+            sc.pl.umap(
+                adata_cls, color=att_col, ax=ax,
+                color_map=palette, size=size, alpha=alpha,
+                title=f"{title_prefix}{label} = {cls}",
+                colorbar_loc="right", show=False,
+            )
 
-    # Hide unused panels
-    for idx in range(len(classes), n_rows * n_cols):
-        row, col = divmod(idx, n_cols)
-        axes[row][col].set_visible(False)
+        for idx in range(len(classes), n_rows * n_cols):
+            row, col = divmod(idx, n_cols)
+            axes[row][col].set_visible(False)
 
-    fig.suptitle(f"Attention weights — {label}", fontsize=13, y=1.01)
-    fig.tight_layout()
+        fig.suptitle(f"Attention weights — {label}", fontsize=13, y=1.01)
+        fig.tight_layout()
+    finally:
+        # Restore obsm to its original state
+        if umap_key != "X_umap":
+            if _orig_umap is not None:
+                adata.obsm["X_umap"] = _orig_umap
+            elif "X_umap" in adata.obsm:
+                del adata.obsm["X_umap"]
+
     return fig
 
 
@@ -189,11 +151,10 @@ def plot_attention_by_cell_type(
     figsize: tuple[float, float] | None = None,
     palette: str | list | None = None,
 ):
-    """Violin/dot plot of attention weights aggregated by cell type, per class.
+    """Violin plot of attention weights by cell type.
 
-    Shows how attention is distributed across cell types in each class of
-    the prediction label.  Cell types are ranked by mean attention weight in
-    the first class and the top ``n_top_cell_types`` are displayed.
+    Shows how attention is distributed across cell types.  Cell types are
+    ranked by mean attention weight and the top ``n_top_cell_types`` are shown.
 
     Parameters
     ----------
@@ -207,19 +168,20 @@ def plot_attention_by_cell_type(
         Column in ``adata.obs`` with cell-type annotations.
     sample_key
         Column with donor IDs.
+    normalized
+        Passed to :meth:`get_cell_importance`.
     n_top_cell_types
         How many cell types to show (ranked by mean attention).
     figsize
         Figure size.  Defaults to ``(10, 0.5 * n_top_cell_types)``.
     palette
-        Colour palette passed to seaborn.
+        Colour palette passed to :func:`scanpy.pl.violin`.
 
     Returns
     -------
     matplotlib.figure.Figure
     """
     import matplotlib.pyplot as plt
-    import seaborn as sns
 
     sample_key = sample_key or model.sample_key
 
@@ -228,49 +190,35 @@ def plot_attention_by_cell_type(
     if label not in adata.obs.columns:
         raise ValueError(f"label='{label}' not found in adata.obs.")
 
-    att_df = _get_cell_importance(model, label=label, normalized=normalized)
-    att_col = f"{label}_importance"
+    att_col = _store_importance(adata, model, label, normalized)
     weight_label = "Attention weight (softmax)" if normalized else "Attention score (pre-softmax)"
 
-    frame = pd.DataFrame(
-        {
-            "cell_type": adata.obs[cell_type_key].values,
-            sample_key: adata.obs[sample_key].values,
-            label: adata.obs[label].values,
-            att_col: att_df[att_col].values,
-        },
-        index=adata.obs_names,
-    )
-
     top_ct = (
-        frame.groupby("cell_type")[att_col].mean()
+        adata.obs.groupby(cell_type_key)[att_col].mean()
         .nlargest(n_top_cell_types)
         .index.tolist()
     )
-    frame = frame[frame["cell_type"].isin(top_ct)]
+    adata_top = adata[adata.obs[cell_type_key].isin(top_ct)].copy()
+    # Reorder cell_type_key as a categorical so sc.pl.violin respects the ranking
+    adata_top.obs[cell_type_key] = pd.Categorical(
+        adata_top.obs[cell_type_key], categories=top_ct, ordered=True
+    )
 
     fh = figsize or (10, max(4, 0.5 * n_top_cell_types))
     fig, ax = plt.subplots(figsize=fh)
 
-    sns.violinplot(
-        data=frame,
-        y="cell_type",
-        x=att_col,
-        hue=label,
-        orient="h",
-        scale="width",
-        inner="quartile",
+    sc.pl.violin(
+        adata_top,
+        keys=[att_col],
+        groupby=cell_type_key,
+        rotation=90,
         palette=palette or "Set2",
-        order=top_ct,
         ax=ax,
-        cut=0,
-        density_norm="width",
+        show=False,
     )
-    ax.set_xlabel(weight_label, fontsize=10)
-    ax.set_ylabel("Cell type", fontsize=10)
+    ax.set_xlabel("Cell type", fontsize=10)
+    ax.set_ylabel(weight_label, fontsize=10)
     ax.set_title(f"Attention by cell type — {label}", fontsize=12)
-    ax.tick_params(labelsize=9)
-    ax.legend(title=label, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=9)
     fig.tight_layout()
     return fig
 
@@ -309,22 +257,11 @@ def plot_attention_celltype_heatmap(
 
     sample_key = sample_key or model.sample_key
 
-    att_df = _get_cell_importance(model, label=label, normalized=normalized)
-    att_col = f"{label}_importance"
+    att_col = _store_importance(adata, model, label, normalized)
     weight_label = "Mean attention (softmax)" if normalized else "Mean attention score (pre-softmax)"
 
-    frame = pd.DataFrame(
-        {
-            "cell_type": adata.obs[cell_type_key].values,
-            sample_key: adata.obs[sample_key].values,
-            label: adata.obs[label].values,
-            att_col: att_df[att_col].values,
-        },
-        index=adata.obs_names,
-    )
-
     pivot = (
-        frame.groupby(["cell_type", label])[att_col]
+        adata.obs.groupby([cell_type_key, label])[att_col]
         .mean()
         .unstack(label)
     )

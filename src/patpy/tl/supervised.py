@@ -896,7 +896,12 @@ class MixMIL(SupervisedSampleMethod):
         self.adata.uns[cache_key] = sample_importance.to_dict()
         return sample_importance
 
-    def get_cell_importance(self, label: str | None = None, force: bool = False) -> pd.DataFrame:
+    def get_cell_importance(
+        self,
+        label: str | None = None,
+        normalized: bool = True,
+        force: bool = False,
+    ) -> pd.DataFrame:
         """Per-cell attention weights from the trained MixMIL model.
 
         Weights within each donor's bag are softmax-normalised and therefore
@@ -908,6 +913,10 @@ class MixMIL(SupervisedSampleMethod):
         label
             Which label's attention weights to return.  Defaults to
             ``label_keys[0]``.  Must be one of :attr:`label_keys`.
+        normalized
+            MixMIL always returns softmax-normalised weights; this parameter
+            exists for API consistency with :class:`TorchMILWrapper` and is
+            ignored.
         force
             Recompute even if cached results exist in ``adata.obs``.
 
