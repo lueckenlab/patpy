@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "patpy": {
+      "command": "${PATPY_SKILLS_MCP_COMMAND:-patpy-skills-mcp}",
+      "args": [],
+      "env": {}
+    }
+  }
+}
