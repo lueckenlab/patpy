@@ -100,6 +100,12 @@ optional-dependencies.pilot = [
 optional-dependencies.scpoli = [
   "scarches>=0.5.1",
 ]
+# `sampleclr` is not yet on PyPI; install it manually from the repository:
+#   pip install git+https://github.com/lueckenlab/sampleclr.git@main
+optional-dependencies.sampleclr = [
+  "torch>=1.13",
+  "umap-learn",
+]
 optional-dependencies.test = [
   "coverage",
   "pytest",
