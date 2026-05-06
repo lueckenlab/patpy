@@ -387,11 +387,35 @@ class TorchMILWrapper(SupervisedSampleMethod):
         return self.adata.obs[[col]]
 
     def get_sample_representations(self) -> pd.DataFrame:
-        """Attention-weighted bag embeddings (requires the model to support it)."""
-        raise NotImplementedError(
-            f"{self.model_class_name} does not expose intermediate bag embeddings. "
-            "Use get_sample_importance() instead."
-        )
+        """Bag embeddings captured at the classifier input (one vector per patient)."""
+        import torch
+
+        self._check_fitted()
+        label = self.label_keys[0]
+        model = self._models[label]
+        device = next(model.parameters()).device
+
+        bags, sample_ids = self._build_bags_from_adata(self.adata)
+        X_padded, mask = _bags_to_padded(bags, self.max_cells_per_bag)
+        X_padded, mask = X_padded.to(device), mask.to(device)
+
+        captured: list[torch.Tensor] = []
+
+        def _hook(module, inp, out):
+            captured.append(inp[0].detach().cpu())
+
+        handle = model.classifier.register_forward_hook(_hook)
+        model.eval()
+        with torch.no_grad():
+            _model_forward(model, X_padded, mask)
+        handle.remove()
+
+        if not captured:
+            raise RuntimeError(
+                f"Forward hook did not capture embeddings for {self.model_class_name}."
+            )
+
+        return pd.DataFrame(captured[0].numpy(), index=sample_ids)
 
     # ------------------------------------------------------------------
     # Internal helpers
