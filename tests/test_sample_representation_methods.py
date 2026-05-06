@@ -10,6 +10,7 @@ from patpy.tl._base_sample_method import _create_colormap
 from patpy.tl.sample_representation import (
     MOFA,
     PILOT,
+    PILOTGMVAE,
     CellGroupComposition,
     DiffusionEarthMoverDistance,
     GloScope,
@@ -233,6 +234,61 @@ def test_pilot(pbmc3k_adata):
 
     _assert_distances(distances, n_samples, method)
     _assert_cache_respected(method, distances)
+
+
+# ---------------------------------------------------------------------------
+# PILOTGMVAE (requires pilotgm)
+# ---------------------------------------------------------------------------
+
+
+def test_pilotgmvae(pbmc3k_adata):
+    pytest.importorskip("pilotgm")
+    adata = pbmc3k_adata.copy()
+    adata.obs["state"] = "control"
+    n_samples = adata.obs[SAMPLE_KEY].nunique()
+
+    method = PILOTGMVAE(
+        sample_key=SAMPLE_KEY,
+        sample_state_col="state",
+        layer="X_pca",
+        num_classes=3,
+        epochs=1,
+        dataset_name="test_pilotgmvae",
+    )
+    method.prepare_anndata(adata)
+    distances = method.calculate_distance_matrix(force=True)
+
+    _assert_distances(distances, n_samples, method)
+    _assert_cache_respected(method, distances)
+
+
+def test_pilotgmvae_sample_representation(pbmc3k_adata):
+    pytest.importorskip("pilotgm")
+    adata = pbmc3k_adata.copy()
+    adata.obs["state"] = "control"
+    n_samples = adata.obs[SAMPLE_KEY].nunique()
+    num_classes = 3
+
+    method = PILOTGMVAE(
+        sample_key=SAMPLE_KEY,
+        sample_state_col="state",
+        layer="X_pca",
+        num_classes=num_classes,
+        epochs=1,
+        dataset_name="test_pilotgmvae_repr",
+    )
+    method.prepare_anndata(adata)
+    method.calculate_distance_matrix(force=True)
+
+    assert method.sample_representation is not None
+    assert method.sample_representation.shape == (n_samples, num_classes)
+    assert np.allclose(method.sample_representation.sum(axis=1), 1.0, atol=1e-5)
+
+
+def test_pilotgmvae_cell_group_key_is_none():
+    pytest.importorskip("pilotgm")
+    method = PILOTGMVAE(sample_key=SAMPLE_KEY, sample_state_col="state", layer="X_pca")
+    assert method.cell_group_key is None
 
 
 # ---------------------------------------------------------------------------
