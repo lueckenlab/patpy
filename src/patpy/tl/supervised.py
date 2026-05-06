@@ -488,19 +488,20 @@ class SupervisedSampleMethod(BaseSampleMethod):
         return self._extract_metadata(columns=[col]).loc[self.samples].values.ravel()
 
     def _build_label_mappings(self) -> None:
-        """Build and store mappings for string labels.
+        """Build and store mappings for classification labels.
 
-        For each label key whose donor-level column is non-numeric (strings,
-        objects), a mapping from unique sorted class names to integer indices is
-        stored in :attr:`_label_mappings`.  Already-mapped labels are skipped.
+        For each classification label key, a mapping from unique sorted class
+        names to 0-based integer indices is stored in :attr:`_label_mappings`.
+        This covers both string labels and numeric labels used as classification
+        targets (e.g. ordinal scores).  Already-mapped labels are skipped.
         """
-        for label_key in self.label_keys:
+        for label_key, task in zip(self.label_keys, self.tasks):
             if label_key in self._label_mappings:
                 continue
 
             col = self._donor_col(label_key)
-            if col.dtype.kind not in ("f", "i", "u"):  # not float/int/uint
-                classes = sorted(np.unique(col))
+            if task == "classification" or col.dtype.kind not in ("f", "i", "u"):
+                classes = sorted(pd.Series(col).dropna().unique())
                 encode_dict = {c: i for i, c in enumerate(classes)}
                 self._label_mappings[label_key] = (classes, encode_dict)
 

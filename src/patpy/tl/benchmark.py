@@ -242,9 +242,9 @@ class MILBenchmark:
             # Pre-populate label mappings from the full adata so val/test classes
             # not present in this training split don't cause index-out-of-bounds.
             model._label_mappings = {}
-            for lk in model.label_keys:
+            for lk, task in zip(model.label_keys, model.tasks):
                 lk_vals = adata.obs.groupby(model.sample_key)[lk].first().dropna()
-                if lk_vals.dtype.kind not in ("f", "i", "u"):
+                if lk_vals.dtype.kind not in ("f", "i", "u") or task == "classification":
                     classes = sorted(lk_vals.unique())
                     model._label_mappings[lk] = (classes, {c: i for i, c in enumerate(classes)})
 
