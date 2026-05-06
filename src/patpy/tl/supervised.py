@@ -1082,8 +1082,11 @@ class MixMIL(SupervisedSampleMethod):
             else:
                 col_encoded = col.astype("int32")
 
-            # Check if multiclass classification (>2 unique values in classification task)
-            n_classes = len(np.unique(col_encoded))
+            # n_classes from mapping (covers all classes, not just those in train split)
+            if key in self._label_mappings:
+                n_classes = len(self._label_mappings[key][0])
+            else:
+                n_classes = len(np.unique(col_encoded))
             if task == "classification" and n_classes > 2:
                 one_hot = np.eye(n_classes, dtype="float32")[col_encoded]
                 y_cols_list.extend([one_hot[:, i] for i in range(n_classes)])

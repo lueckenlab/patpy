@@ -243,9 +243,9 @@ class MILBenchmark:
             # not present in this training split don't cause index-out-of-bounds.
             model._label_mappings = {}
             for lk in model.label_keys:
-                col = adata.obs.groupby(model.sample_key)[lk].first().dropna()
-                if col.dtype.kind not in ("f", "i", "u"):
-                    classes = sorted(col.unique())
+                lk_vals = adata.obs.groupby(model.sample_key)[lk].first().dropna()
+                if lk_vals.dtype.kind not in ("f", "i", "u"):
+                    classes = sorted(lk_vals.unique())
                     model._label_mappings[lk] = (classes, {c: i for i, c in enumerate(classes)})
 
             # Check inductive-prediction support
