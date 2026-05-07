@@ -168,6 +168,7 @@ nbsphinx_thumbnails = {
     "tutorials/notebooks/differential_analysis": "_static/patpy_logo.png",
     "tutorials/notebooks/synthetic_data_generation": "_static/patpy_logo.png",
     "tutorials/notebooks/distances_test_example": "_static/patpy_logo.png",
+    "tutorials/notebooks/immune_aging_multiresolution_composition": "_static/patpy_logo.png",
 }
 
 # -- nbsphinx configuration --------------------------------------------------
