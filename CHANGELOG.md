@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0,16,5
+
+### Added
+
+- Interface to PILOT_GMA_VAE sample representation method at `patpy.tl.sample_representation.PILOTGMVAE`
+
+### Fixed
+
+- Added missing method references to the API docs
+
 ## 0.16.4
 
 ### Added
