@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 
 from patpy.tl._differential_utils import (
-    _require_pertpy,
     build_all_pairwise_contrasts,
     build_condition_combinations,
     filter_adata_to_conditions,
@@ -187,7 +186,6 @@ class ConditionComparison:
     """
 
     def __init__(self, model_cls: Any, **default_kwargs: Any) -> None:
-        _require_pertpy()
         self.model_cls = model_cls
         self.default_kwargs = default_kwargs
         self.models_: dict[str, Any] = {}
