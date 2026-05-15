@@ -36,7 +36,9 @@ dependencies = [
 ]
 
 optional-dependencies.de = [
-  "pertpy[de]>=1.0.5",
+  # pertpy>=1.0.5 requires Python>=3.12; gate the extra so resolution succeeds
+  # on Python 3.11 (patpy core still installs, but pertpy-backed DE is unavailable).
+  "pertpy[de]>=1.0.5; python_version>='3.12'",
 ]
 optional-dependencies.dev = [
   # CLI for bumping the version number
@@ -76,7 +78,9 @@ optional-dependencies.helical = [
   "helical>=1.8.3",
 ]
 optional-dependencies.milo-edger = [
-  "pertpy[milo-edger]>=1.0.5",
+  # pertpy>=1.0.5 requires Python>=3.12; gate the extra so resolution succeeds
+  # on Python 3.11 (patpy core still installs, but milo/edgeR is unavailable).
+  "pertpy[milo-edger]>=1.0.5; python_version>='3.12'",
 ]
 optional-dependencies.mixmil = [
   "mixmil>=0.1.2",
