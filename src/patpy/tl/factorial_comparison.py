@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
+from patpy.tl._differential_utils import _require_pertpy
+
 if TYPE_CHECKING:
     import anndata as ad
 
@@ -350,6 +352,7 @@ class FactorialDE:
     """
 
     def __init__(self, model_cls: Any, layer: str | None = None) -> None:
+        _require_pertpy()
         self.model_cls = model_cls
         self.layer = layer
         self.model_: Any = None

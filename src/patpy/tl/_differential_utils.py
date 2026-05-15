@@ -1,11 +1,37 @@
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 import pandas as pd
 
 if TYPE_CHECKING:
     import anndata as ad
+
+
+def _require_pertpy() -> None:
+    """Ensure pertpy is importable; otherwise raise a helpful ImportError.
+
+    pertpy>=1.0.5 requires Python>=3.12, so on Python 3.11 the
+    ``patpy[de]`` / ``patpy[milo-edger]`` extras silently skip pertpy at
+    install time. This guard runs at runtime to surface a clear message
+    pointing users at the Python version requirement.
+    """
+    try:
+        import pertpy  # noqa: F401
+    except ImportError as exc:
+        if sys.version_info < (3, 12):
+            raise ImportError(
+                f"pertpy is required for this feature but is not installed. "
+                f"pertpy>=1.0.5 requires Python>=3.12, but you are running "
+                f"Python {sys.version_info.major}.{sys.version_info.minor}. "
+                "Please install Python 3.12+ and reinstall patpy with: "
+                "`pip install 'patpy[de]'` or `pip install 'patpy[milo-edger]'`."
+            ) from exc
+        raise ImportError(
+            "pertpy is required for this feature but is not installed. "
+            "Install it with: `pip install 'patpy[de]'` or `pip install 'patpy[milo-edger]'`."
+        ) from exc
 
 
 def build_condition_combinations(
