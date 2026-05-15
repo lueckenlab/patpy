@@ -295,7 +295,7 @@ def subsample(adata, obs_category_col: str, min_samples_per_category: int, fract
             selected_cells_idxs = np.random.choice(level_idxs, size=n_cells, replace=False)
             subsample_idxs.extend(selected_cells_idxs)
 
-    return adata[subsample_idxs]
+    return adata[subsample_idxs].copy()
 
 
 def is_count_data(matrix, window_size=10000) -> bool:
