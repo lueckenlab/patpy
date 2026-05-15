@@ -12,6 +12,7 @@ from .evaluation import (
     predict_knn,
     test_distances_significance,
     test_proportions,
+    trajectory_correlation,
 )
 from .factorial_comparison import (
     FactorialDE,
