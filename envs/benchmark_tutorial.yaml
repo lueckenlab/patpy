@@ -1,0 +1,27 @@
+# Conda env for the patpy benchmarking tutorial notebook
+# (docs/tutorials/notebooks/benchmarking_sample_representation_methods.ipynb).
+#
+# Create with:
+#     mamba env create -f envs/benchmark_tutorial.yaml
+#     conda activate patpy-benchmark-tutorial
+#
+# For development against a local patpy checkout, replace the patpy line in the
+# pip section with `-e /path/to/patpy[pilot,mrvi,scpoli,diffusionemd]` or run
+# `pip install -e .[pilot,mrvi,scpoli,diffusionemd]` after env creation.
+#
+# MrVI / scPoli benefit from a CUDA-enabled GPU; the pip wheels for jax/torch
+# detect CUDA automatically when installed on a GPU node.
+name: patpy-benchmark-tutorial
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - pip
+  - ipykernel
+  - jupyter
+  - pip:
+      - patpy[pilot,mrvi,scpoli,diffusionemd]
+      - mofapy2
+      - ehrapy
+      - plottable
