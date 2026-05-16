@@ -2781,3 +2781,262 @@ class SampleCLR(SupervisedSampleMethod):
             self._compute_sample_representations()
         return self.sample_representation
 
+    def _find_native_head(self, label: str):
+        """Locate the SampleCLR head trained for *label*.
+
+        Returns
+        -------
+        (head, head_kind, n_classes) or (None, None, None)
+            ``head_kind`` is one of ``"classification"``, ``"regression"``,
+            ``"ordinal"``.  Returns all-None when *label* has no native head
+            (e.g. it was added later via sklearn-probe fallback).
+        """
+        sclr = self._sclr_model
+        for i, t in enumerate(sclr.classification_tasks):
+            if t["column"] == label:
+                return sclr.classifiers[i], "classification", t["n_classes"]
+        for i, col in enumerate(sclr.regression_tasks):
+            if col == label:
+                return sclr.regressors[i], "regression", None
+        for i, t in enumerate(sclr.ordinal_regression_tasks):
+            if t["column"] == label:
+                return sclr.ordinal_regressors[i], "ordinal", t["n_classes"]
+        return None, None, None
+
+    def _decode_classification_labels(self, label: str, n_classes: int) -> list:
+        """Recover original class labels from SampleCLR's ``<label>_encoded`` map."""
+        enc_col = f"{label}_encoded"
+        if enc_col in self.adata.obs.columns and label in self.adata.obs.columns:
+            pairs = self.adata.obs[[label, enc_col]].dropna().drop_duplicates()
+            inv = {int(c): orig for orig, c in zip(pairs[label].values, pairs[enc_col].values, strict=True)}
+            return [inv.get(i, i) for i in range(n_classes)]
+        return list(range(n_classes))
+
+    def _head_predict(self, label: str) -> tuple[np.ndarray, str, int | None]:
+        """Run *label*'s native head on the donor embeddings.
+
+        Returns
+        -------
+        out : np.ndarray
+            Raw head output, shape ``(n_donors, n_outputs)``.
+        head_kind : str
+            ``"classification"``, ``"regression"``, or ``"ordinal"``.
+        n_classes : int or None
+            Number of classes for classification / ordinal; ``None`` for regression.
+        """
+        import torch
+
+        head, head_kind, n_classes = self._find_native_head(label)
+        if head is None:
+            raise KeyError(f"No native SampleCLR head for label '{label}'.")
+        rep = self.get_sample_representations()
+        X = torch.tensor(rep.values, dtype=torch.float32, device=self._sclr_model.device)
+        head.eval()
+        with torch.no_grad():
+            out = head(X).cpu().numpy()
+        return out, head_kind, n_classes
+
+    def predict(self, label: str) -> pd.Series | pd.DataFrame:
+        """Predict *label* for every donor.
+
+        Uses SampleCLR's native head when *label* was configured at
+        ``__init__``; otherwise falls back to the sklearn linear probe fitted
+        by :meth:`SupervisedSampleMethod.fine_tune` on the frozen donor
+        embedding.
+
+        Parameters
+        ----------
+        label
+            Donor-level label to predict.  Must be in :attr:`label_keys`.
+
+        Returns
+        -------
+        pd.Series or pd.DataFrame
+            Classification: DataFrame with one ``prob_<class>`` column per
+            class and a ``"<label>_pred"`` column.
+            Regression: Series of values (un-scaled).
+            Ranking: Series of integer ordinal levels.
+        """
+        self._check_fitted()
+        if label not in self.label_keys:
+            raise ValueError(f"`label='{label}'` is not found in model label keys.")
+
+        head, head_kind, n_classes = self._find_native_head(label)
+        if head is None:
+            return super().predict(label)
+
+        out, _, _ = self._head_predict(label)
+
+        if head_kind == "classification":
+            import scipy.special
+
+            proba = scipy.special.softmax(out, axis=1)
+            classes = self._decode_classification_labels(label, n_classes)
+            result = pd.DataFrame(
+                {f"prob_{c}": proba[:, i] for i, c in enumerate(classes)},
+                index=self.samples,
+            )
+            result[f"{label}_pred"] = [classes[i] for i in proba.argmax(axis=1)]
+            return result
+
+        if head_kind == "regression":
+            preds = out.ravel()
+            mean = self._sclr_model.regression_target_means.get(label, 0.0)
+            std = self._sclr_model.regression_target_stds.get(label, 1.0)
+            preds = preds * std + mean
+            return pd.Series(preds, index=self.samples, name=label)
+
+        # ordinal
+        cumulative_probas = np.cumsum(out, axis=1)
+        preds = np.clip((cumulative_probas > 0.5).sum(axis=1).astype(int), 0, n_classes - 1)
+        return pd.Series(preds, index=self.samples, name=label)
+
+    def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
+        """Per-donor posterior scores from each configured SampleCLR head.
+
+        For every label in :attr:`label_keys` the corresponding head
+        is evaluated on the frozen donor embedding and reduced to a single
+        scalar per donor:
+        - classification → probability of the predicted class
+        - regression → predicted value (back on the original scale)
+        - ranking → predicted ordinal level
+
+        Parameters
+        ----------
+        force
+            Recompute even if cached results exist in ``adata.uns``.
+
+        Returns
+        -------
+        pd.DataFrame
+            Indexed by donor ID.  One ``"<label>_importance"`` column per
+            label key; an additional ``"average_importance"`` column for
+            multi-label models.
+        """
+        self._check_adata_loaded()
+
+        cache_key = "supervised_sample_importance"
+        if not force and cache_key in self.adata.uns:
+            return pd.DataFrame(self.adata.uns[cache_key], index=self.samples)
+
+        norms = np.linalg.norm(self.get_sample_representations().values, axis=1)
+
+        scores: dict[str, np.ndarray] = {}
+        for label in self.label_keys:
+            head, head_kind, n_classes = self._find_native_head(label)
+            if head is None:
+                scores[label] = norms
+                continue
+
+            out, _, _ = self._head_predict(label)
+            if head_kind == "classification":
+                import scipy.special
+
+                proba = scipy.special.softmax(out, axis=1)
+                scores[label] = proba.max(axis=1)
+            elif head_kind == "regression":
+                mean = self._sclr_model.regression_target_means.get(label, 0.0)
+                std = self._sclr_model.regression_target_stds.get(label, 1.0)
+                scores[label] = out.ravel() * std + mean
+            else:  # ordinal
+                cumulative = np.cumsum(out, axis=1)
+                scores[label] = np.clip(
+                    (cumulative > 0.5).sum(axis=1).astype(float), 0, n_classes - 1
+                )
+
+        sample_importance = pd.DataFrame(
+            {f"{k}_importance": scores[k] for k in self.label_keys},
+            index=self.samples,
+        )
+        if len(self.label_keys) > 1:
+            sample_importance.insert(
+                0, "average_importance", sample_importance.mean(axis=1).values
+            )
+
+        self.adata.uns[cache_key] = sample_importance.to_dict()
+        return sample_importance
+
+    def get_cell_importance(
+        self,
+        label: str | None = None,
+        force: bool = False,
+        obsm_key: str = "sampleclr_cell_attention",
+    ) -> pd.DataFrame:
+        """Per-cell aggregator attention weights from the multi-head aggregator.
+
+        Parameters
+        ----------
+        label
+            If given, return only ``"<label>_importance"``.  Defaults to
+            returning every label's column.
+        force
+            Recompute even if cached results exist in ``adata.obs``.
+        obsm_key
+            Key under which the full per-head attention matrix is stored in
+            ``adata.obsm``.  Defaults to ``"sampleclr_cell_attention"``.
+
+        Returns
+        -------
+        pd.DataFrame
+            Indexed by ``adata.obs_names``.  One ``"<label>_importance"``
+            column per requested label.
+        """
+        import torch
+
+        self._check_adata_loaded()
+
+        if label is not None and label not in self.label_keys:
+            raise ValueError(f"label='{label}' is not in label_keys={self.label_keys}.")
+
+        importance_cols = [f"{label}_importance"] if label else [f"{k}_importance" for k in self.label_keys]
+
+        cached = obsm_key in self.adata.obsm and all(
+            c in self.adata.obs.columns for c in importance_cols
+        )
+        if not force and cached:
+            return self.adata.obs[importance_cols]
+
+        sclr = self._sclr_model
+        sclr.aggregator.eval()
+
+        donor_col = self.adata.obs[self.sample_key].values
+        cells_arr = self.adata.obsm[self.layer]
+        n_cells = self.adata.n_obs
+
+        n_heads: int | None = None
+        cell_attention = None 
+        mean_score = np.zeros(n_cells, dtype=np.float32)
+
+        for donor_id in self.samples:
+            mask = donor_col == donor_id
+            if not mask.any():
+                continue
+            cells = cells_arr[mask]
+            if hasattr(cells, "toarray"):
+                cells = cells.toarray()
+            x = torch.tensor(
+                np.asarray(cells, dtype=np.float32), device=sclr.device
+            ).unsqueeze(0)
+            with torch.no_grad():
+                result = sclr.aggregator(x, return_weights=True)
+            if not isinstance(result, tuple):
+                continue
+            _, weights = result  # (1, n_cells_i, n_heads) for multihead aggregators
+            w_np = weights.squeeze(0).cpu().numpy()
+            if w_np.ndim == 1:
+                w_np = w_np[:, None]  # treat as single head
+
+            if n_heads is None:
+                n_heads = w_np.shape[1]
+                cell_attention = np.zeros((n_cells, n_heads), dtype=np.float32)
+
+            cell_attention[mask] = w_np
+            mean_score[mask] = w_np.mean(axis=1)
+
+        if cell_attention is not None:
+            self.adata.obsm[obsm_key] = cell_attention
+
+        for k in self.label_keys:
+            self.adata.obs[f"{k}_importance"] = mean_score
+
+        return self.adata.obs[importance_cols]
