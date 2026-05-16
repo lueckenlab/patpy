@@ -21,7 +21,7 @@ dependencies:
   - ipykernel
   - jupyter
   - pip:
-      - patpy[pilot,mrvi,scpoli,diffusionemd]
+      - patpy[pilot,mrvi,scpoli,diffusionemd,gloscope-py-cpu]
       - mofapy2
       - ehrapy
       - plottable

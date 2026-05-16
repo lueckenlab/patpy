@@ -769,7 +769,8 @@ def trajectory_correlation(
         except (KeyError, ValueError, RuntimeError) as e:
             print(f"Error computing diffmap for {representation}: {e}")
             meta_adata.obs[f"{representation}_dpt_pseudotime"] = np.zeros(len(meta_adata.obs))
-            continue
+            # Fall through to append a placeholder correlation so the result
+            # DataFrame stays aligned with `representations`.
 
         target = _get_col_from_adata(meta_adata, trajectory_variable)
 
