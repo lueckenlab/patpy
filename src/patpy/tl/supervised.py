@@ -193,6 +193,18 @@ class SupervisedSampleMethod(BaseSampleMethod):
 
         return labels, tasks
 
+    def pretrain(self, **kwargs) -> None:
+        """Optional self-supervised / unsupervised pretraining phase.
+
+        The default implementation is a no-op.  Subclasses with pretraining stage overrides this
+
+        Raises
+        ------
+        RuntimeError
+            If called before :meth:`prepare_anndata`.
+        """
+        self._check_adata_loaded()
+
     def fine_tune(self, labels: list[str] | str, tasks: list[_PREDICTION_TASKS] | _PREDICTION_TASKS, **kwargs):
         """Fine-tune / continue training the model on new or existing labels.
 
@@ -2319,7 +2331,7 @@ class PaSCient(SupervisedSampleMethod):
 
 
 class SampleCLR(SupervisedSampleMethod):
-    """Donor-level representation via SampleCLR (Shitov et al.).
+    """Donor-level representation via SampleCLR (Shitov, Frey, Dehkordi et al.).
 
     SampleCLR learns sample-level embeddings from single-cell data with a
     contrastive objective: two random subsamples of cells from the same
@@ -2407,7 +2419,13 @@ class SampleCLR(SupervisedSampleMethod):
     ...     batch_key="study_id",
     ...     class_balancing="effective_number",
     ... )
-    >>> model.prepare_anndata(adata, pretrain=True, fine_tune=True)
+    >>> model.prepare_anndata(
+    ...     adata,
+    ...     pretrain=True,
+    ...     fine_tune=True,
+    ...     pretrain_val_metric="loss",
+    ...     fine_tune_val_metric="total",
+    ... )
     >>> embeddings = model.get_sample_representations()
     """
 
@@ -2478,14 +2496,24 @@ class SampleCLR(SupervisedSampleMethod):
         adata: sc.AnnData,
         pretrain: bool = True,
         fine_tune: bool = True,
-        **kwargs,
+        *,
+        pretrain_num_epochs: int | None = None,
+        pretrain_num_warmup_epochs: int | None = None,
+        pretrain_val_metric: Literal["loss", "knn"] = "loss",
+        pretrain_max_training_time_minutes: float | None = None,
+        fine_tune_num_epochs: int | None = None,
+        fine_tune_num_warmup_epochs: int | None = None,
+        fine_tune_stage: Literal["joint", "only_supervised_with_agg"] = "joint",
+        fine_tune_val_metric: Literal["nn", "knn", "loss", "total"] = "knn",
+        fine_tune_max_training_time_minutes: float | None = None,
+        verbose: bool = True,
     ) -> None:
         """Initialise the SampleCLR model and optionally run pretrain + fine-tune.
 
         Parameters
         ----------
         adata
-            Single-cell AnnData.  Must contain :attr:`sample_key` and any
+            Single-cell AnnData. Must contain :attr:`sample_key` and any
             :attr:`label_keys` in ``.obs``, and per-cell features in
             ``.obsm[self.layer]``.
         pretrain
@@ -2493,9 +2521,13 @@ class SampleCLR(SupervisedSampleMethod):
         fine_tune
             If True (and supervised labels are configured), run
             :meth:`fine_tune` on the labels passed at ``__init__``.
-        **kwargs
-            Extra arguments forwarded to :meth:`pretrain` and
-            :meth:`fine_tune` (only those they accept).
+
+        pretrain_num_epochs, pretrain_num_warmup_epochs, pretrain_val_metric, pretrain_max_training_time_minutes
+            Passed to :meth:`pretrain`.  See its docstring for details.
+        fine_tune_num_epochs, fine_tune_num_warmup_epochs, fine_tune_stage, fine_tune_val_metric, fine_tune_max_training_time_minutes
+            Passed to :meth:`fine_tune`.
+        verbose
+            Print per-epoch progress in both phases.
         """
         try:
             from sampleclr.models.contrastive_model import ContrastiveModel
@@ -2546,29 +2578,65 @@ class SampleCLR(SupervisedSampleMethod):
 
         self.samples = np.array(self._sclr_model.train_dataset.unique_categories)
 
-        pretrain_keys = {"num_epochs", "num_warmup_epochs", "val_metric", "verbose", "max_training_time_minutes"}
-        ft_keys = {"num_epochs", "num_warmup_epochs", "stage", "val_metric", "verbose", "max_training_time_minutes", "epoch_offset"}
-
         if pretrain:
-            pretrain_kwargs = {k: v for k, v in kwargs.items() if k in pretrain_keys}
-            self.pretrain(**pretrain_kwargs)
+            self.pretrain(
+                num_epochs=pretrain_num_epochs,
+                num_warmup_epochs=pretrain_num_warmup_epochs,
+                val_metric=pretrain_val_metric,
+                verbose=verbose,
+                max_training_time_minutes=pretrain_max_training_time_minutes,
+            )
 
         if fine_tune and self.label_keys:
-            ft_kwargs = {k: v for k, v in kwargs.items() if k in ft_keys}
-            self.fine_tune(self.label_keys, self.tasks, **ft_kwargs)
+            self.fine_tune(
+                self.label_keys,
+                self.tasks,
+                num_epochs=fine_tune_num_epochs,
+                num_warmup_epochs=fine_tune_num_warmup_epochs,
+                stage=fine_tune_stage,
+                val_metric=fine_tune_val_metric,
+                verbose=verbose,
+                max_training_time_minutes=fine_tune_max_training_time_minutes,
+            )
         else:
             self._compute_sample_representations()
             self._fitted = True
 
-    def pretrain(self, **kwargs) -> None:
+    def pretrain(
+        self,
+        num_epochs: int | None = None,
+        num_warmup_epochs: int | None = None,
+        val_metric: Literal["loss", "knn"] = "loss",
+        verbose: bool = True,
+        max_training_time_minutes: float | None = None,
+    ) -> None:
         """Run Stage 1 — self-supervised contrastive pretraining.
 
-        Forwards keyword arguments to
-        :meth:`sampleclr.models.contrastive_model.ContrastiveModel.pretrain`.
+        Parameters
+        ----------
+        num_epochs
+            Number of pretraining epochs. ``None`` uses
+            ``self.num_epochs_pretrain`` (from ``__init__``).
+        num_warmup_epochs
+            LR warmup epochs. ``None`` uses SampleCLR's
+            ``num_warmup_epochs_stage1`` default.
+        val_metric
+            Validation metric for early stopping: ``"loss"`` or ``"knn"``.
+        verbose
+            Print per-epoch progress.
+        max_training_time_minutes
+            Stop after this many minutes of wall-clock time. ``None`` =
+            unlimited.
         """
         if self._sclr_model is None:
             raise RuntimeError("Call prepare_anndata() before pretrain().")
-        self._sclr_model.pretrain(**kwargs)
+        self._sclr_model.pretrain(
+            num_epochs=num_epochs,
+            num_warmup_epochs=num_warmup_epochs,
+            val_metric=val_metric,
+            verbose=verbose,
+            max_training_time_minutes=max_training_time_minutes,
+        )
         self._compute_sample_representations()
         self._fitted = True
 
@@ -2576,9 +2644,21 @@ class SampleCLR(SupervisedSampleMethod):
         self,
         labels: list[str] | str,
         tasks: list[_PREDICTION_TASKS] | _PREDICTION_TASKS,
-        **kwargs,
+        num_epochs: int | None = None,
+        num_warmup_epochs: int | None = None,
+        stage: Literal["joint", "only_supervised_with_agg"] = "joint",
+        val_metric: Literal["nn", "knn", "loss", "total"] = "knn",
+        verbose: bool = True,
+        max_training_time_minutes: float | None = None,
+        epoch_offset: int = 0,
     ) -> None:
         """Run Stage 2 — supervised / joint fine-tuning.
+
+        For labels configured at ``__init__`` SampleCLR's native heads are
+        trained end-to-end. For labels *not* present at ``__init__`` the
+        method falls back to sklearn linear probes via
+        :meth:`SupervisedSampleMethod.fine_tune` on the frozen donor
+        embedding.
 
         Parameters
         ----------
@@ -2586,10 +2666,27 @@ class SampleCLR(SupervisedSampleMethod):
             Labels to fine-tune for.
         tasks : list[_PREDICTION_TASKS] or _PREDICTION_TASKS
             Corresponding prediction tasks.
-        **kwargs
-            Extra arguments forwarded to the underlying training loop
-            (e.g. ``num_epochs``, ``stage``, ``val_metric``,
-            ``max_training_time_minutes``).
+        num_epochs
+            Number of fine-tuning epochs. ``None`` uses
+            ``self.num_epochs_fine_tune`` (from ``__init__``).
+        num_warmup_epochs
+            Backbone-frozen warmup epochs. ``None`` uses SampleCLR's
+            ``num_warmup_epochs_stage2`` default.
+        stage
+            ``"joint"`` (contrastive + supervised) or
+            ``"only_supervised_with_agg"`` (supervised only, aggregator
+            unfrozen).
+        val_metric
+            Validation metric for early stopping: ``"nn"``, ``"knn"``,
+            ``"loss"`` or ``"total"``.
+        verbose
+            Print per-epoch progress.
+        max_training_time_minutes
+            Stop after this many minutes of wall-clock time. ``None`` =
+            unlimited.
+        epoch_offset
+            Offset for the per-epoch step counter, so step-level metrics
+            stay continuous across pretrain → fine_tune.
         """
         if self._sclr_model is None:
             raise RuntimeError("Call prepare_anndata() before fine_tune().")
@@ -2607,14 +2704,18 @@ class SampleCLR(SupervisedSampleMethod):
                 "linear probes on the frozen donor embedding for these labels.",
                 stacklevel=2,
             )
-            super().fine_tune(labels_list, tasks_list, **{k: v for k, v in kwargs.items() if k not in {
-                "num_epochs", "num_warmup_epochs", "stage", "val_metric", "max_training_time_minutes"
-            }})
+            super().fine_tune(labels_list, tasks_list)
             return
 
-        ft_keys = {"num_epochs", "num_warmup_epochs", "stage", "val_metric", "verbose", "max_training_time_minutes", "epoch_offset"}
-        ft_kwargs = {k: v for k, v in kwargs.items() if k in ft_keys}
-        self._sclr_model.fine_tune(**ft_kwargs)
+        self._sclr_model.fine_tune(
+            num_epochs=num_epochs,
+            num_warmup_epochs=num_warmup_epochs,
+            stage=stage,
+            val_metric=val_metric,
+            verbose=verbose,
+            max_training_time_minutes=max_training_time_minutes,
+            epoch_offset=epoch_offset,
+        )
         self._compute_sample_representations()
         self._fitted = True
 
@@ -2679,3 +2780,4 @@ class SampleCLR(SupervisedSampleMethod):
         if self.sample_representation is None:
             self._compute_sample_representations()
         return self.sample_representation
+
