@@ -108,6 +108,7 @@ optional-dependencies.scpoli = [
 ]
 optional-dependencies.test = [
   "coverage",
+  "filelock",   # cross-worker lock for pytest-xdist (scanpy download race)
   "pytest",
   "pytest-cov",
 ]
@@ -126,6 +127,7 @@ dev = [
 ]
 test = [
   "coverage>=7.10",
+  "filelock",       # cross-worker lock for pytest-xdist (scanpy download race)
   "pytest",
   "pytest-cov",     # For VS Code’s coverage functionality
 ]

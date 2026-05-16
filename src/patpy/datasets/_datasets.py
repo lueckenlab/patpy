@@ -1,11 +1,15 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import scanpy as sc
 from anndata import AnnData
 
 from patpy._settings import settings
 from patpy.datasets._dataloader import _download
+
+DatasetKind = Literal["raw", "processed"]
+InflammationAtlasSplit = Literal["main", "external", "validation"]
 
 
 @dataclass(frozen=True)
@@ -120,9 +124,123 @@ _TICATLAS_INFO = DatasetInfo(
     sample_metadata_columns=["patient", "gender", "subtype", "source"],
 )
 
+_COMBAT_STEPHENSON_INFO = DatasetInfo(
+    n_samples=251,
+    n_cells=1399435,
+    n_features=1856,
+    sample_key="sample_id",
+    cell_type_key="cell_coarse_aligned",
+    sample_metadata_columns=[
+        "dataset",
+        "Site",
+        "SARSCoV2PCR",
+        "Outcome",
+        "TimeSinceOnset",
+        "split",
+        "Status",
+        "severity_ord",
+        "severity_idx",
+        "outcome_bin",
+        "Status_encoded",
+    ],
+)
+
+# Per-split metadata for the inflammation atlas. All three splits are
+# latents-only (n_features=0; the 30-dim scANVI embedding lives in
+# obsm['X_scANVI_atlas']). Main carries ground-truth Level1/Level2 annotations;
+# external and validation carry model-predicted Level1pred/Level2pred labels.
+_INFLAMMATION_ATLAS_SAMPLE_METADATA_COLUMNS = [
+    "studyID",
+    "chemistry",
+    "technology",
+    "disease",
+    "sex",
+    "binned_age",
+    "disease_group",
+    "therapy_response",
+    "smoking_status",
+]
+
+_INFLAMMATION_ATLAS_INFOS: dict[InflammationAtlasSplit, DatasetInfo] = {
+    "main": DatasetInfo(
+        n_samples=817,
+        n_cells=4918140,
+        n_features=0,
+        sample_key="sampleID",
+        cell_type_key="Level1",
+        sample_metadata_columns=_INFLAMMATION_ATLAS_SAMPLE_METADATA_COLUMNS,
+    ),
+    "external": DatasetInfo(
+        n_samples=86,
+        n_cells=572872,
+        n_features=0,
+        sample_key="sampleID",
+        cell_type_key="Level1pred",
+        sample_metadata_columns=_INFLAMMATION_ATLAS_SAMPLE_METADATA_COLUMNS,
+    ),
+    "validation": DatasetInfo(
+        n_samples=144,
+        n_cells=849922,
+        n_features=0,
+        sample_key="sampleID",
+        cell_type_key="Level1pred",
+        sample_metadata_columns=_INFLAMMATION_ATLAS_SAMPLE_METADATA_COLUMNS,
+    ),
+}
+
+# Registry of Figshare URLs for each dataset / kind. ``None`` means "not yet
+# uploaded"; the loader will raise NotImplementedError for those combinations.
+_DATASET_URLS: dict[str, dict[DatasetKind, str | None]] = {
+    "combat": {
+        "processed": "https://ndownloader.figshare.com/files/64217586",
+        "raw": None,
+    },
+    "hlca": {
+        "processed": "https://ndownloader.figshare.com/files/64225983",
+        "raw": None,
+    },
+    "onek1k": {
+        "processed": "https://ndownloader.figshare.com/files/64225884",
+        "raw": None,
+    },
+    "stephenson": {
+        "processed": "https://ndownloader.figshare.com/files/64226109",
+        "raw": None,
+    },
+    "ticatlas": {
+        "processed": "https://ndownloader.figshare.com/files/64226097",
+        "raw": None,
+    },
+    "combat_stephenson": {
+        "processed": "https://ndownloader.figshare.com/files/64486770",
+        "raw": None,
+    },
+    "inflammation_atlas_main": {
+        "processed": "https://ndownloader.figshare.com/files/64486761",
+        "raw": None,
+    },
+    "inflammation_atlas_external": {
+        "processed": "https://ndownloader.figshare.com/files/64486752",
+        "raw": None,
+    },
+    "inflammation_atlas_validation": {
+        "processed": "https://ndownloader.figshare.com/files/64486758",
+        "raw": None,
+    },
+}
+
+# Zipped sample-metadata AnnData for the COMBAT cohort (~4 MB).
+_COMBAT_META_URL = "https://ndownloader.figshare.com/files/64291092"
+_COMBAT_META_FILENAME = "combat_meta_adata.h5ad"
+
 
 def _load_dataset(url: str, output_file_name: str, overwrite: bool) -> AnnData:
-    """Shared download / cache / load logic for the preprocessed datasets."""
+    """Shared download / cache / load logic.
+
+    Downloads ``url`` as a zip, extracts it into ``settings.datasetdir``, and
+    reads the resulting ``output_file_name`` (which must be the name of the
+    ``.h5ad`` file inside the zip) as an :class:`~anndata.AnnData`.
+    """
     output_file_path = settings.datasetdir / output_file_name
     if not Path(output_file_path).exists() or overwrite:
         zip_name = f"{output_file_name}.zip"
@@ -136,74 +254,113 @@ def _load_dataset(url: str, output_file_name: str, overwrite: bool) -> AnnData:
     return sc.read_h5ad(output_file_path)
 
 
-def combat_preprocessed(
+def _resolve_dataset_url(name: str, kind: DatasetKind) -> str:
+    """Return the URL for ``name``/``kind`` or raise a clear error."""
+    if kind not in ("raw", "processed"):
+        raise ValueError(f"kind must be 'raw' or 'processed', got {kind!r}.")
+    url = _DATASET_URLS[name][kind]
+    if url is None:
+        raise NotImplementedError(f"The {kind!r} version of the {name!r} dataset is not available yet.")
+    return url
+
+
+def _load_named_dataset(name: str, kind: DatasetKind, overwrite: bool) -> AnnData:
+    """Resolve the URL for ``name``/``kind`` and download the dataset."""
+    url = _resolve_dataset_url(name, kind)
+    return _load_dataset(
+        url=url,
+        output_file_name=f"{name}_{kind}.h5ad",
+        overwrite=overwrite,
+    )
+
+
+def _load_combat_metadata(overwrite: bool) -> AnnData:
+    """Download and return the COMBAT sample-metadata AnnData (~4 MB zipped)."""
+    return _load_dataset(
+        url=_COMBAT_META_URL,
+        output_file_name=_COMBAT_META_FILENAME,
+        overwrite=overwrite,
+    )
+
+
+def combat(
+    kind: DatasetKind = "processed",
     overwrite: bool = False,
+    load_metadata: bool = False,
     return_dataset_info: bool = False,
-) -> AnnData | tuple[AnnData, DatasetInfo]:
-    """Processed COvid-19 Multi-omics Blood ATlas (COMBAT) dataset.
+) -> AnnData | tuple[AnnData, ...]:
+    """COvid-19 Multi-omics Blood ATlas (COMBAT) dataset.
 
-    Here, data was preprocessed according to the standard scanpy pipeline, cells annotated as "nan" removed, PCA, scVI, scANVI and scPoli dimensionality reduction were applied.
-
-    The dataset contains 783'677 cells and 3,000 features.
-    The function downloads a zip compressed file of approximately 1.5 GB, which is unzipped to an :class:`~anndata.AnnData` file of approximately 5 GB. Download with good internet connection takes approximately 2 min.
+    The processed version was prepared with the standard scanpy pipeline; cells
+    annotated as "nan" were removed; PCA, scVI, scANVI, and scPoli dimensionality
+    reduction were applied. The dataset contains 783,677 cells and 3,000
+    features. The processed download is approximately 1.5 GB compressed and
+    ~5 GB unzipped.
 
     Parameters
     ----------
+    kind
+        Either ``"processed"`` (default) or ``"raw"``. Currently only
+        ``"processed"`` is available; ``"raw"`` raises :class:`NotImplementedError`.
     overwrite
         If ``True``, re-download the dataset even when a cached copy exists.
+    load_metadata
+        If ``True``, also download the ~4 MB sample-metadata
+        :class:`~anndata.AnnData` and return it as an extra element.
     return_dataset_info
-        If ``True``, return a tuple ``(adata, DatasetInfo)`` with the dataset's
-        standard schema (sample / cell-type keys, cell counts, etc.) instead of
-        just ``adata``.
+        If ``True``, append a :class:`DatasetInfo` describing the dataset's
+        standard schema (sample / cell-type keys, cell counts, etc.) to the
+        return value.
+
+    Returns
+    -------
+        By default the :class:`~anndata.AnnData` object alone. When
+        ``load_metadata`` and/or ``return_dataset_info`` are set, a tuple is
+        returned in this fixed order: ``(adata, meta_adata, info)`` (omitting
+        any element that was not requested).
 
     References
     ----------
         Ahern, D. J., Ai, Z., Ainsworth, M., Allan, C., Allcock, A., Angus, B., ... & Salio, M. (2022). A blood atlas of COVID-19 defines hallmarks of disease severity and specificity. Cell, 185(5), 916-938. https://doi.org/10.1016/j.cell.2022.01.012.
         COvid-19 Multi-omics Blood ATlas (COMBAT) Consortium. (2021). A blood atlas of COVID-19 defines hallmarks of disease severity and specificity: Associated data (1.0.1) [Data set]. Zenodo. https://doi.org/10.5281/zenodo.6120249
 
-    Returns
-    -------
-        :class:`~anndata.AnnData` object of scRNA-seq profiles, optionally paired
-        with a :class:`DatasetInfo` describing the dataset's standard schema.
-
     Examples
     --------
         >>> import patpy
-        >>> adata = patpy.datasets.combat_preprocessed()
-        >>> adata
-        AnnData object with n_obs × n_vars = 783677 × 3000
-            obs: 'Annotation_cluster_id', 'Annotation_cluster_name', 'Annotation_minor_subset', 'Annotation_major_subset', 'Annotation_cell_type', 'GEX_region', 'QC_ngenes', 'QC_total_UMI', 'QC_pct_mitochondrial', 'QC_scrub_doublet_scores', 'TCR_chain_composition', 'TCR_clone_ID', 'TCR_clone_count', 'TCR_clone_proportion', 'TCR_contains_unproductive', 'TCR_doublet', 'TCR_chain_TRA', 'TCR_v_gene_TRA', 'TCR_d_gene_TRA', 'TCR_j_gene_TRA', 'TCR_c_gene_TRA', 'TCR_productive_TRA', 'TCR_cdr3_TRA', 'TCR_umis_TRA', 'TCR_chain_TRA2', 'TCR_v_gene_TRA2', 'TCR_d_gene_TRA2', 'TCR_j_gene_TRA2', 'TCR_c_gene_TRA2', 'TCR_productive_TRA2', 'TCR_cdr3_TRA2', 'TCR_umis_TRA2', 'TCR_chain_TRB', 'TCR_v_gene_TRB', 'TCR_d_gene_TRB', 'TCR_j_gene_TRB', 'TCR_c_gene_TRB', 'TCR_productive_TRB', 'TCR_chain_TRB2', 'TCR_v_gene_TRB2', 'TCR_d_gene_TRB2', 'TCR_j_gene_TRB2', 'TCR_c_gene_TRB2', 'TCR_productive_TRB2', 'TCR_cdr3_TRB2', 'TCR_umis_TRB2', 'BCR_umis_HC', 'BCR_contig_qc_HC', 'BCR_functionality_HC', 'BCR_v_call_HC', 'BCR_v_score_HC', 'BCR_j_call_HC', 'BCR_j_score_HC', 'BCR_junction_aa_HC', 'BCR_total_mut_HC', 'BCR_s_mut_HC', 'BCR_r_mut_HC', 'BCR_c_gene_HC', 'BCR_clone_per_replicate_HC', 'BCR_clone_global_HC', 'BCR_clonal_abundance_HC', 'BCR_locus_LC', 'BCR_umis_LC', 'BCR_contig_qc_LC', 'BCR_functionality_LC', 'BCR_v_call_LC', 'BCR_v_score_LC', 'BCR_j_call_LC', 'BCR_j_score_LC', 'BCR_junction_aa_LC', 'BCR_total_mut_LC', 'BCR_s_mut_LC', 'BCR_r_mut_LC', 'BCR_c_gene_LC', 'COMBAT_ID', 'scRNASeq_sample_ID', 'COMBAT_participant_timepoint_ID', 'Source', 'Age', 'Sex', 'Race', 'BMI', 'Hospitalstay', 'Death28', 'Institute', 'PreExistingHeartDisease', 'PreExistingLungDisease', 'PreExistingKidneyDisease', 'PreExistingDiabetes', 'PreExistingHypertension', 'PreExistingImmunocompromised', 'Smoking', 'Symptomatic', 'Requiredvasoactive', 'Respiratorysupport', 'SARSCoV2PCR', 'Outcome', 'TimeSinceOnset', 'Ethnicity', 'Tissue', 'DiseaseClassification', 'Pool_ID', 'Channel_ID', 'ifn_1_score', '_scvi_batch', '_scvi_labels', 'n_genes_by_counts', 'log1p_n_genes_by_counts', 'total_counts', 'log1p_total_counts', 'pct_counts_in_top_50_genes', 'pct_counts_in_top_100_genes', 'pct_counts_in_top_200_genes', 'pct_counts_in_top_500_genes', 'total_counts_mt', 'log1p_total_counts_mt', 'pct_counts_mt', 'total_counts_ribo', 'log1p_total_counts_ribo', 'pct_counts_ribo', 'vertex', 'eigenvector_centrality'
-            var: 'gene_ids', 'feature_types', 'highly_variable', 'highly_variable_rank', 'means', 'variances', 'variances_norm', 'highly_variable_nbatches', 'mt', 'ribo', 'n_cells_by_counts', 'mean_counts', 'log1p_mean_counts', 'pct_dropout_by_counts', 'total_counts', 'log1p_total_counts'
-            uns: 'Institute', 'ObjectCreateDate', 'Source_colors', 'Technology', 'X_gloscope_cuml_distances', 'X_gloscope_pynndescent_distances', 'X_scpoli', '_scvi_manager_uuid', '_scvi_uuid', 'genome_annotation_version', 'gloscope_representation', 'gloscope_scpoli_distances', 'hvg', 'log1p', 'neighbors', 'pca', 'scpoli_distances', 'scpoli_parameters', 'scpoli_samples'
-            obsm: 'X_pca', 'X_scANVI_batch', 'X_scANVI_sample', 'X_scVI_batch', 'X_scVI_sample', 'X_scpoli', 'X_umap', 'X_umap_source'
-            varm: 'PCs'
-            layers: 'X_raw_counts'
-            obsp: 'connectivities', 'distances'
-        >>> adata, combat_info = patpy.datasets.combat_preprocessed(return_dataset_info=True)
+        >>> adata = patpy.datasets.combat()
+        >>> adata, meta_adata = patpy.datasets.combat(load_metadata=True)
+        >>> adata, info = patpy.datasets.combat(return_dataset_info=True)
+        >>> adata, meta_adata, info = patpy.datasets.combat(load_metadata=True, return_dataset_info=True)
     """
-    adata = _load_dataset(
-        url="https://ndownloader.figshare.com/files/64217586",
-        output_file_name="combat_processed.h5ad",
-        overwrite=overwrite,
-    )
+    adata = _load_named_dataset("combat", kind=kind, overwrite=overwrite)
+    extras: list[AnnData | DatasetInfo] = []
+    if load_metadata:
+        extras.append(_load_combat_metadata(overwrite=overwrite))
     if return_dataset_info:
-        return adata, _COMBAT_INFO
-    return adata
+        extras.append(_COMBAT_INFO)
+    if not extras:
+        return adata
+    return (adata, *extras)
 
 
-def hlca_preprocessed(
+def hlca(
+    kind: DatasetKind = "processed",
     overwrite: bool = False,
     return_dataset_info: bool = False,
 ) -> AnnData | tuple[AnnData, DatasetInfo]:
-    """Processed Human Lung Cell Atlas (HLCA) dataset.
+    """Human Lung Cell Atlas (HLCA) dataset.
 
-    Here, data was preprocessed according to the standard scanpy pipeline, cells annotated as "nan" removed, PCA, scVI, scANVI and scPoli dimensionality reduction were applied.
-
-    The dataset contains 1,687,127 cells and 3,000 features.
-    The function downloads a zip compressed file of approximately 3 GB, which is unzipped to an :class:`~anndata.AnnData` file of approximately 6.5 GB. Download with good internet connection takes approximately 3 min.
+    The processed version was prepared with the standard scanpy pipeline; cells
+    annotated as "nan" were removed; PCA, scVI, scANVI, and scPoli dimensionality
+    reduction were applied. The dataset contains 1,687,127 cells and 3,000
+    features. The processed download is approximately 3 GB compressed and
+    ~6.5 GB unzipped.
 
     Parameters
     ----------
+    kind
+        Either ``"processed"`` (default) or ``"raw"``. Currently only
+        ``"processed"`` is available; ``"raw"`` raises :class:`NotImplementedError`.
     overwrite
         If ``True``, re-download the dataset even when a cached copy exists.
     return_dataset_info
@@ -221,41 +378,33 @@ def hlca_preprocessed(
     Examples
     --------
         >>> import patpy
-        >>> adata = patpy.datasets.hlca_preprocessed()
-        >>> adata
-        AnnData object with n_obs × n_vars = 1687127 × 3000
-            obs: 'suspension_type', 'donor_id', 'is_primary_data', 'assay_ontology_term_id', 'cell_type_ontology_term_id', 'development_stage_ontology_term_id', 'disease_ontology_term_id', 'self_reported_ethnicity_ontology_term_id', 'tissue_ontology_term_id', 'organism_ontology_term_id', 'sex_ontology_term_id', "3'_or_5'", 'BMI', 'age_or_mean_of_age_range', 'age_range', 'anatomical_region_ccf_score', 'ann_coarse_for_GWAS_and_modeling', 'ann_finest_level', 'ann_level_1', 'ann_level_2', 'ann_level_3', 'ann_level_4', 'ann_level_5', 'cause_of_death', 'core_or_extension', 'dataset', 'fresh_or_frozen', 'log10_total_counts', 'lung_condition', 'mixed_ancestry', 'original_ann_level_1', 'original_ann_level_2', 'original_ann_level_3', 'original_ann_level_4', 'original_ann_level_5', 'original_ann_nonharmonized', 'reannotation_type', 'sample', 'scanvi_label', 'sequencing_platform', 'smoking_status', 'study', 'subject_type', 'tissue_coarse_unharmonized', 'tissue_detailed_unharmonized', 'tissue_dissociation_protocol', 'tissue_level_2', 'tissue_level_3', 'tissue_sampling_method', 'total_counts', 'transf_ann_level_1_label', 'transf_ann_level_1_uncert', 'transf_ann_level_2_label', 'transf_ann_level_2_uncert', 'transf_ann_level_3_label', 'transf_ann_level_3_uncert', 'transf_ann_level_4_label', 'transf_ann_level_4_uncert', 'transf_ann_level_5_label', 'transf_ann_level_5_uncert', 'tissue_type', 'cell_type', 'assay', 'disease', 'organism', 'sex', 'tissue', 'self_reported_ethnicity', 'development_stage', 'observation_joinid', '_scvi_batch', '_scvi_labels', 'n_genes_by_counts', 'log1p_n_genes_by_counts', 'log1p_total_counts', 'pct_counts_in_top_50_genes', 'pct_counts_in_top_100_genes', 'pct_counts_in_top_200_genes', 'pct_counts_in_top_500_genes', 'total_counts_mt', 'log1p_total_counts_mt', 'pct_counts_mt', 'total_counts_ribo', 'log1p_total_counts_ribo', 'pct_counts_ribo', 'vertex', 'eigenvector_centrality'
-            var: 'feature_is_filtered', 'original_gene_symbols', 'feature_name', 'feature_reference', 'feature_biotype', 'feature_length', 'feature_type', 'highly_variable', 'highly_variable_rank', 'means', 'variances', 'variances_norm', 'highly_variable_nbatches', 'mt', 'ribo', 'n_cells_by_counts', 'mean_counts', 'log1p_mean_counts', 'pct_dropout_by_counts', 'total_counts', 'log1p_total_counts'
-            uns: 'X_gloscope_cuml_distances', '_scvi_manager_uuid', '_scvi_uuid', 'batch_condition', 'citation', 'default_embedding', 'gloscope_representation', 'hvg', 'log1p', 'neighbors', 'pca', 'schema_reference', 'schema_version', 'title'
-            obsm: 'X_pca', 'X_scANVI_batch', 'X_scANVI_sample', 'X_scVI_batch', 'X_scVI_sample', 'X_scanvi_emb', 'X_umap'
-            varm: 'PCs'
-            layers: 'X_raw_counts', 'soupX'
-            obsp: 'connectivities', 'distances'
-        >>> adata, hlca_info = patpy.datasets.hlca_preprocessed(return_dataset_info=True)
+        >>> adata = patpy.datasets.hlca()
+        >>> adata, info = patpy.datasets.hlca(return_dataset_info=True)
     """
-    adata = _load_dataset(
-        url="https://ndownloader.figshare.com/files/64225983",
-        output_file_name="hlca_processed.h5ad",
-        overwrite=overwrite,
-    )
+    adata = _load_named_dataset("hlca", kind=kind, overwrite=overwrite)
     if return_dataset_info:
         return adata, _HLCA_INFO
     return adata
 
 
-def onek1k_preprocessed(
+def onek1k(
+    kind: DatasetKind = "processed",
     overwrite: bool = False,
     return_dataset_info: bool = False,
 ) -> AnnData | tuple[AnnData, DatasetInfo]:
-    """Processed onek1k dataset.
+    """OneK1K dataset.
 
-    Here, data was preprocessed according to the standard scanpy pipeline, cells annotated as "nan" removed, PCA, scVI, scANVI and scPoli dimensionality reduction were applied.
-
-    The dataset contains 1,248,980 cells and 3,000 features.
-    The function downloads a zip compressed file of approximately 2.5 GB, which is unzipped to an :class:`~anndata.AnnData` file of approximately 4 GB. Download with good internet connection takes approximately 3 min.
+    The processed version was prepared with the standard scanpy pipeline; cells
+    annotated as "nan" were removed; PCA, scVI, scANVI, and scPoli dimensionality
+    reduction were applied. The dataset contains 1,248,980 cells and 3,000
+    features. The processed download is approximately 2.5 GB compressed and
+    ~4 GB unzipped.
 
     Parameters
     ----------
+    kind
+        Either ``"processed"`` (default) or ``"raw"``. Currently only
+        ``"processed"`` is available; ``"raw"`` raises :class:`NotImplementedError`.
     overwrite
         If ``True``, re-download the dataset even when a cached copy exists.
     return_dataset_info
@@ -274,41 +423,33 @@ def onek1k_preprocessed(
     Examples
     --------
         >>> import patpy
-        >>> adata = patpy.datasets.onek1k_preprocessed()
-        >>> adata
-        AnnData object with n_obs × n_vars = 1248980 × 3000
-            obs: 'orig.ident', 'nCount_RNA', 'nFeature_RNA', 'percent.mt', 'donor_id', 'pool_number', 'predicted.celltype.l2', 'predicted.celltype.l2.score', 'age', 'organism_ontology_term_id', 'tissue_ontology_term_id', 'assay_ontology_term_id', 'disease_ontology_term_id', 'cell_type_ontology_term_id', 'self_reported_ethnicity_ontology_term_id', 'development_stage_ontology_term_id', 'sex_ontology_term_id', 'is_primary_data', 'suspension_type', 'tissue_type', 'cell_type', 'assay', 'disease', 'organism', 'sex', 'tissue', 'self_reported_ethnicity', 'development_stage', 'observation_joinid', '_scvi_batch', '_scvi_labels', 'n_genes_by_counts', 'log1p_n_genes_by_counts', 'total_counts', 'log1p_total_counts', 'pct_counts_in_top_50_genes', 'pct_counts_in_top_100_genes', 'pct_counts_in_top_200_genes', 'pct_counts_in_top_500_genes', 'total_counts_mt', 'log1p_total_counts_mt', 'pct_counts_mt', 'total_counts_ribo', 'log1p_total_counts_ribo', 'pct_counts_ribo', 'vertex', 'eigenvector_centrality'
-            var: 'vst.mean', 'vst.variance', 'vst.variance.expected', 'vst.variance.standardized', 'vst.variable', 'feature_is_filtered', 'feature_name', 'feature_reference', 'feature_biotype', 'feature_length', 'feature_type', 'highly_variable', 'highly_variable_rank', 'means', 'variances', 'variances_norm', 'highly_variable_nbatches', 'mt', 'ribo', 'n_cells_by_counts', 'mean_counts', 'log1p_mean_counts', 'pct_dropout_by_counts', 'total_counts', 'log1p_total_counts'
-            uns: 'X_gloscope_cuml_distances', 'X_scpoli', '_scvi_manager_uuid', '_scvi_uuid', 'cell_type_ontology_term_id_colors', 'citation', 'default_embedding', 'gloscope_representation', 'hvg', 'log1p', 'neighbors', 'pca', 'schema_reference', 'schema_version', 'scpoli_distances', 'scpoli_parameters', 'scpoli_samples', 'title'
-            obsm: 'X_azimuth_spca', 'X_azimuth_umap', 'X_harmony', 'X_pca', 'X_scANVI_batch', 'X_scANVI_sample', 'X_scVI_batch', 'X_scVI_sample', 'X_scpoli', 'X_umap'
-            varm: 'PCs'
-            layers: 'X_raw_counts'
-            obsp: 'connectivities', 'distances'
-        >>> adata, onek1k_info = patpy.datasets.onek1k_preprocessed(return_dataset_info=True)
+        >>> adata = patpy.datasets.onek1k()
+        >>> adata, info = patpy.datasets.onek1k(return_dataset_info=True)
     """
-    adata = _load_dataset(
-        url="https://ndownloader.figshare.com/files/64225884",
-        output_file_name="onek1k_processed.h5ad",
-        overwrite=overwrite,
-    )
+    adata = _load_named_dataset("onek1k", kind=kind, overwrite=overwrite)
     if return_dataset_info:
         return adata, _ONEK1K_INFO
     return adata
 
 
-def stephenson_preprocessed(
+def stephenson(
+    kind: DatasetKind = "processed",
     overwrite: bool = False,
     return_dataset_info: bool = False,
 ) -> AnnData | tuple[AnnData, DatasetInfo]:
-    """Processed multi-omics immune response in COVID-19 (Stephenson) dataset.
+    """Multi-omics immune response in COVID-19 (Stephenson) dataset.
 
-    Here, data was preprocessed according to the standard scanpy pipeline, cells annotated as "nan" removed, PCA, scVI, scANVI and scPoli dimensionality reduction were applied.
-
-    The dataset contains 639,482 cells and 3,000 features.
-    The function downloads a zip compressed file of approximately 1.5 GB, which is unzipped to an :class:`~anndata.AnnData` file of approximately 4.5 GB. Download with good internet connection takes approximately 2 min.
+    The processed version was prepared with the standard scanpy pipeline; cells
+    annotated as "nan" were removed; PCA, scVI, scANVI, and scPoli dimensionality
+    reduction were applied. The dataset contains 639,482 cells and 3,000
+    features. The processed download is approximately 1.5 GB compressed and
+    ~4.5 GB unzipped.
 
     Parameters
     ----------
+    kind
+        Either ``"processed"`` (default) or ``"raw"``. Currently only
+        ``"processed"`` is available; ``"raw"`` raises :class:`NotImplementedError`.
     overwrite
         If ``True``, re-download the dataset even when a cached copy exists.
     return_dataset_info
@@ -326,41 +467,33 @@ def stephenson_preprocessed(
     Examples
     --------
         >>> import patpy
-        >>> adata = patpy.datasets.stephenson_preprocessed()
-        >>> adata
-        AnnData object with n_obs × n_vars = 639482 × 3000
-            obs: 'sample_id', 'n_genes', 'n_genes_by_counts', 'total_counts', 'total_counts_mt', 'pct_counts_mt', 'initial_clustering', 'Resample', 'Collection_Day', 'Swab_result', 'Status', 'Smoker', 'Status_on_day_collection', 'Status_on_day_collection_summary', 'Days_from_onset', 'Site', 'time_after_LPS', 'Worst_Clinical_Status', 'Outcome', 'donor_id', 'assay_ontology_term_id', 'cell_type_ontology_term_id', 'development_stage_ontology_term_id', 'disease_ontology_term_id', 'self_reported_ethnicity_ontology_term_id', 'is_primary_data', 'organism_ontology_term_id', 'sex_ontology_term_id', 'tissue_ontology_term_id', 'author_cell_type', 'suspension_type', 'tissue_type', 'cell_type', 'assay', 'disease', 'organism', 'sex', 'tissue', 'self_reported_ethnicity', 'development_stage', 'observation_joinid', '_scvi_batch', '_scvi_labels', 'log1p_n_genes_by_counts', 'log1p_total_counts', 'pct_counts_in_top_50_genes', 'pct_counts_in_top_100_genes', 'pct_counts_in_top_200_genes', 'pct_counts_in_top_500_genes', 'log1p_total_counts_mt', 'total_counts_ribo', 'log1p_total_counts_ribo', 'pct_counts_ribo', 'vertex', 'eigenvector_centrality'
-            var: 'feature_is_filtered', 'feature_name', 'feature_reference', 'feature_biotype', 'feature_length', 'feature_type', 'highly_variable', 'highly_variable_rank', 'means', 'variances', 'variances_norm', 'highly_variable_nbatches', 'mt', 'ribo', 'n_cells_by_counts', 'mean_counts', 'log1p_mean_counts', 'pct_dropout_by_counts', 'total_counts', 'log1p_total_counts'
-            uns: 'X_gloscope_cuml_distances', 'X_gloscope_pynndescent_distances', 'X_scpoli', '_scvi_manager_uuid', '_scvi_uuid', 'antibody_X', 'antibody_features', 'antibody_raw.X', 'citation', 'default_embedding', 'gloscope_representation', 'gloscope_scpoli_distances', 'hvg', 'leiden', 'log1p', 'neighbors', 'pca', 'schema_reference', 'schema_version', 'scpoli_distances', 'scpoli_parameters', 'scpoli_samples', 'title', 'umap'
-            obsm: 'X_pca', 'X_pca_harmony', 'X_scANVI_batch', 'X_scANVI_sample', 'X_scVI_batch', 'X_scVI_sample', 'X_scpoli', 'X_umap'
-            varm: 'PCs'
-            layers: 'X_raw_counts'
-            obsp: 'connectivities', 'distances'
-        >>> adata, stephenson_info = patpy.datasets.stephenson_preprocessed(return_dataset_info=True)
+        >>> adata = patpy.datasets.stephenson()
+        >>> adata, info = patpy.datasets.stephenson(return_dataset_info=True)
     """
-    adata = _load_dataset(
-        url="https://ndownloader.figshare.com/files/64226109",
-        output_file_name="stephenson_processed.h5ad",
-        overwrite=overwrite,
-    )
+    adata = _load_named_dataset("stephenson", kind=kind, overwrite=overwrite)
     if return_dataset_info:
         return adata, _STEPHENSON_INFO
     return adata
 
 
-def ticatlas_preprocessed(
+def ticatlas(
+    kind: DatasetKind = "processed",
     overwrite: bool = False,
     return_dataset_info: bool = False,
 ) -> AnnData | tuple[AnnData, DatasetInfo]:
-    """Processed Tumor Immune Cell Atlas (TICAtlas) dataset.
+    """Tumor Immune Cell Atlas (TICAtlas) dataset.
 
-    Here, data was preprocessed according to the standard scanpy pipeline, cells annotated as "nan" removed, PCA, scVI, scANVI and scPoli dimensionality reduction were applied.
-
-    The dataset contains 267,547 cells and 3,000 features.
-    The function downloads a zip compressed file of approximately 0.5 GB, which is unzipped to an :class:`~anndata.AnnData` file of approximately 1.8 GB. Download with good internet connection takes approximately 2 min.
+    The processed version was prepared with the standard scanpy pipeline; cells
+    annotated as "nan" were removed; PCA, scVI, scANVI, and scPoli dimensionality
+    reduction were applied. The dataset contains 267,547 cells and 3,000
+    features. The processed download is approximately 0.5 GB compressed and
+    ~1.8 GB unzipped.
 
     Parameters
     ----------
+    kind
+        Either ``"processed"`` (default) or ``"raw"``. Currently only
+        ``"processed"`` is available; ``"raw"`` raises :class:`NotImplementedError`.
     overwrite
         If ``True``, re-download the dataset even when a cached copy exists.
     return_dataset_info
@@ -378,22 +511,130 @@ def ticatlas_preprocessed(
     Examples
     --------
         >>> import patpy
-        >>> adata = patpy.datasets.ticatlas_preprocessed()
-        >>> adata
-        AnnData object with n_obs × n_vars = 267547 × 3000
-            obs: 'orig.ident', 'nCount_RNA', 'nFeature_RNA', 'patient', 'percent.mt', 'gender', 'subtype', 'source', 'lv1_annot', 'lv2_annot', 'kmeans_cluster', 'n_genes', '_scvi_batch', '_scvi_labels', 'n_genes_by_counts', 'log1p_n_genes_by_counts', 'total_counts', 'log1p_total_counts', 'pct_counts_in_top_50_genes', 'pct_counts_in_top_100_genes', 'pct_counts_in_top_200_genes', 'pct_counts_in_top_500_genes', 'total_counts_mt', 'log1p_total_counts_mt', 'pct_counts_mt', 'total_counts_ribo', 'log1p_total_counts_ribo', 'pct_counts_ribo'
-            var: 'features', 'n_cells', 'highly_variable', 'highly_variable_rank', 'means', 'variances', 'variances_norm', 'highly_variable_nbatches', 'mt', 'ribo', 'n_cells_by_counts', 'mean_counts', 'log1p_mean_counts', 'pct_dropout_by_counts', 'total_counts', 'log1p_total_counts'
-            uns: 'X_scpoli', '_scvi_manager_uuid', '_scvi_uuid', 'hvg', 'log1p', 'pca', 'scpoli_distances', 'scpoli_parameters', 'scpoli_samples'
-            obsm: 'X_pca', 'X_scANVI_batch', 'X_scANVI_sample', 'X_scVI_batch', 'X_scVI_sample', 'X_scpoli', 'X_umap'
-            varm: 'PCs'
-            layers: 'X_raw_counts', 'shifted_log_counts'
-        >>> adata, ticatlas_info = patpy.datasets.ticatlas_preprocessed(return_dataset_info=True)
+        >>> adata = patpy.datasets.ticatlas()
+        >>> adata, info = patpy.datasets.ticatlas(return_dataset_info=True)
     """
-    adata = _load_dataset(
-        url="https://ndownloader.figshare.com/files/64226097",
-        output_file_name="ticatlas_processed.h5ad",
-        overwrite=overwrite,
-    )
+    adata = _load_named_dataset("ticatlas", kind=kind, overwrite=overwrite)
     if return_dataset_info:
         return adata, _TICATLAS_INFO
+    return adata
+
+
+def combat_stephenson(
+    kind: DatasetKind = "processed",
+    overwrite: bool = False,
+    return_dataset_info: bool = False,
+) -> AnnData | tuple[AnnData, DatasetInfo]:
+    """Harmonized COMBAT + Stephenson COVID-19 PBMC dataset.
+
+    Cross-study harmonization of the COMBAT and Stephenson COVID-19 PBMC cohorts
+    sharing a unified cell-type annotation (``cell_coarse_aligned``) and joint
+    PCA/scVI/scANVI embeddings (in ``adata.obsm``). The published file
+    contains 1,399,435 cells across 251 samples (2 source datasets), with 1,856
+    genes retained after harmonization. Raw counts are kept under
+    ``adata.layers['X_raw_counts']``. Sample-level metadata (Site, Status,
+    severity, outcome, etc.) is available in ``adata.obs`` directly.
+
+    Parameters
+    ----------
+    kind
+        Either ``"processed"`` (default) or ``"raw"``. The processed dataset is
+        available via Figshare; ``"raw"`` currently raises
+        :class:`NotImplementedError`.
+    overwrite
+        If ``True``, re-download the dataset even when a cached copy exists.
+    return_dataset_info
+        If ``True``, return a tuple ``(adata, DatasetInfo)`` instead of just ``adata``.
+
+    References
+    ----------
+        Ahern, D. J., et al. (2022). A blood atlas of COVID-19 defines hallmarks of disease severity and specificity. Cell, 185(5), 916-938. https://doi.org/10.1016/j.cell.2022.01.012
+        Stephenson, E., et al. (2021). Single-cell multi-omics analysis of the immune response in COVID-19. Nature medicine, 27(5), 904-916. https://doi.org/10.1038/s41591-021-01329-2
+
+    Returns
+    -------
+        :class:`~anndata.AnnData` object of scRNA-seq profiles, optionally paired
+        with a :class:`DatasetInfo` describing the dataset's standard schema.
+
+    Examples
+    --------
+        >>> import patpy
+        >>> adata = patpy.datasets.combat_stephenson()
+        >>> adata, info = patpy.datasets.combat_stephenson(return_dataset_info=True)
+    """
+    adata = _load_named_dataset("combat_stephenson", kind=kind, overwrite=overwrite)
+    if return_dataset_info:
+        return adata, _COMBAT_STEPHENSON_INFO
+    return adata
+
+
+def inflammation_atlas(
+    split: InflammationAtlasSplit = "main",
+    kind: DatasetKind = "processed",
+    overwrite: bool = False,
+    return_dataset_info: bool = False,
+) -> AnnData | tuple[AnnData, DatasetInfo]:
+    """Cross-study inflammation atlas (scANVI latents).
+
+    The published "processed" version is a scANVI-embedded latents-only
+    :class:`~anndata.AnnData` with the 30-dimensional scANVI embedding under
+    ``adata.obsm['X_scANVI_atlas']``. The file has no gene-expression matrix
+    for now; use the embedding directly for
+    sample-representation workflows. Sample-level metadata (``studyID``,
+    ``chemistry``, ``disease``, ``sex``, ``binned_age``) is available in
+    ``adata.obs`` directly.
+
+    Three splits are exposed via the ``split`` argument:
+
+    * ``"main"`` (default) — atlas training data, 4,918,140 cells / 817 samples,
+      with ground-truth ``Level1`` / ``Level2`` cell-type annotations.
+    * ``"external"`` — held-out studies, 572,872 cells /
+      86 samples, with model-predicted ``Level1pred`` / ``Level2pred`` labels.
+    * ``"validation"`` — held-out samples, 849,922 cells /
+      144 samples, with model-predicted ``Level1pred`` / ``Level2pred`` labels.
+
+    Parameters
+    ----------
+    split
+        Which split to load: ``"main"``, ``"external"``, or ``"validation"``.
+        Defaults to ``"main"``.
+    kind
+        Either ``"processed"`` (default) or ``"raw"``. The processed splits are
+        available via Figshare; ``"raw"`` currently raises
+        :class:`NotImplementedError`.
+    overwrite
+        If ``True``, re-download the dataset even when a cached copy exists.
+    return_dataset_info
+        If ``True``, return a tuple ``(adata, DatasetInfo)`` instead of just
+        ``adata``. The :class:`DatasetInfo` is split-specific: ``cell_type_key``
+        is ``"Level1"`` for ``main`` and ``"Level1pred"`` for the other two
+        splits. ``n_features`` is reported as ``0`` because the file is
+        latents-only.
+
+
+    References
+    ----------
+       Jiménez-Gracia, L., Maspero, D., Aguilar-Fernández, S. et al. Interpretable inflammation landscape of circulating immune cells. Nat Med 32, 633–644 (2026). https://doi.org/10.1038/s41591-025-04126-3
+
+
+    Returns
+    -------
+        :class:`~anndata.AnnData` object with scANVI latents under
+        ``obsm['X_scANVI_atlas']``, optionally paired with a :class:`DatasetInfo`
+        describing the requested split's standard schema.
+
+    Examples
+    --------
+        >>> import patpy
+        >>> adata = patpy.datasets.inflammation_atlas()
+        >>> latents = adata.obsm["X_scANVI_atlas"]
+        >>> adata, info = patpy.datasets.inflammation_atlas(return_dataset_info=True)
+        >>> ext = patpy.datasets.inflammation_atlas(split="external")
+        >>> val = patpy.datasets.inflammation_atlas(split="validation")
+    """
+    if split not in _INFLAMMATION_ATLAS_INFOS:
+        raise ValueError(f"split must be one of {tuple(_INFLAMMATION_ATLAS_INFOS)}, got {split!r}.")
+    adata = _load_named_dataset(f"inflammation_atlas_{split}", kind=kind, overwrite=overwrite)
+    if return_dataset_info:
+        return adata, _INFLAMMATION_ATLAS_INFOS[split]
     return adata

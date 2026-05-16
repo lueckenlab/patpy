@@ -95,20 +95,42 @@ def nan_heavy_matrix():
 
 
 @pytest.fixture(scope="session")
-def pbmc3k_adata():
+def pbmc3k_adata(request, tmp_path_factory):
     """Preprocessed PBMC3k dataset with randomly assigned sample labels.
 
     Provides real single-cell data with X_pca embedding and louvain cell-type
     annotations, suitable for methods that require biological structure in the
     data (e.g. DiffusionEMD, GloScope, WassersteinTSNE, PILOT, MOFA).
+
+    Under pytest-xdist each worker runs its own session fixture, so without a
+    cross-process lock multiple workers race on scanpy's shared
+    ``pbmc3k_processed.h5ad`` download and one ends up reading a partially
+    written file (``OSError: ... truncated file``). The filelock pattern below
+    is the one recommended in the pytest-xdist docs.
     """
     import scanpy as sc
 
-    adata = sc.datasets.pbmc3k_processed()
-    rng = np.random.default_rng(0)
-    n_samples = 4
-    adata.obs["sample_id"] = rng.choice([f"sample_{i}" for i in range(n_samples)], size=adata.n_obs).astype(str)
-    return adata
+    def _load() -> AnnData:
+        adata = sc.datasets.pbmc3k_processed()
+        rng = np.random.default_rng(0)
+        n_samples = 4
+        adata.obs["sample_id"] = rng.choice([f"sample_{i}" for i in range(n_samples)], size=adata.n_obs).astype(str)
+        return adata
+
+    # Detect xdist via its ``worker_id`` fixture. Without xdist (or its plugin
+    # not installed), no cross-worker race is possible, so just load directly.
+    try:
+        worker_id = request.getfixturevalue("worker_id")
+    except pytest.FixtureLookupError:
+        return _load()
+    if worker_id == "master":
+        return _load()
+
+    from filelock import FileLock
+
+    lock_path = tmp_path_factory.getbasetemp().parent / "pbmc3k_processed.lock"
+    with FileLock(str(lock_path)):
+        return _load()
 
 
 @pytest.fixture
