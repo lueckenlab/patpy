@@ -95,16 +95,16 @@ optional-dependencies.pascient = [
 optional-dependencies.pilot = [
   "pilotpy",
 ]
-# `pulsar` is not on PyPI; install it manually:
-#   pip install git+https://github.com/snap-stanford/PULSAR.git@main
-optional-dependencies.scpoli = [
-  "scarches>=0.5.1",
-]
 # `sampleclr` is not yet on PyPI; install it manually from the repository:
 #   pip install git+https://github.com/lueckenlab/sampleclr.git@main
 optional-dependencies.sampleclr = [
   "torch>=1.13",
   "umap-learn",
+]
+# `pulsar` is not on PyPI; install it manually:
+#   pip install git+https://github.com/snap-stanford/PULSAR.git@main
+optional-dependencies.scpoli = [
+  "scarches>=0.5.1",
 ]
 optional-dependencies.test = [
   "coverage",

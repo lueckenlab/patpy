@@ -2486,7 +2486,9 @@ class SampleCLR(SupervisedSampleMethod):
         sampleclr_tasks: dict[str, list[str]] = {}
         for label, task in zip(self.label_keys, self.tasks, strict=True):
             if task not in self._SAMPLECLR_TASK_MAP:
-                raise ValueError(f"Unsupported task '{task}' for SampleCLR. Use one of {list(self._SAMPLECLR_TASK_MAP)}.")
+                raise ValueError(
+                    f"Unsupported task '{task}' for SampleCLR. Use one of {list(self._SAMPLECLR_TASK_MAP)}."
+                )
             sclr_key = self._SAMPLECLR_TASK_MAP[task]
             sampleclr_tasks.setdefault(sclr_key, []).append(label)
         return sampleclr_tasks
@@ -2533,8 +2535,7 @@ class SampleCLR(SupervisedSampleMethod):
             from sampleclr.models.contrastive_model import ContrastiveModel
         except ImportError as e:
             raise ImportError(
-                "sampleclr is required. Install it from the SampleCLR repository "
-                "(it is not yet on PyPI)."
+                "sampleclr is required. Install it from the SampleCLR repository (it is not yet on PyPI)."
             ) from e
 
         super().prepare_anndata(adata)
@@ -2729,7 +2730,8 @@ class SampleCLR(SupervisedSampleMethod):
     ) -> pd.DataFrame:
         """Run the trained projector + aggregator over ``self.adata`` to extract per-donor embeddings.
 
-        Wraps :func:`sampleclr.utils.get_sample_representations_from_adata` 
+        Wraps :func:`sampleclr.utils.get_sample_representations_from_adata`
+
         Parameters
         ----------
         subset_size
