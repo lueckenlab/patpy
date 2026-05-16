@@ -2942,18 +2942,14 @@ class SampleCLR(SupervisedSampleMethod):
                 scores[label] = out.ravel() * std + mean
             else:  # ordinal
                 cumulative = np.cumsum(out, axis=1)
-                scores[label] = np.clip(
-                    (cumulative > 0.5).sum(axis=1).astype(float), 0, n_classes - 1
-                )
+                scores[label] = np.clip((cumulative > 0.5).sum(axis=1).astype(float), 0, n_classes - 1)
 
         sample_importance = pd.DataFrame(
             {f"{k}_importance": scores[k] for k in self.label_keys},
             index=self.samples,
         )
         if len(self.label_keys) > 1:
-            sample_importance.insert(
-                0, "average_importance", sample_importance.mean(axis=1).values
-            )
+            sample_importance.insert(0, "average_importance", sample_importance.mean(axis=1).values)
 
         self.adata.uns[cache_key] = sample_importance.to_dict()
         return sample_importance
@@ -2992,9 +2988,7 @@ class SampleCLR(SupervisedSampleMethod):
 
         importance_cols = [f"{label}_importance"] if label else [f"{k}_importance" for k in self.label_keys]
 
-        cached = obsm_key in self.adata.obsm and all(
-            c in self.adata.obs.columns for c in importance_cols
-        )
+        cached = obsm_key in self.adata.obsm and all(c in self.adata.obs.columns for c in importance_cols)
         if not force and cached:
             return self.adata.obs[importance_cols]
 
@@ -3006,7 +3000,7 @@ class SampleCLR(SupervisedSampleMethod):
         n_cells = self.adata.n_obs
 
         n_heads: int | None = None
-        cell_attention = None 
+        cell_attention = None
         mean_score = np.zeros(n_cells, dtype=np.float32)
 
         for donor_id in self.samples:
@@ -3016,9 +3010,7 @@ class SampleCLR(SupervisedSampleMethod):
             cells = cells_arr[mask]
             if hasattr(cells, "toarray"):
                 cells = cells.toarray()
-            x = torch.tensor(
-                np.asarray(cells, dtype=np.float32), device=sclr.device
-            ).unsqueeze(0)
+            x = torch.tensor(np.asarray(cells, dtype=np.float32), device=sclr.device).unsqueeze(0)
             with torch.no_grad():
                 result = sclr.aggregator(x, return_weights=True)
             if not isinstance(result, tuple):
