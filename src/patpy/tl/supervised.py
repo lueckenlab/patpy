@@ -2406,8 +2406,6 @@ class SampleCLR(SupervisedSampleMethod):
         ``batch_sampler_pseudo_batch_strategy``, ``aggregator_type``,
         ``aggregator_normalization``, ``use_uncertainty_weighting``, and
         ``train_ids`` / ``val_ids`` / ``test_ids`` for explicit splits.
-        These were previously named ``concord_*`` and were renamed in
-        SampleCLR 0.3.0.
 
     Examples
     --------
