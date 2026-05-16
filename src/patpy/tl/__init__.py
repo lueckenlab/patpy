@@ -35,4 +35,4 @@ from .sample_representation import (
     correlate_composition,
     describe_metadata,
 )
-from .supervised import PULSAR, MixMIL, PaSCient
+from .supervised import PULSAR, MixMIL, PaSCient, SampleCLR
