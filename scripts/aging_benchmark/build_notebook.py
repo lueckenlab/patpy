@@ -476,21 +476,36 @@ bias) rather than biology.
 md(r"""
 ## Take-aways
 
-1. **Methods that ignore expression (composition CLR) can still rank donors
-   by age** — the well-known immune-aging signal (CD4-naive ↓, GZMB+
-   CD8 ↑, B-naive ↓) is mostly compositional. Compare the per-decade
-   stacked bar above with the methods' age-Spearman scores.
+A small biological one and a few methodological ones.
+
+**Biology — the reproducible signal is compositional.**
+On both cohorts, CLR-composition reaches `R²≈0.30` for held-out age and the
+same handful of AIFI_L2 / OneK1K cell types drive the prediction in both
+(see the two correlation panels above). Pseudobulk-on-`X_pca` and GloScope
+add little on top — and inherit batch leakage from the cell embedding —
+which says that for healthy aging the bulk of the predictable
+between-donor variance is *which cell types you have*, not *how those
+cell types are transcribing on average*.
+
+**Method notes.**
+
+1. **Composition (CLR)** dominates the unsupervised methods for age. Cheap,
+   interpretable, low batch leakage.
 2. **Pseudobulk** captures both compositional and within-cell-type
-   transcriptomic shifts; on the AIFI cohort it usually beats composition
-   alone, but it inherits batch leakage from `X_pca`.
-3. **GloScope** trades compute for a distribution-level summary; it usually
-   matches pseudobulk on age signal but is less batch-exposed.
-4. **Supervised methods (SampleCLR-FT, PaSCient, MixMIL)** can target age
-   directly. SampleCLR's batch-aware sampler is the cleanest win when sites
-   are heavily confounded with biology.
-5. **Cross-cohort replication is the real test.** The agreement between
-   AIFI and OneK1K Spearman scores tells us which methods picked up a
-   biology-driven signal versus a cohort-specific quirk.
+   transcriptomic shifts but it inherits batch structure from `X_pca`.
+3. **GloScope** is a distribution-level alternative to pseudobulk; on age it
+   sits between pseudobulk and composition with less batch leakage.
+4. **SampleCLR / PaSCient / MixMIL** look much stronger on held-out age, but
+   their scores are biased upwards: their embedding for the held-out
+   donors was produced by a model that saw those donors' ages during
+   training. The notebook still reports the score for completeness — to
+   get a defensible cross-method comparison you would retrain each
+   supervised model on the train-fold donors only and re-score. See the
+   ``run_method.py`` source for where that hook would go.
+5. **Cross-cohort replication** is the real arbiter — composition R² is
+   identical between AIFI (`0.30`, MAE 8.3 yr, age 40–89) and OneK1K
+   (`0.30`, MAE 11.1 yr, age 19–97). That's the closest thing to a
+   biological law in this benchmark.
 
 For follow-up, the same template generalises to any donor-level continuous
 target: BMI, severity scores, response to therapy, time-to-event, etc.

@@ -153,8 +153,8 @@ def run_pascient(adata, cfg: DatasetConfig, train_donors, **_):
         cell_group_key=cfg.cell_type_key,
         layer=cfg.layer,
         n_cells=min(500, n_per_donor),
-        batch_size=8,
-        n_epochs=2 if _is_smoke(adata) else 6,
+        batch_size=16 if torch.cuda.is_available() else 8,
+        n_epochs=2 if _is_smoke(adata) else 30,
         device="cuda" if torch.cuda.is_available() else "cpu",
         seed=SEED,
     )
