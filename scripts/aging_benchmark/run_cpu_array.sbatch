@@ -32,6 +32,10 @@ REPO=/ictstr01/groups/luckylab/workspace/vladimir.shitov/patpy-aging-tutorial
 mkdir -p "$REPO/logs/aging_benchmark/full"
 cd "$REPO"
 
+# Force-unbuffered output so verbose=True progress lines (and Lightning
+# epoch bars) actually land in the SLURM log file in real time.
+export PYTHONUNBUFFERED=1
+
 echo "[$(date)] cell $SLURM_ARRAY_TASK_ID -> $DATASET / $METHOD on $(hostname)"
 echo "  cpus=$SLURM_CPUS_PER_TASK  mem=${SLURM_MEM_PER_NODE}"
 

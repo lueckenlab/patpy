@@ -156,6 +156,10 @@ def run_pascient(adata, cfg: DatasetConfig, train_donors, **_):
         batch_size=16 if torch.cuda.is_available() else 8,
         n_epochs=2 if _is_smoke(adata) else 30,
         device="cuda" if torch.cuda.is_available() else "cpu",
+        # cfg.layer is an embedding (X_pca / X_scVI), already centred → can have
+        # negative values. PaSCient's normalize=True takes log() of the input and
+        # blows up to NaN on negative values. Disable for embedding-style layers.
+        normalize=False,
         seed=SEED,
     )
     pa.prepare_anndata(adata, train=True)
@@ -203,11 +207,11 @@ def run_sampleclr(adata, cfg: DatasetConfig, train_donors, batch_aware: bool = T
         layer=cfg.layer,
         tasks={"regression": ["age"]},
         batch_size=8,
-        num_epochs_stage1=10 if smoke else 100,
-        num_epochs_stage2=10 if smoke else 100,
-        num_warmup_epochs_stage1=2 if smoke else 10,
-        num_warmup_epochs_stage2=2 if smoke else 10,
-        early_stopping_patience=3 if smoke else 10,
+        num_epochs_stage1=10 if smoke else 40,
+        num_epochs_stage2=10 if smoke else 40,
+        num_warmup_epochs_stage1=2 if smoke else 5,
+        num_warmup_epochs_stage2=2 if smoke else 5,
+        early_stopping_patience=3 if smoke else 8,
         seed=SEED,
     )
     if batch_aware:

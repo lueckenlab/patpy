@@ -1648,8 +1648,19 @@ class PaSCient(SupervisedSampleMethod):
             # receive higher loss via CrossEntropyLossViews's 1/w scheme).
             class_counts = [int((label_vals == c).sum()) for c in classes]
         else:
+            # Regression: z-score the target so MSE is on a unit scale.
+            # Without this, raw targets like ages (40-89) make the initial
+            # loss ~thousands and gradients explode into NaN within a few
+            # steps. We store the mean/std so ``_predict_native`` can
+            # de-normalise back to the original scale.
             n_classes = 1
-            y_map = {d: float(v) for d, v in zip(self.labels.index, label_vals, strict=True)}
+            float_vals = np.asarray(label_vals, dtype=np.float64)
+            self._regression_mean = float(np.nanmean(float_vals))
+            self._regression_std = float(np.nanstd(float_vals)) or 1.0
+            y_map = {
+                d: float((v - self._regression_mean) / self._regression_std)
+                for d, v in zip(self.labels.index, label_vals, strict=True)
+            }
             self._class_names = None
             class_counts = None
 
@@ -1719,6 +1730,8 @@ class PaSCient(SupervisedSampleMethod):
             enable_checkpointing=False,
             logger=False,
             enable_progress_bar=True,
+            gradient_clip_val=1.0,
+            gradient_clip_algorithm="norm",
         )
         self._pascient_model.train()
         trainer.fit(self._pascient_model, train_dataloaders=train_dl, val_dataloaders=val_dl)
@@ -2115,7 +2128,10 @@ class PaSCient(SupervisedSampleMethod):
             result[f"{label}_pred"] = [classes[i] for i in proba.argmax(axis=1)]
             return result
         else:
-            return pd.Series(preds_arr.ravel(), index=donor_ids, name=label)
+            # De-normalise the z-scored target back to the original scale.
+            mean = getattr(self, "_regression_mean", 0.0)
+            std = getattr(self, "_regression_std", 1.0)
+            return pd.Series(preds_arr.ravel() * std + mean, index=donor_ids, name=label)
 
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
         """Per-donor importance derived from the L2 norm of patient embeddings.

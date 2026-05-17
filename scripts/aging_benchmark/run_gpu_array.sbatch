@@ -28,6 +28,8 @@ REPO=/ictstr01/groups/luckylab/workspace/vladimir.shitov/patpy-aging-tutorial
 mkdir -p "$REPO/logs/aging_benchmark/full"
 cd "$REPO"
 
+export PYTHONUNBUFFERED=1
+
 echo "[$(date)] cell $SLURM_ARRAY_TASK_ID -> $DATASET / pascient on $(hostname)"
 nvidia-smi -L 2>&1 || true
 
