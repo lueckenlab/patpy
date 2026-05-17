@@ -1483,7 +1483,13 @@ class PaSCient(SupervisedSampleMethod):
         self._extract_embeddings(adata)
         self._fitted = True
 
-    def _build_model(self, n_genes: int, n_classes: int, class_counts: list[int] | None = None):
+    def _build_model(
+        self,
+        n_genes: int,
+        n_classes: int,
+        class_counts: list[int] | None = None,
+        task: str = "classification",
+    ):
         """Build a fresh PaSCient model from pascient component classes.
 
         Parameters
@@ -1491,17 +1497,21 @@ class PaSCient(SupervisedSampleMethod):
         n_genes
             Number of input genes.
         n_classes
-            Number of prediction outputs.
+            Number of prediction outputs (set to ``1`` for regression).
         class_counts
-            Per-class sample counts for loss weighting.  When provided,
-            ``CrossEntropyLossViews`` uses inverse counts so that
+            Per-class sample counts for loss weighting (classification only).
+            When provided, ``CrossEntropyLossViews`` uses inverse counts so
             under-represented classes receive higher loss.
+        task
+            ``"classification"`` (default) routes through
+            ``CrossEntropyLossViews``. ``"regression"`` swaps in a per-view
+            mean-squared error loss.
 
         Returns
         -------
         pascient.model.sample_predictor.SamplePredictor
             A ``SamplePredictor`` instance with the default PaSCient
-            architecture.
+            architecture and a task-appropriate prediction loss.
         """
         from functools import partial
         from types import SimpleNamespace
@@ -1525,16 +1535,36 @@ class PaSCient(SupervisedSampleMethod):
         latent_dim = self.latent_dim  # 1024
         emb_dim = self.patient_emb_dim  # 512
 
-        from pascient.components.losses import CrossEntropyLossViews
+        if task == "regression":
+            class _RegressionLoss(nn.Module):
+                """MSE between predicted scalar and target, averaged over the (single) view."""
 
-        # Minimal losses config expected by SamplePredictor.init_losses()
-        # CrossEntropyLossViews internally inverts the weights (1/w),
-        # so passing class counts upweights rare classes.
-        loss_kwargs = {"weight": class_counts} if class_counts is not None else {}
+                def __init__(self):
+                    super().__init__()
+                    self.mse = nn.MSELoss()
+
+                def forward(self, logits, target):
+                    # logits: (B, V, 1) where V = #views. target: (B,) or (B, 1).
+                    if logits.ndim == 3 and logits.shape[-1] == 1:
+                        logits = logits.squeeze(-1)
+                    if logits.ndim == 2 and logits.shape[1] == 1:
+                        logits = logits.squeeze(1)
+                    target = target.to(logits.dtype).view(logits.shape)
+                    return self.mse(logits, target)
+
+            loss_factory = _RegressionLoss
+        else:
+            from pascient.components.losses import CrossEntropyLossViews
+
+            # CrossEntropyLossViews internally inverts the weights (1/w),
+            # so passing class counts upweights rare classes.
+            loss_kwargs = {"weight": class_counts} if class_counts is not None else {}
+            loss_factory = partial(CrossEntropyLossViews, **loss_kwargs)
+
         losses = SimpleNamespace(
             sample_prediction_loss=SimpleNamespace(
                 weight=1.0,
-                loss_fn=partial(CrossEntropyLossViews, **loss_kwargs),
+                loss_fn=loss_factory,
                 labels=self.label_keys[:1],
             ),
         )
@@ -1626,7 +1656,9 @@ class PaSCient(SupervisedSampleMethod):
         self._trained_label = label_key
 
         if self._pascient_model is None:
-            self._pascient_model = self._build_model(n_genes, n_classes, class_counts=class_counts)
+            self._pascient_model = self._build_model(
+                n_genes, n_classes, class_counts=class_counts, task=task,
+            )
 
         # -- Dataset that produces SampleBatch per donor ----------------
 
