@@ -512,6 +512,249 @@ specific composition shifts (different annotation granularity, recruiting
 bias) rather than biology.
 """)
 
+# ---------------------------------------------------------------------------
+# SampleCLR attention deep-dive
+# ---------------------------------------------------------------------------
+
+md(r"""
+## Inside SampleCLR — what does fine-tuning move?
+
+SampleCLR has two stages:
+
+- **SSL (self-supervised pretrain)** sees only cell-by-cell contrastive
+  signal — no donor labels. The aggregator learns which cells inside a
+  donor are most informative *for distinguishing donors from each other*,
+  not for predicting age in particular.
+- **FT (supervised fine-tune)** adds a regression head on age. Gradient
+  flow from the age loss reshapes the aggregator's attention so that the
+  cells most predictive of age get more weight.
+
+We snapshot the aggregator at both stages on the **same 500 cells per
+donor** and dump per-cell, per-head attention weights to a parquet — that
+lets us ask three biological questions:
+
+1. How does the held-out age score change between SSL and FT?
+2. Which immune cell types do the attention heads focus on, and how does
+   that shift with FT?
+3. Which (cell type, head) combinations correlate with donor age, and
+   what genes drive that head's attention inside those cells?
+""")
+
+code(r"""
+def load_attention(dataset, suffix=SUFFIX):
+    d = BENCH_ROOT / f"{dataset}{suffix}" / "sampleclr_attention"
+    if not (d / "attention_ft.parquet").exists():
+        return None
+    return {
+        "att_ssl":   pd.read_parquet(d / "attention_ssl.parquet"),
+        "att_ft":    pd.read_parquet(d / "attention_ft.parquet"),
+        "meta":      pd.read_parquet(d / "meta.parquet"),
+        "knn":       pd.read_csv(d / "knn_scores.csv"),
+        "samples":   [str(s) for s in np.load(d / "samples.npy", allow_pickle=True)],
+        "corr":      (pd.read_parquet(d / "celltype_head_age_corr.parquet")
+                      if (d / "celltype_head_age_corr.parquet").exists() else None),
+        "gene_ft":   (pd.read_parquet(d / "gene_attention_corr_ft.parquet")
+                      if (d / "gene_attention_corr_ft.parquet").exists() else None),
+        "gene_ssl":  (pd.read_parquet(d / "gene_attention_corr_ssl.parquet")
+                      if (d / "gene_attention_corr_ssl.parquet").exists() else None),
+        "runtime":   json.loads((d / "runtime.json").read_text()),
+    }
+
+att_aging = load_attention("aging")
+att_onek1k = load_attention("onek1k")
+for tag, art in [("aging", att_aging), ("onek1k", att_onek1k)]:
+    if art is None:
+        print(f"{tag}: run scripts/aging_benchmark/run_sampleclr_attention.py --dataset {tag} first.")
+    else:
+        rt = art["runtime"]
+        print(f"{tag}: SSL R² = {rt.get('score_age_r2_ssl'):.3f}  →  FT R² = {rt.get('score_age_r2_ft'):.3f}")
+""")
+
+md(r"""
+### 1. SSL vs FT — does fine-tuning actually help on this task?
+""")
+
+code(r"""
+def plot_ssl_vs_ft_scores(arts, datasets):
+    rows = []
+    for ds, art in zip(datasets, arts):
+        if art is None: continue
+        rt = art["runtime"]
+        rows.append({"dataset": ds, "stage": "ssl", "R²": rt["score_age_r2_ssl"], "Spearman": rt["score_age_spearman_ssl"]})
+        rows.append({"dataset": ds, "stage": "ft",  "R²": rt["score_age_r2_ft"],  "Spearman": rt["score_age_spearman_ft"]})
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.5))
+    for ax, metric in zip(axes, ["R²", "Spearman"]):
+        df.pivot(index="dataset", columns="stage", values=metric).plot(
+            kind="bar", ax=ax, color={"ssl": "#888", "ft": "#C44E52"})
+        ax.axhline(0, color="k", lw=0.5)
+        ax.set_ylabel(metric); ax.set_title(f"{metric} for held-out age")
+        ax.legend(title="")
+    plt.tight_layout(); plt.show()
+    return df
+
+ssl_ft_df = plot_ssl_vs_ft_scores([att_aging, att_onek1k], ["aging", "onek1k"])
+ssl_ft_df.round(3) if ssl_ft_df is not None else None
+""")
+
+md(r"""
+The SSL embedding alone is not very age-aware — it organises donors by
+cell-state composition shifts that contrastive learning happens to pick
+up. Fine-tuning on age moves the score sharply upward in both cohorts,
+which is what we'd expect: the supervised head is now actively reshaping
+the aggregator's attention.
+
+### 2. Attention distribution across cell types — SSL vs FT
+""")
+
+code(r"""
+def plot_attention_by_celltype(art, dataset_label, head=0, top_k=10):
+    if art is None: return
+    head_col = f"head_{head}"
+    rows = []
+    for stage, key in [("ssl", "att_ssl"), ("ft", "att_ft")]:
+        df = art[key]
+        # Mean attention per cell type
+        m = df.groupby("cell_type", observed=True)[head_col].mean()
+        for ct, v in m.items():
+            rows.append({"stage": stage, "cell_type": ct, "mean_attention": v})
+    cmp = (pd.DataFrame(rows).pivot(index="cell_type", columns="stage", values="mean_attention")
+           .dropna()
+           .assign(delta=lambda d: (d["ft"] - d["ssl"]).abs())
+           .sort_values("delta", ascending=False).head(top_k))
+    fig, ax = plt.subplots(figsize=(7, max(3, 0.32 * len(cmp))))
+    y = np.arange(len(cmp))
+    ax.barh(y - 0.2, cmp["ssl"], height=0.4, color="#888888", label="SSL")
+    ax.barh(y + 0.2, cmp["ft"],  height=0.4, color="#C44E52", label="FT")
+    ax.set_yticks(y); ax.set_yticklabels(cmp.index)
+    ax.set_xlabel(f"mean per-cell attention (head {head})")
+    ax.set_title(f"{dataset_label} — {head_col}: top cell types reshaped by FT")
+    ax.invert_yaxis(); ax.legend()
+    plt.tight_layout(); plt.show()
+    return cmp
+
+plot_attention_by_celltype(att_aging, "AIFI aging", head=0, top_k=10)
+plot_attention_by_celltype(att_onek1k, "OneK1K", head=0, top_k=10)
+""")
+
+md(r"""
+### 3. (cell type × head) correlations with age
+
+For each attention head and each cell type we compute one number per
+donor — the mean attention that the head gives to cells of that type —
+and then correlate that vector against the donor's age. Cells where the
+correlation is far from zero are immune populations where the *amount of
+attention the model spends* tracks age.
+""")
+
+code(r"""
+def heatmap_corr(art, dataset_label, stage="ft", top_n_celltypes=20):
+    if art is None or art.get("corr") is None: return
+    corr = art["corr"]
+    df = corr.query("stage == @stage").pivot_table(index="cell_type", columns="head", values="r")
+    # Pick the top-N cell types by max |r| across heads
+    df = df.reindex(df.abs().max(axis=1).sort_values(ascending=False).head(top_n_celltypes).index)
+    fig, ax = plt.subplots(figsize=(8, max(4, 0.32 * len(df))))
+    sns.heatmap(df, ax=ax, cmap="RdBu_r", center=0, vmin=-0.5, vmax=0.5,
+                cbar_kws={"label": "Pearson r(mean attention, age)"})
+    ax.set_title(f"{dataset_label} — (cell type × head) age correlation, stage={stage.upper()}")
+    plt.tight_layout(); plt.show()
+    return df
+
+heatmap_corr(att_aging,  "AIFI aging",  stage="ft", top_n_celltypes=15)
+heatmap_corr(att_onek1k, "OneK1K",      stage="ft", top_n_celltypes=15)
+""")
+
+code(r"""
+# Compare SSL vs FT for the SAME (cell_type, head) — what fine-tuning created
+def ssl_vs_ft_scatter(art, dataset_label):
+    if art is None or art.get("corr") is None: return
+    c = (art["corr"].pivot_table(index=["cell_type", "head"], columns="stage", values="r")
+          .reset_index().dropna(subset=["ssl", "ft"]))
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.scatter(c["ssl"], c["ft"], s=20, color="#4C72B0", alpha=0.6, edgecolor="black", lw=0.3)
+    # Annotate the top-|r| FT outliers
+    top = c.assign(d=(c["ft"] - c["ssl"]).abs()).sort_values("d", ascending=False).head(8)
+    for _, row in top.iterrows():
+        ax.annotate(f"{row['cell_type'][:20]}/{row['head']}",
+                    (row["ssl"], row["ft"]), xytext=(5, 3),
+                    textcoords="offset points", fontsize=7)
+    lim = max(c["ssl"].abs().max(), c["ft"].abs().max()) * 1.1
+    ax.plot([-lim, lim], [-lim, lim], "k--", lw=0.5)
+    ax.axhline(0, color="grey", lw=0.5); ax.axvline(0, color="grey", lw=0.5)
+    ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
+    ax.set_xlabel("SSL: r(mean attention, age)"); ax.set_ylabel("FT: r(mean attention, age)")
+    ax.set_title(f"{dataset_label}: SSL vs FT age correlation per (cell type, head)")
+    plt.tight_layout(); plt.show()
+
+ssl_vs_ft_scatter(att_aging,  "AIFI aging")
+ssl_vs_ft_scatter(att_onek1k, "OneK1K")
+""")
+
+md(r"""
+Points far from the diagonal are (cell type, head) combinations whose
+correlation with age changed between SSL and FT — exactly the
+combinations that fine-tuning *created* as age-predictive features.
+
+### 4. Genes that drive the age-correlated attention
+
+For each top (cell type, head) hit on the AIFI cohort, we computed a
+per-cell Pearson correlation between attention weight in that head and
+each gene's log-normalised expression among cells of that type. The top
+genes per hit are the markers the model is implicitly looking for inside
+that cell type when it boosts or suppresses attention.
+""")
+
+code(r"""
+def top_genes_panel(art, dataset_label, top_hits=6, n_genes=10):
+    if art is None or art.get("gene_ft") is None: return
+    g = art["gene_ft"].copy()
+    # Pick the top hits by |head_age_r|
+    top = (g.groupby(["cell_type", "head"], as_index=False)["head_age_r"].first()
+           .sort_values("head_age_r", key=lambda s: s.abs(), ascending=False)
+           .head(top_hits))
+    cols = min(3, top_hits)
+    rows = int(np.ceil(top_hits / cols))
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 4, rows * 3.2), squeeze=False)
+    for ax, (_, row) in zip(axes.ravel(), top.iterrows()):
+        sub = (g[(g["cell_type"] == row["cell_type"]) & (g["head"] == row["head"])]
+               .sort_values("r", key=lambda s: s.abs(), ascending=False).head(n_genes))
+        colors = ["#1f77b4" if r < 0 else "#d62728" for r in sub["r"]]
+        ax.barh(sub["gene"], sub["r"], color=colors)
+        ax.axvline(0, color="k", lw=0.5)
+        title = f"{row['cell_type'][:30]}\n{row['head']}  age-r={row['head_age_r']:.2f}"
+        ax.set_title(title, fontsize=9)
+        ax.set_xlabel("r(att, gene)")
+        ax.invert_yaxis()
+    for ax in axes.ravel()[len(top):]:
+        ax.set_visible(False)
+    plt.tight_layout(); plt.show()
+    return top
+
+top_genes_panel(att_aging,  "AIFI aging",  top_hits=6, n_genes=10)
+top_genes_panel(att_onek1k, "OneK1K",      top_hits=6, n_genes=10)
+""")
+
+md(r"""
+**How to read these bar plots.** Red bars mean *more attention is given to
+cells that express this gene more*. Blue bars mean *more attention goes
+to cells that under-express this gene*. The header line gives the cell
+type, the head index, and the (cell type, head)'s correlation with age.
+
+For example, an NK-cell head whose attention is positively correlated
+with age (header `r>0`) and whose top red bars are `GZMB`, `PRF1`, `NKG7`
+is the model implicitly saying: *as donors age, I find more
+cytotoxic-program NK cells, and I weight them up*. The same shorthand
+generalises: terminal-effector markers in CD8 T-cell heads, classical
+monocyte activation markers in CD14+ monocyte heads, etc.
+
+This is the same biology that immune-aging studies find with manual
+DE testing — only here we read it off the attention mass of a small
+neural network that was trained end-to-end on age regression.
+""")
+
 md(r"""
 ## Take-aways
 
