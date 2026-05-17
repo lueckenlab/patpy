@@ -885,8 +885,13 @@ biological question.
   of in-domain donors fix the transfer gap?
 - AIFI in-sample for reference.
 
-The 10% is donor-stratified random; the 90% test set never sees the
-fine-tune step.
+The 10% subset is **age-stratified**: we bin OneK1K donors into age
+quintiles and sample an equal number from each bin so the fine-tune
+set spans the full 19–97 age range. A plain random 10% would inherit
+OneK1K's natural age distribution and under-represent young donors —
+exactly the cohort that the AIFI-trained models (which only saw 40–89)
+struggle with. The 90% held-out test set never sees the fine-tune
+step.
 """)
 
 code(r'''
@@ -942,17 +947,42 @@ aifi_t = filter_and_subsample(adata, sample_size_threshold=0,
 one_t = filter_and_subsample(adata_one, sample_size_threshold=0,
                               max_cells_per_donor=N_CELLS_TRANSFER)
 
-# Donor-level 10% / 90% split for the OneK1K transfer experiment
-one_donors_all = list(pd.unique(one_t.obs["donor"]))
+# Age-stratified 10/90 split. Plain random sampling would inherit OneK1K's
+# natural age distribution (slightly older-biased) and leave young donors
+# under-represented in the fine-tune set; we bin donors into age quintiles
+# and pick equal numbers from each bin so the fine-tune subset spans the
+# full 19-97 range.
+one_donors_all = pd.Index(pd.unique(one_t.obs["donor"]))
+donor_age_one = donor_meta_one["age"].reindex(one_donors_all).astype(float)
+n_ft = max(5, int(round(len(one_donors_all) * FINETUNE_FRACTION)))
+n_bins = min(5, n_ft)
+age_bins = pd.qcut(donor_age_one, q=n_bins, duplicates="drop")
+per_bin = max(1, n_ft // len(age_bins.cat.categories))
 rng_split = np.random.default_rng(SEED)
-perm = rng_split.permutation(len(one_donors_all))
-n_ft = max(2, int(round(len(one_donors_all) * FINETUNE_FRACTION)))
-ft_set = set(np.asarray(one_donors_all)[perm[:n_ft]].tolist())
+ft_picks = []
+for bin_label in age_bins.cat.categories:
+    in_bin = donor_age_one.index[age_bins == bin_label]
+    k = min(per_bin, len(in_bin))
+    if k > 0:
+        ft_picks.extend(rng_split.choice(np.asarray(in_bin), size=k, replace=False).tolist())
+ft_set = set(ft_picks)
 one_ft = one_t[one_t.obs["donor"].isin(ft_set)].copy()
 one_test = one_t[~one_t.obs["donor"].isin(ft_set)].copy()
+
+ft_ages = donor_age_one.reindex(ft_picks)
 print(f"AIFI training set:        {aifi_t.n_obs:,} cells  ({aifi_t.obs['donor'].nunique()} donors)")
-print(f"OneK1K fine-tune set:     {one_ft.n_obs:,} cells  ({one_ft.obs['donor'].nunique()} donors)")
+print(f"OneK1K fine-tune set:     {one_ft.n_obs:,} cells  ({len(ft_picks)} donors, "
+      f"{n_bins} age quintiles x ~{per_bin}/bin, age {ft_ages.min():.0f}-{ft_ages.max():.0f})")
 print(f"OneK1K held-out test set: {one_test.n_obs:,} cells  ({one_test.obs['donor'].nunique()} donors)")
+
+# Quick visual: show fine-tune age distribution vs the full OneK1K
+fig, ax = plt.subplots(figsize=(8, 3))
+ax.hist(donor_age_one, bins=40, alpha=0.4, color="grey", label="OneK1K all donors")
+ax.hist(ft_ages, bins=20, alpha=0.7, color="#C44E52",
+        label=f"FT subset ({len(ft_picks)} donors, age-quintile-balanced)")
+ax.set_xlabel("Age (years)"); ax.set_ylabel("Donor count")
+ax.set_title("Fine-tune subset covers the OneK1K age range uniformly")
+ax.legend(); plt.tight_layout(); plt.show()
 ''')
 
 code(r'''
