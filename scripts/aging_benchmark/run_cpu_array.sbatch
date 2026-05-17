@@ -11,11 +11,11 @@
 #SBATCH --job-name=aging-cpu
 #SBATCH --output=logs/aging_benchmark/full/%A_%a.out
 #SBATCH --error=logs/aging_benchmark/full/%A_%a.err
-#SBATCH --time=20:00:00
+#SBATCH --time=23:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
 #SBATCH --partition=cpu_p
-#SBATCH --qos=cpu_long
+#SBATCH --qos=cpu_normal
 #SBATCH --nice=10000
 
 set -eo pipefail

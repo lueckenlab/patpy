@@ -98,9 +98,10 @@ print("patpy", patpy.__version__)
 
 code(r"""
 # Pre-computed benchmark artifacts produced by scripts/aging_benchmark/run_method.py.
-# Change ``SUFFIX = "_smoke"`` to inspect the small-data dry run before the full run.
+# Set ``BENCH_SUFFIX="_smoke"`` (via env var or below) to inspect the dry-run subset.
+import os
 BENCH_ROOT = Path("../../../data/aging_benchmark")
-SUFFIX = ""   # set to "_smoke" to use the dry-run subset
+SUFFIX = os.environ.get("BENCH_SUFFIX", "")
 DATASETS = ["aging", "onek1k"]
 METHODS  = ["pseudobulk", "composition", "gloscope", "sampleclr", "pascient", "mixmil"]
 
@@ -116,7 +117,7 @@ METHOD_COLORS = {
 
 def load_artifact(dataset, method, suffix=SUFFIX):
     d = BENCH_ROOT / f"{dataset}{suffix}" / method
-    if not d.exists():
+    if not (d / "embedding.npy").exists():
         return None
     samples = np.load(d / "samples.npy", allow_pickle=True)
     return {
@@ -188,16 +189,17 @@ md("### Pre-existing biology: composition shifts with age")
 code(r"""
 # Cell-type fractions per donor (AIFI_L2 — 28 immune subsets).
 ct = pd.crosstab(obs["donor"], obs["AIFI_L2"], normalize="index")
+ct.columns = list(map(str, ct.columns))   # drop pd.Categorical column dtype
 # Bin donors by age decade and average composition
 donor_meta["age_decade"] = pd.cut(donor_meta.age, bins=[39,50,60,70,80,90],
                                   labels=["40s","50s","60s","70s","80s+"], right=False)
 ct = ct.join(donor_meta["age_decade"]).groupby("age_decade", observed=True).mean()
 
-# Show the cell types whose mean fraction changes the most across decades
+# Cell types whose mean fraction changes the most across decades
 delta = (ct.iloc[-1] - ct.iloc[0]).sort_values()
 top_movers = list(delta.head(4).index) + list(delta.tail(4).index)
-ct[top_movers].plot(kind="bar", stacked=False, figsize=(10, 4),
-                     colormap="coolwarm")
+ct.loc[:, top_movers].plot(kind="bar", stacked=False, figsize=(10, 4),
+                            colormap="coolwarm")
 plt.ylabel("Mean fraction per donor"); plt.legend(loc="center left", bbox_to_anchor=(1, 0.5))
 plt.title("Cell-type fractions that change most with age (AIFI_L2)")
 plt.tight_layout(); plt.show()
@@ -218,27 +220,32 @@ and a KNN-regression score for held-out age (80/20 donor split, k=5). Below
 we just **load** those artifacts; the actual fits live in the script.
 """)
 
-code(r"""
-def plot_method_umap(art, method, metadata_cols=("age", "sex", "batch")):
-    \"\"\"UMAP of the donor embedding coloured by each metadata column.\"\"\"
-    meta = art["meta"].reset_index().rename(columns={"index": "donor"})
+code(r'''
+def plot_method_umap(art, method, metadata_cols=("age", "sex", "batch_id")):
+    """UMAP of the donor embedding coloured by each metadata column."""
+    emb = np.asarray(art["embedding"], dtype="float32")
+    # Replace NaN/inf from poorly-trained models so sklearn's neighbours don't crash.
+    if not np.isfinite(emb).all():
+        col_mean = np.nanmean(np.where(np.isfinite(emb), emb, np.nan), axis=0)
+        col_mean = np.where(np.isfinite(col_mean), col_mean, 0.0)
+        emb = np.where(np.isfinite(emb), emb, col_mean[None, :])
+    meta = art["meta"].copy()
     samples = art["samples"]
-    meta = meta.set_index(meta.columns[0]).reindex(samples)
-    # Build a tiny adata so we can use sc.tl.umap
-    a = ad.AnnData(X=art["embedding"].astype("float32"), obs=meta)
+    meta.index = meta.index.astype(str)
+    meta = meta.reindex(samples)
+    a = ad.AnnData(X=emb, obs=meta)
     a.obs_names = samples
     sc.pp.neighbors(a, n_neighbors=min(15, a.n_obs - 1), use_rep="X")
     sc.tl.umap(a, random_state=0)
-    fig, axes = plt.subplots(1, len(metadata_cols), figsize=(4 * len(metadata_cols), 3.5))
-    if len(metadata_cols) == 1:
-        axes = [axes]
-    for ax, col in zip(axes, metadata_cols):
-        if col not in a.obs.columns:
-            ax.set_visible(False)
-            continue
-        sc.pl.umap(a, color=col, ax=ax, show=False, frameon=False, size=80, title=f"{method} · {col}")
+    cols = [c for c in metadata_cols if c in a.obs.columns]
+    if not cols:
+        return
+    fig, axes = plt.subplots(1, len(cols), figsize=(4 * len(cols), 3.5), squeeze=False)
+    for ax, col in zip(axes.ravel(), cols):
+        sc.pl.umap(a, color=col, ax=ax, show=False, frameon=False, size=80,
+                   title=f"{method} · {col}")
     plt.tight_layout(); plt.show()
-""")
+''')
 
 method_blurbs = {
     "pseudobulk": "**Pseudobulk** averages every cell's `X_pca` embedding within a donor and uses Euclidean distances between those means. Cheap, interpretable, ignores within-donor heterogeneity.",
@@ -256,7 +263,10 @@ art = load_artifact("aging", "{m}")
 if art is None:
     print("Run scripts/aging_benchmark/run_method.py --dataset aging --method {m} first.")
 else:
-    print(f"emb={{art['embedding'].shape}}  fit_seconds={{art['runtime'].get('t_fit_sec'):.1f}}")
+    rt = art["runtime"]
+    fit = rt.get("t_fit_sec")
+    print(f"emb={{art['embedding'].shape}}  status={{rt.get('status')}}  "
+          f"fit_seconds={{fit if fit is not None else 'NA'}}")
     print(art["knn"].to_string(index=False))
     plot_method_umap(art, "{m}", metadata_cols=["age", "sex", "batch_id"])
 """)
@@ -356,9 +366,9 @@ Both questions reduce to per-feature Pearson correlations between a column
 of the donor-level matrix and the age vector. We then validate on OneK1K.
 """)
 
-code(r"""
+code(r'''
 def feature_vs_age(emb, samples, donor_age, top_n=10):
-    \"\"\"Pearson correlation between every feature column and donor age.\"\"\"
+    """Pearson correlation between every feature column and donor age."""
     df = pd.DataFrame(emb, index=samples)
     age = donor_age.reindex(samples).astype(float).values
     keep = ~np.isnan(age)
@@ -366,25 +376,35 @@ def feature_vs_age(emb, samples, donor_age, top_n=10):
     rs = df.apply(lambda c: pearsonr(c, age)[0])
     ps = df.apply(lambda c: pearsonr(c, age)[1])
     return pd.DataFrame({"r": rs, "p": ps}).sort_values("r")
-""")
+''')
 
 code(r"""
-# Cell types correlated with age — using the CLR composition embedding
-comp_age = load_artifact("aging", "composition")
-if comp_age is not None:
-    age_per_donor = comp_age["meta"]["age"]
-    cell_types = pd.Index(comp_age["meta"].columns).tolist()
-    # The embedding columns are AIFI_L2 cell types; reconstruct that index
-    # from the run_method.py pipeline (CellGroupComposition stores them in
-    # ``sample_representation.columns``; we don't have it here so we just
-    # number the columns).
-    corr_comp = feature_vs_age(comp_age["embedding"], comp_age["samples"], age_per_donor)
-    top_pos = corr_comp.tail(5)
-    top_neg = corr_comp.head(5)
-    print("Composition columns most negatively correlated with age (decrease with age):")
-    print(top_neg.round(3))
-    print("\nComposition columns most positively correlated with age (increase with age):")
-    print(top_pos.round(3))
+# Cell types correlated with age — we use the per-donor AIFI_L2 fractions we
+# already built for the intro plot, so the columns carry their original
+# cell-type names (the saved composition embedding is just unnamed numeric).
+ct_age = ct.copy()        # decade × cell_type means
+# Per-donor fractions, not decade-averaged, for a Pearson per cell type:
+donor_ct = pd.crosstab(obs["donor"], obs["AIFI_L2"], normalize="index")
+donor_ct.columns = list(map(str, donor_ct.columns))
+donor_ct = donor_ct.join(donor_meta["age"])
+ages = donor_ct.pop("age")
+corr_ct = donor_ct.apply(lambda c: pd.Series({
+    "r": pearsonr(c, ages)[0],
+    "p": pearsonr(c, ages)[1],
+})).T.sort_values("r")
+print("Cell types whose fraction DECREASES with age:")
+print(corr_ct.head(5).round(3))
+print("\nCell types whose fraction INCREASES with age:")
+print(corr_ct.tail(5).round(3))
+
+fig, ax = plt.subplots(figsize=(8, 5))
+sub = pd.concat([corr_ct.head(5), corr_ct.tail(5)])
+colors = ["#1f77b4" if r < 0 else "#d62728" for r in sub["r"]]
+ax.barh(sub.index, sub["r"], color=colors)
+ax.axvline(0, color="k", lw=0.5)
+ax.set_xlabel("Pearson r between donor cell-type fraction and age")
+ax.set_title("AIFI cohort — top compositional aging signatures")
+plt.tight_layout(); plt.show()
 """)
 
 code(r"""
@@ -426,12 +446,31 @@ plt.xticks(rotation=15); plt.tight_layout(); plt.show()
 """)
 
 code(r"""
-# Check OneK1K composition correlations and compare to AIFI's
-comp_one = load_artifact("onek1k", "composition")
-if comp_one is not None:
-    corr_one = feature_vs_age(comp_one["embedding"], comp_one["samples"], comp_one["meta"]["age"])
-    print("OneK1K composition columns sorted by correlation with age:")
-    print(pd.concat([corr_one.head(3), corr_one.tail(3)]).round(3))
+# Cross-cohort: same exercise on OneK1K. We need the original adata's cell
+# types to recover names — the saved embedding has unnamed columns.
+ONE_PATH = "/ictstr01/groups/luckylab/workspace/vladimir.shitov/patpy/data/onek1k_processed.h5ad"
+one = ad.read_h5ad(ONE_PATH, backed="r")
+one_obs = one.obs[["donor_id", "age", "cell_type"]].copy()
+one.file.close()
+donor_meta_one = one_obs.groupby("donor_id", observed=True).agg(age=("age", "first"))
+one_ct = pd.crosstab(one_obs["donor_id"], one_obs["cell_type"], normalize="index")
+one_ct.columns = list(map(str, one_ct.columns))
+one_ct = one_ct.join(donor_meta_one)
+one_ages = one_ct.pop("age")
+corr_one = one_ct.apply(lambda c: pd.Series({
+    "r": pearsonr(c, one_ages)[0],
+    "p": pearsonr(c, one_ages)[1],
+})).T.sort_values("r")
+print("OneK1K — cell types most correlated with age:")
+print(pd.concat([corr_one.head(5), corr_one.tail(5)]).round(3))
+""")
+md(r"""
+**Cross-cohort take-away.** Compare the two top-mover tables: cell types
+whose fraction shifts with age in both cohorts (e.g. naive CD4 / CD8 T
+cells declining, GZMB+ effector populations rising) are the
+reproducible immune-aging signal. Cohort-only movers may reflect study-
+specific composition shifts (different annotation granularity, recruiting
+bias) rather than biology.
 """)
 
 md(r"""
