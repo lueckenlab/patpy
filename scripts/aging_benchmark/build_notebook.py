@@ -878,11 +878,23 @@ code(r'''
 from sklearn.decomposition import PCA as _SkPCA
 
 def build_shared_pca(aifi, onek1k, n_pcs=50, fit_subsample=300_000, seed=SEED):
-    """Recompute PCA on AIFI restricted to shared genes; project both cohorts."""
-    shared = sorted(set(aifi.var_names.astype(str)) & set(onek1k.var_names.astype(str)))
-    print(f"shared HVGs: {len(shared)}")
+    """Recompute PCA on AIFI restricted to shared genes; project both cohorts.
+
+    AIFI stores gene symbols in var_names; OneK1K stores Ensembl IDs in
+    var_names with the symbol in var["feature_name"]. We match on symbol.
+    """
+    aifi_symbols = aifi.var_names.astype(str)
+    one_symbols = (onek1k.var["feature_name"].astype(str)
+                   if "feature_name" in onek1k.var.columns
+                   else onek1k.var_names.astype(str))
+    shared = sorted(set(aifi_symbols) & set(one_symbols))
+    if len(shared) < 200:
+        raise RuntimeError(f"too few shared gene symbols: {len(shared)}")
+    print(f"shared gene symbols: {len(shared)}")
     aifi_idx = aifi.var_names.get_indexer(shared)
-    onek1k_idx = onek1k.var_names.get_indexer(shared)
+    one_pos_by_symbol = pd.Series(np.arange(onek1k.n_vars), index=one_symbols.values)
+    onek1k_idx = one_pos_by_symbol.reindex(shared).values.astype(int)
+
     Xa = aifi.X[:, aifi_idx]
     if hasattr(Xa, "toarray"): Xa = Xa.toarray()
     Xa = np.asarray(Xa, dtype=np.float32)

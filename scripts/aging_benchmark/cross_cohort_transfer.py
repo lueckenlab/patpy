@@ -85,14 +85,29 @@ def cap_cells_per_donor(adata: ad.AnnData, max_cells: int, seed: int = SEED) -> 
     return adata[np.sort(np.concatenate(keep))].copy()
 
 
-def fit_shared_pca(aifi: ad.AnnData, shared_genes: list[str], n_pcs: int = N_PCS) -> tuple[PCA, np.ndarray, np.ndarray]:
+def shared_gene_names(aifi: ad.AnnData, onek1k: ad.AnnData) -> tuple[list[str], np.ndarray, np.ndarray]:
+    """Intersect AIFI gene symbols with OneK1K (which stores symbols in ``var['feature_name']``).
+
+    Returns the shared gene symbols, AIFI column indices for them, OneK1K column
+    indices for them (in the same order).
+    """
+    aifi_symbols = aifi.var_names.astype(str)
+    one_symbols = onek1k.var["feature_name"].astype(str) if "feature_name" in onek1k.var.columns else onek1k.var_names.astype(str)
+    shared = sorted(set(aifi_symbols) & set(one_symbols))
+    log(f"shared gene symbols: {len(shared)} (AIFI {len(aifi_symbols)}, OneK1K {one_symbols.nunique()})")
+    aifi_idx = aifi.var_names.get_indexer(shared)
+    one_pos_by_symbol = pd.Series(np.arange(onek1k.n_vars), index=one_symbols.values)
+    one_idx = one_pos_by_symbol.reindex(shared).values.astype(int)
+    return shared, aifi_idx, one_idx
+
+
+def fit_shared_pca(aifi: ad.AnnData, aifi_idx: np.ndarray, n_pcs: int = N_PCS) -> tuple[PCA, np.ndarray]:
     """Recompute PCA on AIFI restricted to shared genes."""
-    idx = aifi.var_names.get_indexer(shared_genes)
-    X = aifi.X[:, idx]
+    X = aifi.X[:, aifi_idx]
     if hasattr(X, "toarray"):
         X = X.toarray()
     X = np.asarray(X, dtype=np.float32)
-    log(f"fitting PCA on AIFI[:, shared]: shape={X.shape}  (will use IncrementalPCA-like sklearn PCA(svd_solver='auto'))")
+    log(f"fitting PCA on AIFI[:, shared]: shape={X.shape}")
     # Sample a subset for fitting if memory is a problem
     fit_sample = X
     if X.shape[0] > 300_000:
@@ -103,7 +118,7 @@ def fit_shared_pca(aifi: ad.AnnData, shared_genes: list[str], n_pcs: int = N_PCS
     pca = PCA(n_components=n_pcs, svd_solver="randomized", random_state=SEED)
     pca.fit(fit_sample)
     log(f"  PCA fit done; cumulative variance = {pca.explained_variance_ratio_.sum():.3f}")
-    return pca, X, idx
+    return pca, X
 
 
 def project(X: np.ndarray | "scipy.sparse.spmatrix", pca: PCA) -> np.ndarray:
@@ -221,19 +236,19 @@ def main() -> int:
         onek1k = load_onek1k()
         log(f"OneK1K: {onek1k.n_obs:,} cells x {onek1k.n_vars} genes, {onek1k.obs['donor'].nunique()} donors")
 
-        # 1. Shared genes
-        shared = sorted(set(aifi.var_names.astype(str)) & set(onek1k.var_names.astype(str)))
-        log(f"shared HVGs: {len(shared)}  (AIFI has {aifi.n_vars}, OneK1K has {onek1k.n_vars})")
+        # 1. Shared genes (AIFI uses gene symbols; OneK1K stores symbols in
+        #    var["feature_name"] and var_names as Ensembl IDs).
+        shared, aifi_idx, onek1k_idx = shared_gene_names(aifi, onek1k)
+        if len(shared) < 200:
+            raise SystemExit(f"too few shared genes: {len(shared)} — check naming convention.")
 
         # 2. Fit PCA on AIFI restricted to shared genes
-        pca, aifi_X_shared, aifi_idx = fit_shared_pca(aifi, shared, n_pcs=N_PCS)
+        pca, aifi_X_shared = fit_shared_pca(aifi, aifi_idx, n_pcs=N_PCS)
 
         # 3. Project AIFI + OneK1K into shared PC space
         log("=== Projecting AIFI + OneK1K into shared PCA space ===")
         aifi.obsm["X_pca_shared"] = pca.transform(aifi_X_shared).astype(np.float32)
         del aifi_X_shared; gc.collect()
-        onek1k_idx = onek1k.var_names.get_indexer(shared)
-        # OneK1K is sparse — densify in chunks to avoid blowing up memory.
         log(f"  densifying OneK1K[:, shared] of shape ({onek1k.n_obs}, {len(shared)})")
         X_one = onek1k.X[:, onek1k_idx]
         if hasattr(X_one, "toarray"):
