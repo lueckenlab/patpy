@@ -464,6 +464,45 @@ corr_one = one_ct.apply(lambda c: pd.Series({
 print("OneK1K — cell types most correlated with age:")
 print(pd.concat([corr_one.head(5), corr_one.tail(5)]).round(3))
 """)
+
+code(r"""
+# Identify cell-type families consistent across cohorts. AIFI_L2 and OneK1K
+# cell_type are different vocabularies, so we map by lower-cased substring.
+def family(name):
+    n = str(name).lower()
+    if "naive" in n and ("cd4" in n or "t4" in n): return "CD4_naive"
+    if "naive" in n and ("cd8" in n or "t8" in n): return "CD8_naive"
+    if "tem" in n or "effector" in n or "gzmb" in n: return "T_effector"
+    if "treg" in n: return "Treg"
+    if "naive b" in n or "b_naive" in n: return "B_naive"
+    if "memory b" in n or "b mem" in n: return "B_memory"
+    if "monocyte" in n and ("cd16" in n or "non-classical" in n): return "Mono_CD16"
+    if "monocyte" in n: return "Mono_classical"
+    if "nk" in n: return "NK"
+    if "mait" in n or "gdt" in n: return "MAIT_gdT"
+    if "dc" in n or "dendritic" in n: return "DC"
+    if "plasma" in n: return "plasma"
+    return None
+
+aifi_by_fam = corr_ct.assign(family=corr_ct.index.map(family)).dropna(subset=["family"]).groupby("family")["r"].mean()
+one_by_fam = corr_one.assign(family=corr_one.index.map(family)).dropna(subset=["family"]).groupby("family")["r"].mean()
+both = pd.concat([aifi_by_fam.rename("AIFI"), one_by_fam.rename("OneK1K")], axis=1).dropna()
+print(both.round(3).to_string())
+
+fig, ax = plt.subplots(figsize=(6, 6))
+ax.scatter(both["AIFI"], both["OneK1K"], s=120, c="#4C72B0", edgecolor="black", zorder=3)
+for fam, row in both.iterrows():
+    ax.annotate(fam, (row["AIFI"], row["OneK1K"]), xytext=(5, 5),
+                textcoords="offset points", fontsize=9)
+ax.axhline(0, color="grey", lw=0.5); ax.axvline(0, color="grey", lw=0.5)
+lim = max(both.abs().max())*1.2
+ax.plot([-lim, lim], [-lim, lim], "k--", lw=0.5)
+ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
+ax.set_xlabel("AIFI: Pearson r(fraction, age)")
+ax.set_ylabel("OneK1K: Pearson r(fraction, age)")
+ax.set_title("Cell-type family aging correlation — AIFI vs OneK1K")
+plt.tight_layout(); plt.show()
+""")
 md(r"""
 **Cross-cohort take-away.** Compare the two top-mover tables: cell types
 whose fraction shifts with age in both cohorts (e.g. naive CD4 / CD8 T
