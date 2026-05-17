@@ -114,7 +114,26 @@ from sklearn.metrics import mean_absolute_error, r2_score
 import patpy
 
 warnings.filterwarnings("ignore", category=UserWarning)
+
+# Plotting defaults: no grid, despine top + right, frameless UMAPs.
+plt.rcParams["axes.grid"] = False
+plt.rcParams["axes.spines.top"] = False
+plt.rcParams["axes.spines.right"] = False
 sc.set_figure_params(dpi=80, frameon=False)
+
+def despine(*axes):
+    """Drop the top/right spines on every axis passed in."""
+    for ax in axes:
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        ax.grid(False)
+
+def style_umap(ax):
+    """Strip frame + ticks from an embedding scatter."""
+    for s in ax.spines.values():
+        s.set_visible(False)
+    ax.set_xticks([]); ax.set_yticks([])
+
 SEED = 42
 print("patpy", patpy.__version__, " · torch.cuda.is_available()", torch.cuda.is_available())
 ''')
@@ -557,6 +576,7 @@ sub = aging_scores.reindex(order)
 colors = ["#888"] * 4 + ["#aaa", "#C44E52", "#8172B3"]
 ax.bar(sub.index, sub["spearman"], color=colors, edgecolor="black")
 ax.axhline(0, color="k", lw=0.5)
+ax.set_ylim(-1, 1)                # Spearman is bounded in [-1, 1]; lock the range
 ax.set_ylabel("Spearman ρ vs age (held-out)")
 ax.set_title("Aging cohort — age preservation across methods")
 plt.xticks(rotation=20); plt.tight_layout(); plt.show()
@@ -1158,6 +1178,8 @@ fig, axes = plt.subplots(1, 3, figsize=(12, 3.5))
 for ax, metric in zip(axes, ["R²", "Spearman", "MAE"]):
     sdf.set_index("stage")[metric].plot(kind="bar", ax=ax, color=["#888", "#C44E52"])
     ax.axhline(0, color="k", lw=0.5); ax.set_title(metric); ax.set_ylabel(metric)
+    if metric == "Spearman":
+        ax.set_ylim(-1, 1)        # Spearman is bounded in [-1, 1]
 plt.tight_layout(); plt.show()
 ''')
 
