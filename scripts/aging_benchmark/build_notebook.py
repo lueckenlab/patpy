@@ -859,19 +859,34 @@ md(r"""
 
 So far we re-trained each model from scratch on each cohort. Real
 deployment looks more like *train once on a reference cohort, predict
-on every new donor that comes in*. Two questions:
+on every new donor that comes in*. Two engineering choices and one
+biological question.
+
+**Engineering**
 
 1. **Feature alignment.** AIFI and OneK1K have different gene panels
    and were PCA'd independently, so their `X_pca` spaces are
    incomparable out of the box. We refit a PCA on AIFI restricted to
-   the **shared gene panel**, then project OneK1K through those same
-   loadings. Both cohorts now live in the same 50-PC space.
+   the **shared gene panel** (AIFI uses gene symbols, OneK1K uses
+   Ensembl IDs with the symbol stored in ``var["feature_name"]``),
+   then project OneK1K through those same loadings. Both cohorts now
+   live in the same 50-PC space.
 2. **Bag size.** AIFI donors have ~16K cells each, OneK1K donors have
    ~1.3K. We use a small bag of 200 cells/donor for both training and
    inference so OneK1K donors aren't dominated by zero-padding.
 
-Trained on AIFI, the supervised models then **predict OneK1K ages**
-with no further fine-tuning.
+**Biological question.** Three protocols on the same models:
+
+- **Zero-shot transfer** — train on AIFI, predict OneK1K with no
+  further training. Worst case.
+- **Fine-tuning with a small donor budget** — train on AIFI, then
+  continue training on **10% of OneK1K donors** (with a smaller lr and
+  fewer epochs), then predict the remaining 90%. Does a tiny budget
+  of in-domain donors fix the transfer gap?
+- AIFI in-sample for reference.
+
+The 10% is donor-stratified random; the 90% test set never sees the
+fine-tune step.
 """)
 
 code(r'''
@@ -920,19 +935,28 @@ print(f"OneK1K X_pca_shared: {adata_one.obsm['X_pca_shared'].shape}")
 code(r'''
 # Bag size used for training + inference. 200 cells fits OneK1K donors well.
 N_CELLS_TRANSFER = 50 if SMOKE else 200
+FINETUNE_FRACTION = 0.10        # 10% of OneK1K donors used to fine-tune the AIFI model
 
 aifi_t = filter_and_subsample(adata, sample_size_threshold=0,
                                 max_cells_per_donor=N_CELLS_TRANSFER)
 one_t = filter_and_subsample(adata_one, sample_size_threshold=0,
-                              max_cells_per_donor=N_CELLS_TRANSFER) if "donor" in adata_one.obs.columns else adata_one
-# OneK1K may have different sample_key already mapped to "donor" in adata_one above
-# but filter_and_subsample uses the literal "donor" column.
-print(f"AIFI training set: {aifi_t.n_obs:,} cells")
-print(f"OneK1K inference set: {one_t.n_obs:,} cells")
+                              max_cells_per_donor=N_CELLS_TRANSFER)
+
+# Donor-level 10% / 90% split for the OneK1K transfer experiment
+one_donors_all = list(pd.unique(one_t.obs["donor"]))
+rng_split = np.random.default_rng(SEED)
+perm = rng_split.permutation(len(one_donors_all))
+n_ft = max(2, int(round(len(one_donors_all) * FINETUNE_FRACTION)))
+ft_set = set(np.asarray(one_donors_all)[perm[:n_ft]].tolist())
+one_ft = one_t[one_t.obs["donor"].isin(ft_set)].copy()
+one_test = one_t[~one_t.obs["donor"].isin(ft_set)].copy()
+print(f"AIFI training set:        {aifi_t.n_obs:,} cells  ({aifi_t.obs['donor'].nunique()} donors)")
+print(f"OneK1K fine-tune set:     {one_ft.n_obs:,} cells  ({one_ft.obs['donor'].nunique()} donors)")
+print(f"OneK1K held-out test set: {one_test.n_obs:,} cells  ({one_test.obs['donor'].nunique()} donors)")
 ''')
 
 code(r'''
-# --- PaSCient transfer ---
+# --- PaSCient transfer with optional fine-tune step ---
 pa = patpy.tl.PaSCient(
     sample_key="donor", label_keys=["age"], tasks=["regression"],
     cell_group_key=None, layer="X_pca_shared",
@@ -945,41 +969,56 @@ pa = patpy.tl.PaSCient(
 t0 = time.time()
 pa.prepare_anndata(aifi_t, train=True)
 print(f"PaSCient AIFI train: {time.time()-t0:.1f}s")
-
-# In-sample AIFI predictions (biased high — same donors as training)
 aifi_pa_pred = pa.predict("age")
-# Transfer: repoint to OneK1K, re-extract embeddings + predict
-pa.adata = one_t
-pa.samples = pd.unique(one_t.obs["donor"]).tolist()
-pa._cell_embeddings = {}
-t0 = time.time()
-pa._extract_embeddings(one_t)
-one_pa_pred = pa.predict("age")
-print(f"PaSCient OneK1K inference: {time.time()-t0:.1f}s")
 
-aifi_pa_score = {
-    "r2": r2_score(donor_meta["age"].reindex(aifi_pa_pred.index).astype(float), aifi_pa_pred),
-    "spearman": spearmanr(donor_meta["age"].reindex(aifi_pa_pred.index).astype(float), aifi_pa_pred)[0],
-    "mae": mean_absolute_error(donor_meta["age"].reindex(aifi_pa_pred.index).astype(float), aifi_pa_pred),
-}
-one_pa_score = {
-    "r2": r2_score(donor_meta_one["age"].reindex(one_pa_pred.index).astype(float), one_pa_pred),
-    "spearman": spearmanr(donor_meta_one["age"].reindex(one_pa_pred.index).astype(float), one_pa_pred)[0],
-    "mae": mean_absolute_error(donor_meta_one["age"].reindex(one_pa_pred.index).astype(float), one_pa_pred),
-}
-print(f"PaSCient AIFI train (in-sample): R²={aifi_pa_score['r2']:.3f}  Spearman={aifi_pa_score['spearman']:.3f}  MAE={aifi_pa_score['mae']:.2f}")
-print(f"PaSCient OneK1K transfer:        R²={one_pa_score['r2']:.3f}  Spearman={one_pa_score['spearman']:.3f}  MAE={one_pa_score['mae']:.2f}")
+# 1) Zero-shot: predict OneK1K test set with no further training
+pa.adata = one_test
+pa.samples = pd.unique(one_test.obs["donor"]).tolist()
+pa._cell_embeddings = {}
+pa._extract_embeddings(one_test)
+one_pa_pred_zs = pa.predict("age")
+
+# 2) Fine-tune on the 10% OneK1K subset (lower lr, fewer epochs)
+pa.adata = one_ft
+pa.samples = pd.unique(one_ft.obs["donor"]).tolist()
+pa.lr = 1e-5
+pa.n_epochs = 5 if SMOKE else 15
+t0 = time.time()
+pa._train(one_ft, label_key="age", task="regression")
+print(f"PaSCient OneK1K fine-tune ({pa.n_epochs} epochs, lr={pa.lr}): {time.time()-t0:.1f}s")
+
+# 3) Predict the held-out OneK1K test set with the fine-tuned model
+pa.adata = one_test
+pa.samples = pd.unique(one_test.obs["donor"]).tolist()
+pa._cell_embeddings = {}
+pa._extract_embeddings(one_test)
+one_pa_pred_ft = pa.predict("age")
+
+def _score(y_true, y_pred):
+    return {"r2": float(r2_score(y_true, y_pred)),
+            "spearman": float(spearmanr(y_true, y_pred)[0]),
+            "mae": float(mean_absolute_error(y_true, y_pred))}
+
+aifi_pa_score = _score(donor_meta["age"].reindex(aifi_pa_pred.index).astype(float), aifi_pa_pred)
+zs_pa_score  = _score(donor_meta_one["age"].reindex(one_pa_pred_zs.index).astype(float), one_pa_pred_zs)
+ft_pa_score  = _score(donor_meta_one["age"].reindex(one_pa_pred_ft.index).astype(float), one_pa_pred_ft)
+
+print(f"PaSCient AIFI in-sample:              R²={aifi_pa_score['r2']:.3f}  Spearman={aifi_pa_score['spearman']:.3f}  MAE={aifi_pa_score['mae']:.2f}")
+print(f"PaSCient OneK1K test (zero-shot):     R²={zs_pa_score['r2']:.3f}  Spearman={zs_pa_score['spearman']:.3f}  MAE={zs_pa_score['mae']:.2f}")
+print(f"PaSCient OneK1K test (after 10% FT):  R²={ft_pa_score['r2']:.3f}  Spearman={ft_pa_score['spearman']:.3f}  MAE={ft_pa_score['mae']:.2f}")
 ''')
 
 code(r'''
-# --- SampleCLR transfer ---
+# --- SampleCLR transfer with optional fine-tune step ---
 from sampleclr import ContrastiveModel
 from sampleclr.utils import get_sample_representations_from_adata
 
 dev = "cuda" if torch.cuda.is_available() else "cpu"
 aifi_donors = list(pd.unique(aifi_t.obs["donor"]))
-one_donors = list(pd.unique(one_t.obs["donor"]))
+test_donors = list(pd.unique(one_test.obs["donor"]))
+ft_donors = list(pd.unique(one_ft.obs["donor"]))
 
+# 1. Pretrain + fine-tune on AIFI
 n_epochs = 10 if SMOKE else 30
 sclr_t = ContrastiveModel(
     adata=aifi_t, sample_key="donor", layer="X_pca_shared",
@@ -998,59 +1037,125 @@ sclr_t.pretrain()
 sclr_t.fine_tune(val_metric="loss")
 print(f"SampleCLR AIFI train: {time.time()-t0:.1f}s")
 
-t0 = time.time()
+aifi_state = {
+    "projector":  {k: v.detach().clone() for k, v in sclr_t.projector.state_dict().items()},
+    "aggregator": {k: v.detach().clone() for k, v in sclr_t.aggregator.state_dict().items()},
+}
+
+# 2. Embed AIFI + zero-shot OneK1K test
 aifi_sc = get_sample_representations_from_adata(
     projector=sclr_t.projector, aggregator=sclr_t.aggregator,
     adata=aifi_t, sample_key="donor", layer="X_pca_shared",
     meta_obs_names=aifi_donors, subset_size=N_CELLS_TRANSFER, device=dev,
 )
-one_sc = get_sample_representations_from_adata(
+one_sc_zs = get_sample_representations_from_adata(
     projector=sclr_t.projector, aggregator=sclr_t.aggregator,
-    adata=one_t, sample_key="donor", layer="X_pca_shared",
-    meta_obs_names=one_donors, subset_size=N_CELLS_TRANSFER, device=dev,
+    adata=one_test, sample_key="donor", layer="X_pca_shared",
+    meta_obs_names=test_donors, subset_size=N_CELLS_TRANSFER, device=dev,
 )
-print(f"SampleCLR inference (both): {time.time()-t0:.1f}s")
+del sclr_t; gc.collect()
+if torch.cuda.is_available(): torch.cuda.empty_cache()
 
-# KNN-regression: predict each OneK1K donor's age from k=5 nearest AIFI donors.
+# 3. Fine-tune on the 10% OneK1K subset, starting from the AIFI weights
+ft_epochs = 5 if SMOKE else 20
+sclr_ft = ContrastiveModel(
+    adata=one_ft, sample_key="donor", layer="X_pca_shared",
+    tasks={"regression": ["age"]},
+    batch_size=8,
+    num_epochs_stage1=1, num_epochs_stage2=ft_epochs,
+    num_warmup_epochs_stage1=1, num_warmup_epochs_stage2=max(1, ft_epochs // 5),
+    early_stopping_patience=8,
+    use_batch_aware_sampler=False,
+    verbose=False, seed=SEED,
+)
+try:
+    sclr_ft.projector.load_state_dict(aifi_state["projector"])
+    sclr_ft.aggregator.load_state_dict(aifi_state["aggregator"])
+    print(f"loaded AIFI projector + aggregator weights")
+except RuntimeError as e:
+    print(f"WARN: could not load AIFI weights: {e}")
+t0 = time.time()
+sclr_ft.fine_tune(val_metric="loss")
+print(f"SampleCLR OneK1K fine-tune ({ft_epochs} epochs): {time.time()-t0:.1f}s")
+
+# 4. Embed OneK1K test with the FT model
+one_sc_ft = get_sample_representations_from_adata(
+    projector=sclr_ft.projector, aggregator=sclr_ft.aggregator,
+    adata=one_test, sample_key="donor", layer="X_pca_shared",
+    meta_obs_names=test_donors, subset_size=N_CELLS_TRANSFER, device=dev,
+)
+del sclr_ft; gc.collect()
+if torch.cuda.is_available(): torch.cuda.empty_cache()
+
+# 5. Score: KNN-regression with AIFI donors as reference
 y_aifi = donor_meta["age"].reindex(aifi_donors).astype(float).values
-y_one  = donor_meta_one["age"].reindex(one_donors).astype(float).values
-D = squareform(pdist(np.vstack([one_sc, aifi_sc]), metric="euclidean"))[:len(one_sc), len(one_sc):]
-one_sc_pred = y_aifi[np.argsort(D, axis=1)[:, :5]].mean(axis=1)
-aifi_sc_pred = y_aifi[np.argsort(squareform(pdist(aifi_sc, metric="euclidean")), axis=1)[:, 1:6]].mean(axis=1)
+y_test = donor_meta_one["age"].reindex(test_donors).astype(float).values
 
-aifi_sc_score = {"r2": r2_score(y_aifi, aifi_sc_pred), "spearman": spearmanr(y_aifi, aifi_sc_pred)[0],
-                  "mae": mean_absolute_error(y_aifi, aifi_sc_pred)}
-one_sc_score = {"r2": r2_score(y_one, one_sc_pred), "spearman": spearmanr(y_one, one_sc_pred)[0],
-                 "mae": mean_absolute_error(y_one, one_sc_pred)}
-print(f"SampleCLR AIFI in-sample KNN:  R²={aifi_sc_score['r2']:.3f}  Spearman={aifi_sc_score['spearman']:.3f}  MAE={aifi_sc_score['mae']:.2f}")
-print(f"SampleCLR OneK1K transfer KNN: R²={one_sc_score['r2']:.3f}  Spearman={one_sc_score['spearman']:.3f}  MAE={one_sc_score['mae']:.2f}")
+def _knn_pred(test_emb, train_emb, train_y, k=5):
+    D = squareform(pdist(np.vstack([test_emb, train_emb]), metric="euclidean"))[:len(test_emb), len(test_emb):]
+    return train_y[np.argsort(D, axis=1)[:, :k]].mean(axis=1)
+
+aifi_sc_pred = y_aifi[np.argsort(squareform(pdist(aifi_sc, metric="euclidean")), axis=1)[:, 1:6]].mean(axis=1)
+one_sc_pred_zs = _knn_pred(one_sc_zs, aifi_sc, y_aifi, k=5)
+one_sc_pred_ft = _knn_pred(one_sc_ft, aifi_sc, y_aifi, k=5)
+
+aifi_sc_score = _score(y_aifi, aifi_sc_pred)
+zs_sc_score   = _score(y_test, one_sc_pred_zs)
+ft_sc_score   = _score(y_test, one_sc_pred_ft)
+print(f"SampleCLR AIFI in-sample KNN:             R²={aifi_sc_score['r2']:.3f}  Spearman={aifi_sc_score['spearman']:.3f}  MAE={aifi_sc_score['mae']:.2f}")
+print(f"SampleCLR OneK1K test KNN (zero-shot):    R²={zs_sc_score['r2']:.3f}  Spearman={zs_sc_score['spearman']:.3f}  MAE={zs_sc_score['mae']:.2f}")
+print(f"SampleCLR OneK1K test KNN (after 10% FT): R²={ft_sc_score['r2']:.3f}  Spearman={ft_sc_score['spearman']:.3f}  MAE={ft_sc_score['mae']:.2f}")
 ''')
 
 code(r'''
 # Summary table + scatter of predicted vs true ages
 transfer_df = pd.DataFrame([
-    {"method": "PaSCient",  "set": "AIFI (in-sample)",   **aifi_pa_score},
-    {"method": "PaSCient",  "set": "OneK1K (transfer)",  **one_pa_score},
-    {"method": "SampleCLR", "set": "AIFI (in-sample)",   **aifi_sc_score},
-    {"method": "SampleCLR", "set": "OneK1K (transfer)",  **one_sc_score},
+    {"method": "PaSCient",  "set": "AIFI in-sample",            **aifi_pa_score},
+    {"method": "PaSCient",  "set": "OneK1K test zero-shot",     **zs_pa_score},
+    {"method": "PaSCient",  "set": "OneK1K test after 10% FT",  **ft_pa_score},
+    {"method": "SampleCLR", "set": "AIFI in-sample",            **aifi_sc_score},
+    {"method": "SampleCLR", "set": "OneK1K test zero-shot",     **zs_sc_score},
+    {"method": "SampleCLR", "set": "OneK1K test after 10% FT",  **ft_sc_score},
 ])
 print(transfer_df.round(3).to_string(index=False))
 
-fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-y_one_arr = donor_meta_one["age"].reindex(one_pa_pred.index).astype(float).values
-axes[0].scatter(y_one_arr, one_pa_pred, s=20, alpha=0.6, color="#8172B3")
-axes[0].plot([y_one_arr.min(), y_one_arr.max()], [y_one_arr.min(), y_one_arr.max()], "k--", lw=0.5)
-axes[0].set_xlabel("True age (years)"); axes[0].set_ylabel("PaSCient predicted age")
-axes[0].set_title(f"PaSCient AIFI→OneK1K transfer\nR²={one_pa_score['r2']:.2f}  MAE={one_pa_score['mae']:.1f}y")
+fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+# Top row — PaSCient
+y_zs_pa = donor_meta_one["age"].reindex(one_pa_pred_zs.index).astype(float).values
+axes[0,0].scatter(y_zs_pa, one_pa_pred_zs, s=20, alpha=0.6, color="#8172B3")
+axes[0,0].plot([y_zs_pa.min(), y_zs_pa.max()], [y_zs_pa.min(), y_zs_pa.max()], "k--", lw=0.5)
+axes[0,0].set_xlabel("True age (years)"); axes[0,0].set_ylabel("PaSCient pred (zero-shot)")
+axes[0,0].set_title(f"PaSCient zero-shot — R²={zs_pa_score['r2']:.2f}  MAE={zs_pa_score['mae']:.1f}y")
 
-axes[1].scatter(y_one, one_sc_pred, s=20, alpha=0.6, color="#C44E52")
-axes[1].plot([y_one.min(), y_one.max()], [y_one.min(), y_one.max()], "k--", lw=0.5)
-axes[1].set_xlabel("True age (years)"); axes[1].set_ylabel("SampleCLR predicted age (KNN k=5)")
-axes[1].set_title(f"SampleCLR AIFI→OneK1K transfer\nR²={one_sc_score['r2']:.2f}  MAE={one_sc_score['mae']:.1f}y")
+y_ft_pa = donor_meta_one["age"].reindex(one_pa_pred_ft.index).astype(float).values
+axes[0,1].scatter(y_ft_pa, one_pa_pred_ft, s=20, alpha=0.6, color="#C44E52")
+axes[0,1].plot([y_ft_pa.min(), y_ft_pa.max()], [y_ft_pa.min(), y_ft_pa.max()], "k--", lw=0.5)
+axes[0,1].set_xlabel("True age (years)"); axes[0,1].set_ylabel("PaSCient pred (after 10% FT)")
+axes[0,1].set_title(f"PaSCient after FT — R²={ft_pa_score['r2']:.2f}  MAE={ft_pa_score['mae']:.1f}y")
+
+# Bottom row — SampleCLR
+axes[1,0].scatter(y_test, one_sc_pred_zs, s=20, alpha=0.6, color="#8172B3")
+axes[1,0].plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], "k--", lw=0.5)
+axes[1,0].set_xlabel("True age (years)"); axes[1,0].set_ylabel("SampleCLR pred (zero-shot)")
+axes[1,0].set_title(f"SampleCLR zero-shot — R²={zs_sc_score['r2']:.2f}  MAE={zs_sc_score['mae']:.1f}y")
+
+axes[1,1].scatter(y_test, one_sc_pred_ft, s=20, alpha=0.6, color="#C44E52")
+axes[1,1].plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], "k--", lw=0.5)
+axes[1,1].set_xlabel("True age (years)"); axes[1,1].set_ylabel("SampleCLR pred (after 10% FT)")
+axes[1,1].set_title(f"SampleCLR after FT — R²={ft_sc_score['r2']:.2f}  MAE={ft_sc_score['mae']:.1f}y")
 plt.tight_layout(); plt.show()
 ''')
 
 md(r"""
+**Reading the panels.** The left column is zero-shot transfer (no
+OneK1K data ever seen); the right column is the same model after 15
+fine-tune epochs on 10% of OneK1K donors at a 10× smaller learning
+rate. A big jump from left to right means the AIFI-pretrained model
+*has* useful aging features but they live in a slightly different
+geometry — a small donor budget is enough to recalibrate. A small
+jump means the supervised features are AIFI-specific and only a
+re-train from scratch on OneK1K would help.
+
 **Interpreting the transfer.** A perfect transfer would mean the model
 learnt aging biology rather than AIFI-specific artefacts (batch
 structure, recruitment bias, the 40-89 age range). Two failure modes
