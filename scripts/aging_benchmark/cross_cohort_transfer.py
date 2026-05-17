@@ -180,6 +180,7 @@ def run_pascient_transfer(aifi: ad.AnnData, onek1k_ft: ad.AnnData,
         f"  (lr={PASCIENT_FT_LR}, epochs={PASCIENT_FT_EPOCHS})")
     pa.adata = onek1k_ft
     pa.samples = pd.unique(onek1k_ft.obs["donor"]).tolist()
+    pa.labels = pa._extract_metadata(pa.label_keys)   # refresh donor→label map for OneK1K
     pa.lr = PASCIENT_FT_LR
     pa.n_epochs = PASCIENT_FT_EPOCHS
     pa._train(onek1k_ft, label_key="age", task="regression")

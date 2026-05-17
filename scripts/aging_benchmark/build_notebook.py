@@ -981,6 +981,7 @@ one_pa_pred_zs = pa.predict("age")
 # 2) Fine-tune on the 10% OneK1K subset (lower lr, fewer epochs)
 pa.adata = one_ft
 pa.samples = pd.unique(one_ft.obs["donor"]).tolist()
+pa.labels = pa._extract_metadata(pa.label_keys)   # refresh donor→label map for OneK1K
 pa.lr = 1e-5
 pa.n_epochs = 5 if SMOKE else 15
 t0 = time.time()
