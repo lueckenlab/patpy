@@ -595,6 +595,132 @@ ax.set_xlabel("Pearson r(cell-type fraction, age)")
 ax.set_title("AIFI: cell-type aging signature"); plt.tight_layout(); plt.show()
 ''')
 
+md(r"""
+### Genes correlated with age (pseudobulk-level)
+
+The pseudobulk method computes a donor-level mean of the per-cell `X_pca`
+embedding. To go back to gene resolution we do the same averaging at the
+expression level: per donor, take the mean log-normalised expression of
+every gene, then Pearson-correlate each gene's vector across donors with
+age. These are the genes whose **donor-mean expression shifts with age**,
+i.e. the gene-level aging signature that the pseudobulk distance is
+implicitly leveraging.
+""")
+
+code(r'''
+# Pseudobulk gene expression per donor (mean of cells, in log-normalised space).
+# We do it in chunks of donors so we never densify the full matrix at once.
+def pseudobulk_genes(adata, sample_key="donor"):
+    donors = list(pd.unique(adata.obs[sample_key].astype(str)))
+    gene_names = adata.var_names.astype(str).tolist()
+    out = np.zeros((len(donors), adata.n_vars), dtype=np.float32)
+    obs = adata.obs[sample_key].astype(str).values
+    for i, d in enumerate(donors):
+        mask = obs == d
+        Xd = adata.X[mask]
+        if hasattr(Xd, "toarray"):
+            Xd = Xd.toarray()
+        out[i] = np.asarray(Xd, dtype=np.float32).mean(axis=0)
+    return pd.DataFrame(out, index=donors, columns=gene_names)
+
+bulk_aging = pseudobulk_genes(adata)
+print(f"pseudobulk matrix: {bulk_aging.shape}  (donors x genes)")
+
+age_aifi = donor_meta["age"].reindex(bulk_aging.index).astype(float).values
+mask = np.isfinite(age_aifi)
+Xb = bulk_aging.values[mask]
+ya = age_aifi[mask]
+mu = Xb.mean(axis=0); sd = Xb.std(axis=0) + 1e-12
+yc = ya - ya.mean(); ys = ya.std() + 1e-12
+gene_r = ((Xb - mu) / sd).T @ (yc / ys) / len(yc)
+gene_corr = pd.Series(gene_r, index=bulk_aging.columns, name="r").sort_values()
+print("\nTop 10 genes DECREASING with age in AIFI pseudobulk:")
+print(gene_corr.head(10).round(3))
+print("\nTop 10 genes INCREASING with age:")
+print(gene_corr.tail(10).round(3))
+''')
+
+code(r'''
+fig, ax = plt.subplots(figsize=(7, 6))
+top = pd.concat([gene_corr.head(15), gene_corr.tail(15)]).sort_values()
+ax.barh(top.index, top.values, color=["#1f77b4" if r<0 else "#d62728" for r in top.values])
+ax.axvline(0, color="k", lw=0.5)
+ax.set_xlabel("Pearson r(donor-mean expression, age)")
+ax.set_title("AIFI pseudobulk — top aging-correlated genes")
+plt.tight_layout(); plt.show()
+''')
+
+md(r"""
+### Connecting the PCs back to genes
+
+The pseudobulk distance lives in 50-D `X_pca` space; the methods above
+treat each PC as a feature without knowing what biology lives in it. We
+can read each PC's "meaning" off its loadings (`adata.varm["PCs"]` — the
+eigenvectors that mapped log-normalised gene expression into the 50-D PCA
+space).
+
+For each donor-level age-correlated PC, the top-loading genes tell us
+what transcriptional program drove that PC.
+""")
+
+code(r'''
+# Per-donor mean of X_pca = the pseudobulk vector. Correlate each PC with age.
+pca_per_donor = pd.DataFrame(
+    np.asarray([adata[adata.obs["donor"].astype(str) == d].obsm["X_pca"].mean(axis=0)
+                for d in pd.unique(adata.obs["donor"].astype(str))]),
+    index=pd.unique(adata.obs["donor"].astype(str)),
+    columns=[f"PC{i+1}" for i in range(adata.obsm["X_pca"].shape[1])],
+)
+age = donor_meta["age"].reindex(pca_per_donor.index).astype(float).values
+pc_r = pd.Series(
+    [pearsonr(pca_per_donor[c].values, age)[0] for c in pca_per_donor.columns],
+    index=pca_per_donor.columns, name="r"
+).sort_values(key=lambda s: s.abs(), ascending=False)
+print("Top 10 PCs by |r(donor-mean PC, age)|:")
+print(pc_r.head(10).round(3))
+''')
+
+code(r'''
+# Get loadings (varm["PCs"]) and read top-loading genes for the top-r PCs.
+loadings = pd.DataFrame(adata.varm["PCs"],
+                         index=adata.var_names.astype(str),
+                         columns=[f"PC{i+1}" for i in range(adata.varm["PCs"].shape[1])])
+
+top_pcs = pc_r.head(6).index.tolist()
+ncols = 3; nrows = int(np.ceil(len(top_pcs) / ncols))
+fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 4, nrows * 3.4), squeeze=False)
+for ax, pc in zip(axes.ravel(), top_pcs):
+    loads = loadings[pc].sort_values()
+    top_g = pd.concat([loads.head(8), loads.tail(8)])
+    colors = ["#1f77b4" if v<0 else "#d62728" for v in top_g.values]
+    ax.barh(top_g.index, top_g.values, color=colors)
+    ax.axvline(0, color="k", lw=0.5)
+    ax.set_title(f"{pc}  age-r={pc_r[pc]:.2f}", fontsize=9)
+    ax.set_xlabel("loading")
+    ax.invert_yaxis()
+for ax in axes.ravel()[len(top_pcs):]:
+    ax.set_visible(False)
+plt.tight_layout(); plt.show()
+''')
+
+md(r"""
+**Reading the loading plots.** For each of the top age-correlated PCs,
+red bars are genes that **load positively** on the PC (cells expressing
+them shift the PC value up) and blue bars are genes loading negatively.
+Combined with the header's `age-r`:
+
+- A PC with `age-r > 0` whose red bars include cytotoxic markers
+  (`GZMB`, `GNLY`, `PRF1`, `NKG7`) tells us: *donors with more cells
+  expressing this cytotoxic program score higher on this PC, and that
+  PC tracks age*.
+- A PC with `age-r < 0` whose red bars include naive T markers
+  (`CCR7`, `LEF1`, `TCF7`, `SELL`) tells us the *opposite* — that PC
+  encodes naivety, and naivety drops with age.
+
+This is the same biology you'd get from a manual differential test on
+pseudobulks, just routed through the PCA the methods actually consume.
+""")
+
 # ---------------------------------------------------------------------------
 # OneK1K cross-cohort validation
 # ---------------------------------------------------------------------------
@@ -703,6 +829,212 @@ ax.set_xlabel("AIFI: r(fraction, age)"); ax.set_ylabel("OneK1K: r(fraction, age)
 ax.set_title("Cell-type family aging correlation — AIFI vs OneK1K")
 plt.tight_layout(); plt.show()
 ''')
+
+# ---------------------------------------------------------------------------
+# Cross-cohort generalisation — train AIFI, predict OneK1K
+# ---------------------------------------------------------------------------
+
+md(r"""
+## Generalisation: train on AIFI, predict on OneK1K
+
+So far we re-trained each model from scratch on each cohort. Real
+deployment looks more like *train once on a reference cohort, predict
+on every new donor that comes in*. Two questions:
+
+1. **Feature alignment.** AIFI and OneK1K have different gene panels
+   and were PCA'd independently, so their `X_pca` spaces are
+   incomparable out of the box. We refit a PCA on AIFI restricted to
+   the **shared gene panel**, then project OneK1K through those same
+   loadings. Both cohorts now live in the same 50-PC space.
+2. **Bag size.** AIFI donors have ~16K cells each, OneK1K donors have
+   ~1.3K. We use a small bag of 200 cells/donor for both training and
+   inference so OneK1K donors aren't dominated by zero-padding.
+
+Trained on AIFI, the supervised models then **predict OneK1K ages**
+with no further fine-tuning.
+""")
+
+code(r'''
+from sklearn.decomposition import PCA as _SkPCA
+
+def build_shared_pca(aifi, onek1k, n_pcs=50, fit_subsample=300_000, seed=SEED):
+    """Recompute PCA on AIFI restricted to shared genes; project both cohorts."""
+    shared = sorted(set(aifi.var_names.astype(str)) & set(onek1k.var_names.astype(str)))
+    print(f"shared HVGs: {len(shared)}")
+    aifi_idx = aifi.var_names.get_indexer(shared)
+    onek1k_idx = onek1k.var_names.get_indexer(shared)
+    Xa = aifi.X[:, aifi_idx]
+    if hasattr(Xa, "toarray"): Xa = Xa.toarray()
+    Xa = np.asarray(Xa, dtype=np.float32)
+    fit_X = Xa
+    if Xa.shape[0] > fit_subsample:
+        rng = np.random.default_rng(seed)
+        fit_X = Xa[rng.choice(Xa.shape[0], fit_subsample, replace=False)]
+    pca = _SkPCA(n_components=n_pcs, svd_solver="randomized", random_state=seed)
+    pca.fit(fit_X)
+    print(f"PCA fit: cumulative variance = {pca.explained_variance_ratio_.sum():.3f}")
+    aifi.obsm["X_pca_shared"] = pca.transform(Xa).astype(np.float32)
+    Xo = onek1k.X[:, onek1k_idx]
+    if hasattr(Xo, "toarray"): Xo = Xo.toarray()
+    Xo = np.asarray(Xo, dtype=np.float32)
+    onek1k.obsm["X_pca_shared"] = pca.transform(Xo).astype(np.float32)
+    return pca, shared
+
+pca_shared, shared_genes = build_shared_pca(adata, adata_one, n_pcs=50)
+print(f"AIFI X_pca_shared: {adata.obsm['X_pca_shared'].shape}")
+print(f"OneK1K X_pca_shared: {adata_one.obsm['X_pca_shared'].shape}")
+''')
+
+code(r'''
+# Bag size used for training + inference. 200 cells fits OneK1K donors well.
+N_CELLS_TRANSFER = 50 if SMOKE else 200
+
+aifi_t = filter_and_subsample(adata, sample_size_threshold=0,
+                                max_cells_per_donor=N_CELLS_TRANSFER)
+one_t = filter_and_subsample(adata_one, sample_size_threshold=0,
+                              max_cells_per_donor=N_CELLS_TRANSFER) if "donor" in adata_one.obs.columns else adata_one
+# OneK1K may have different sample_key already mapped to "donor" in adata_one above
+# but filter_and_subsample uses the literal "donor" column.
+print(f"AIFI training set: {aifi_t.n_obs:,} cells")
+print(f"OneK1K inference set: {one_t.n_obs:,} cells")
+''')
+
+code(r'''
+# --- PaSCient transfer ---
+pa = patpy.tl.PaSCient(
+    sample_key="donor", label_keys=["age"], tasks=["regression"],
+    cell_group_key=None, layer="X_pca_shared",
+    n_cells=N_CELLS_TRANSFER,
+    batch_size=16 if torch.cuda.is_available() else 8,
+    n_epochs=2 if SMOKE else 30,
+    device="cuda" if torch.cuda.is_available() else "cpu",
+    normalize=False, seed=SEED,
+)
+t0 = time.time()
+pa.prepare_anndata(aifi_t, train=True)
+print(f"PaSCient AIFI train: {time.time()-t0:.1f}s")
+
+# In-sample AIFI predictions (biased high — same donors as training)
+aifi_pa_pred = pa.predict("age")
+# Transfer: repoint to OneK1K, re-extract embeddings + predict
+pa.adata = one_t
+pa.samples = pd.unique(one_t.obs["donor"]).tolist()
+pa._cell_embeddings = {}
+t0 = time.time()
+pa._extract_embeddings(one_t)
+one_pa_pred = pa.predict("age")
+print(f"PaSCient OneK1K inference: {time.time()-t0:.1f}s")
+
+aifi_pa_score = {
+    "r2": r2_score(donor_meta["age"].reindex(aifi_pa_pred.index).astype(float), aifi_pa_pred),
+    "spearman": spearmanr(donor_meta["age"].reindex(aifi_pa_pred.index).astype(float), aifi_pa_pred)[0],
+    "mae": mean_absolute_error(donor_meta["age"].reindex(aifi_pa_pred.index).astype(float), aifi_pa_pred),
+}
+one_pa_score = {
+    "r2": r2_score(donor_meta_one["age"].reindex(one_pa_pred.index).astype(float), one_pa_pred),
+    "spearman": spearmanr(donor_meta_one["age"].reindex(one_pa_pred.index).astype(float), one_pa_pred)[0],
+    "mae": mean_absolute_error(donor_meta_one["age"].reindex(one_pa_pred.index).astype(float), one_pa_pred),
+}
+print(f"PaSCient AIFI train (in-sample): R²={aifi_pa_score['r2']:.3f}  Spearman={aifi_pa_score['spearman']:.3f}  MAE={aifi_pa_score['mae']:.2f}")
+print(f"PaSCient OneK1K transfer:        R²={one_pa_score['r2']:.3f}  Spearman={one_pa_score['spearman']:.3f}  MAE={one_pa_score['mae']:.2f}")
+''')
+
+code(r'''
+# --- SampleCLR transfer ---
+from sampleclr import ContrastiveModel
+from sampleclr.utils import get_sample_representations_from_adata
+
+dev = "cuda" if torch.cuda.is_available() else "cpu"
+aifi_donors = list(pd.unique(aifi_t.obs["donor"]))
+one_donors = list(pd.unique(one_t.obs["donor"]))
+
+n_epochs = 10 if SMOKE else 30
+sclr_t = ContrastiveModel(
+    adata=aifi_t, sample_key="donor", layer="X_pca_shared",
+    tasks={"regression": ["age"]},
+    batch_size=8,
+    num_epochs_stage1=n_epochs, num_epochs_stage2=n_epochs,
+    num_warmup_epochs_stage1=max(1, n_epochs // 5),
+    num_warmup_epochs_stage2=max(1, n_epochs // 5),
+    early_stopping_patience=8,
+    use_batch_aware_sampler=True,
+    batch_sampler_batch_col="batch_id",
+    verbose=False, seed=SEED,
+)
+t0 = time.time()
+sclr_t.pretrain()
+sclr_t.fine_tune(val_metric="loss")
+print(f"SampleCLR AIFI train: {time.time()-t0:.1f}s")
+
+t0 = time.time()
+aifi_sc = get_sample_representations_from_adata(
+    projector=sclr_t.projector, aggregator=sclr_t.aggregator,
+    adata=aifi_t, sample_key="donor", layer="X_pca_shared",
+    meta_obs_names=aifi_donors, subset_size=N_CELLS_TRANSFER, device=dev,
+)
+one_sc = get_sample_representations_from_adata(
+    projector=sclr_t.projector, aggregator=sclr_t.aggregator,
+    adata=one_t, sample_key="donor", layer="X_pca_shared",
+    meta_obs_names=one_donors, subset_size=N_CELLS_TRANSFER, device=dev,
+)
+print(f"SampleCLR inference (both): {time.time()-t0:.1f}s")
+
+# KNN-regression: predict each OneK1K donor's age from k=5 nearest AIFI donors.
+y_aifi = donor_meta["age"].reindex(aifi_donors).astype(float).values
+y_one  = donor_meta_one["age"].reindex(one_donors).astype(float).values
+D = squareform(pdist(np.vstack([one_sc, aifi_sc]), metric="euclidean"))[:len(one_sc), len(one_sc):]
+one_sc_pred = y_aifi[np.argsort(D, axis=1)[:, :5]].mean(axis=1)
+aifi_sc_pred = y_aifi[np.argsort(squareform(pdist(aifi_sc, metric="euclidean")), axis=1)[:, 1:6]].mean(axis=1)
+
+aifi_sc_score = {"r2": r2_score(y_aifi, aifi_sc_pred), "spearman": spearmanr(y_aifi, aifi_sc_pred)[0],
+                  "mae": mean_absolute_error(y_aifi, aifi_sc_pred)}
+one_sc_score = {"r2": r2_score(y_one, one_sc_pred), "spearman": spearmanr(y_one, one_sc_pred)[0],
+                 "mae": mean_absolute_error(y_one, one_sc_pred)}
+print(f"SampleCLR AIFI in-sample KNN:  R²={aifi_sc_score['r2']:.3f}  Spearman={aifi_sc_score['spearman']:.3f}  MAE={aifi_sc_score['mae']:.2f}")
+print(f"SampleCLR OneK1K transfer KNN: R²={one_sc_score['r2']:.3f}  Spearman={one_sc_score['spearman']:.3f}  MAE={one_sc_score['mae']:.2f}")
+''')
+
+code(r'''
+# Summary table + scatter of predicted vs true ages
+transfer_df = pd.DataFrame([
+    {"method": "PaSCient",  "set": "AIFI (in-sample)",   **aifi_pa_score},
+    {"method": "PaSCient",  "set": "OneK1K (transfer)",  **one_pa_score},
+    {"method": "SampleCLR", "set": "AIFI (in-sample)",   **aifi_sc_score},
+    {"method": "SampleCLR", "set": "OneK1K (transfer)",  **one_sc_score},
+])
+print(transfer_df.round(3).to_string(index=False))
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+y_one_arr = donor_meta_one["age"].reindex(one_pa_pred.index).astype(float).values
+axes[0].scatter(y_one_arr, one_pa_pred, s=20, alpha=0.6, color="#8172B3")
+axes[0].plot([y_one_arr.min(), y_one_arr.max()], [y_one_arr.min(), y_one_arr.max()], "k--", lw=0.5)
+axes[0].set_xlabel("True age (years)"); axes[0].set_ylabel("PaSCient predicted age")
+axes[0].set_title(f"PaSCient AIFI→OneK1K transfer\nR²={one_pa_score['r2']:.2f}  MAE={one_pa_score['mae']:.1f}y")
+
+axes[1].scatter(y_one, one_sc_pred, s=20, alpha=0.6, color="#C44E52")
+axes[1].plot([y_one.min(), y_one.max()], [y_one.min(), y_one.max()], "k--", lw=0.5)
+axes[1].set_xlabel("True age (years)"); axes[1].set_ylabel("SampleCLR predicted age (KNN k=5)")
+axes[1].set_title(f"SampleCLR AIFI→OneK1K transfer\nR²={one_sc_score['r2']:.2f}  MAE={one_sc_score['mae']:.1f}y")
+plt.tight_layout(); plt.show()
+''')
+
+md(r"""
+**Interpreting the transfer.** A perfect transfer would mean the model
+learnt aging biology rather than AIFI-specific artefacts (batch
+structure, recruitment bias, the 40-89 age range). Two failure modes
+to watch for:
+
+- **Floor effect at the AIFI age range.** OneK1K donors aged 19-39 may
+  all collapse onto AIFI's youngest decade (40s), giving them an
+  upward-biased predicted age. The scatter above makes this visible.
+- **Sequencing-platform / annotation differences.** The shared-gene
+  PCA only covers what both cohorts measured; cohort-specific gene
+  programs are lost.
+
+The MAE and Spearman on the right-hand scatter are the headline:
+how many years off, and how well-ranked, are the predictions on a
+cohort the model has never seen.
+""")
 
 # ---------------------------------------------------------------------------
 # SampleCLR attention deep-dive
@@ -899,9 +1231,10 @@ plt.tight_layout(); plt.show()
 
 code(r'''
 # SSL vs FT scatter — points far from diagonal are what fine-tuning created
-both = corr_ft[["cell_type", "head", "r"]].rename(columns={"r": "FT"}).merge(
-    corr_ssl[["cell_type", "head", "r"]].rename(columns={"r": "SSL"}),
-    on=["cell_type", "head"], how="inner")
+both = (corr_ft[["cell_type", "head", "r"]].rename(columns={"r": "FT"})
+        .merge(corr_ssl[["cell_type", "head", "r"]].rename(columns={"r": "SSL"}),
+               on=["cell_type", "head"], how="inner")
+        .dropna(subset=["SSL", "FT"]))
 fig, ax = plt.subplots(figsize=(6, 6))
 ax.scatter(both["SSL"], both["FT"], s=18, color="#4C72B0", alpha=0.6, edgecolor="black", lw=0.3)
 top = both.assign(d=(both["FT"] - both["SSL"]).abs()).sort_values("d", ascending=False).head(8)
@@ -909,7 +1242,8 @@ for _, row in top.iterrows():
     ax.annotate(f"{str(row['cell_type'])[:20]}/{row['head']}",
                 (row["SSL"], row["FT"]), xytext=(5, 3),
                 textcoords="offset points", fontsize=7)
-lim = max(both[["SSL", "FT"]].abs().to_numpy().max(), 0.1) * 1.1
+abs_max = float(both[["SSL", "FT"]].abs().to_numpy().max()) if not both.empty else 0.1
+lim = max(abs_max if np.isfinite(abs_max) else 0.1, 0.1) * 1.1
 ax.plot([-lim, lim], [-lim, lim], "k--", lw=0.5)
 ax.axhline(0, color="grey", lw=0.5); ax.axvline(0, color="grey", lw=0.5)
 ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
