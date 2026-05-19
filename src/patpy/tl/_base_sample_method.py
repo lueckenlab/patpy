@@ -261,6 +261,9 @@ class BaseSampleMethod:
         categorical_palette: str = "tab10",
         na_color: str = "lightgray",
         axes=None,
+        use_uns_colors: bool = True,
+        color_key_suffix: str = "_colors",
+        show_legend: bool = True,
     ):
         """Plot a 2-D embedding of *distances*, optionally coloured by metadata.
 
@@ -276,6 +279,14 @@ class BaseSampleMethod:
             Colour used for samples with missing metadata values.
         axes
             Existing matplotlib Axes (or array of Axes) to plot into.
+        use_uns_colors
+            If ``True``, look for colors in ``adata.uns[f'{col}{color_key_suffix}']``
+            and use them if available (similar to scanpy).
+        color_key_suffix
+            Suffix for the color key in ``adata.uns``. Default is ``"_colors"``.
+            For example, with suffix ``"_colors"``, will look for ``adata.uns['cell_type_colors']``.
+        show_legend
+            If ``True``, display the legend. If ``False``, hide it.
 
         Returns
         -------
@@ -294,9 +305,9 @@ class BaseSampleMethod:
 
         if metadata_cols is None:
             if axes is None:
-                axes = sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1")
+                axes = sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", legend=show_legend)
             else:
-                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", ax=axes)
+                sns.scatterplot(embedding_df, x=f"{method}_0", y=f"{method}_1", ax=axes, legend=show_legend)
             return axes
 
         metadata_df = self._extract_metadata(columns=metadata_cols)
@@ -309,7 +320,21 @@ class BaseSampleMethod:
 
         for i, col in enumerate(metadata_cols):
             n_unique = len(np.unique(metadata_df[col].dropna()))
-            palette = continuous_palette if n_unique > 5 else categorical_palette
+
+            # Try to get colors from adata.uns
+            palette = None
+            if use_uns_colors:
+                color_key = f"{col}{color_key_suffix}"
+                if color_key in self.adata.uns:
+                    unique_vals = pd.unique(metadata_df[col].dropna())
+                    colors = self.adata.uns[color_key]
+                    # Create a mapping from values to colors
+                    palette = dict(zip(unique_vals, colors, strict=False))
+
+            # Fall back to default palette if not found in adata.uns
+            if palette is None:
+                palette = continuous_palette if n_unique > 5 else categorical_palette
+
             ax = axes_flat[i] if len(metadata_cols) > 1 else axes_flat
 
             sns.scatterplot(
@@ -318,6 +343,7 @@ class BaseSampleMethod:
                 y=f"{method}_1",
                 ax=ax,
                 color=na_color,
+                legend=False,
             )
             sns.scatterplot(
                 embedding_df,
@@ -326,6 +352,7 @@ class BaseSampleMethod:
                 hue=col,
                 ax=ax,
                 palette=palette,
+                legend=show_legend,
             )
 
         return axes
