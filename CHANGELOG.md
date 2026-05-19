@@ -8,7 +8,13 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
-## 0,16,5
+## 0.16.6
+
+### Fixed
+
+- Dependencies for patpy[milo-edger] amd patpy[de]. Previously, they allowed python 3.11, but this version is not supported by pertpy and caused problems on installation
+
+## 0.16.5
 
 ### Added
 
