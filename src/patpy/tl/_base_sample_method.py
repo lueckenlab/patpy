@@ -320,7 +320,7 @@ class BaseSampleMethod:
 
         for i, col in enumerate(metadata_cols):
             n_unique = len(np.unique(metadata_df[col].dropna()))
-            
+
             # Try to get colors from adata.uns
             palette = None
             if use_uns_colors:
@@ -330,11 +330,11 @@ class BaseSampleMethod:
                     colors = self.adata.uns[color_key]
                     # Create a mapping from values to colors
                     palette = dict(zip(unique_vals, colors, strict=False))
-            
+
             # Fall back to default palette if not found in adata.uns
             if palette is None:
                 palette = continuous_palette if n_unique > 5 else categorical_palette
-            
+
             ax = axes_flat[i] if len(metadata_cols) > 1 else axes_flat
 
             sns.scatterplot(
