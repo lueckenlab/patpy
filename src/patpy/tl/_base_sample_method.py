@@ -109,8 +109,11 @@ class BaseSampleMethod:
             return self.adata
 
         # getting only those layers with the same shape of the new X matrix from adata.layers[self.layer] to be copied in the new anndata below
+        # Use ``.copy()`` rather than ``np.copy()``: np.copy on a scipy sparse
+        # matrix returns a 0-d object array, which then fails AnnData's shape
+        # validation. ``.copy()`` is correct for both dense and sparse layers.
         filtered_layers = {
-            key: np.copy(layer)
+            key: layer.copy()
             for key, layer in self.adata.layers.items()
             if key != self.layer and layer.shape == self.adata.layers.get(self.layer, np.empty(0)).shape
         }
