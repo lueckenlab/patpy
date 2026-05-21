@@ -2280,24 +2280,95 @@ class GloScope_py(SampleRepresentationMethod):
         return self.sample_representation
 
 
-class PertPyDistances(SampleRepresentationMethod):
-    """Every patient is modeled as a perturbation experiment. Relies on distance metrics defined in PertPy."""
+class PerturbationDistances(SampleRepresentationMethod):
+    """
+    Every patient is modeled as a perturbation experiment. Builds on the pertpy package.
 
-    def __init__(self, sample_key, cell_group_key, layer="X_pca", seed=67, dist="euclidean"):
+    Parameters
+    ----------
+    sample_key : str
+        Column in `.obs` containing sample (patient) IDs.
+    cell_group_key : str
+        Column in `.obs` containing cell type information.
+    layer : str, default: "X_pca"
+        Layer in AnnData to use for calculating distances.
+    seed : int, default: 67
+        Random seed for reproducibility.
+    dist : str, default: "euclidean"
+        Distance metric to use. Available distance metrics:
+
+        - edistance: Energy distance; compares between-group cell distances against within-group cell distances.
+        - euclidean: Euclidean distance between the mean profiles of two groups.
+        - root_mean_squared_error: Root mean squared error between the mean profiles of two groups.
+        - mse: Mean squared error between the mean profiles of two groups.
+        - mean_absolute_error: Mean absolute error between the mean profiles of two groups.
+        - pearson_distance: Pearson correlation distance between the mean profiles of two groups.
+        - spearman_distance: Spearman correlation distance between the mean profiles of two groups.
+        - kendalltau_distance: Kendall tau correlation distance between the mean profiles of two groups.
+        - cosine_distance: Cosine distance between the mean profiles of two groups.
+        - r2_distance: Coefficient of determination (R²) distance between the mean profiles of two groups.
+        - mean_pairwise: Mean pairwise Euclidean distance between cells from two groups.
+        - mmd: Maximum mean discrepancy between the distributions of cells from two groups.
+        - wasserstein: Wasserstein (Earth Mover’s) distance between the distributions of cells from two groups.
+        - sym_kldiv: Symmetrized Kullback–Leibler divergence between Gaussian fits of two groups.
+        - t_test: t-test statistic comparing cells from two groups.
+        - ks_test: Kolmogorov–Smirnov test statistic comparing cells from two groups.
+        - nb_ll: Negative binomial log-likelihood of one group under a model fit on the other.
+        - classifier_proba: Average perturbation-class probability from a binary classifier.
+        - classifier_cp: Average classifier class projection score between groups.
+        - mean_var_distribution: Distance between mean–variance distributions of two groups using KDE.
+        - mahalanobis: Mahalanobis distance between the mean profiles of a target and reference group.
+    cell_wise_metric : str, default: "euclidean"
+        Metric from scipy.spatial.distance to use for pairwise distances between single cells.
+    aggregate : str, default: "mean"
+        Aggregation function to use. Available aggregation functions:
+
+        - mean: Mean of the cell profiles.
+        - median: Median of the cell profiles.
+        - sum: Sum of the cell profiles.
+    """
+
+    def __init__(
+        self,
+        sample_key,
+        cell_group_key,
+        layer="X_pca",
+        seed=67,
+        dist="euclidean",
+        cell_wise_metric="euclidean",
+        aggregate="mean",
+    ):
         import pertpy as pt
 
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer, seed=seed)
 
         # create pertpy distance object; raises an error when distance_metric is not valid
-        self.cell_wise_metric = "euclidean"
-        self.distance = pt.tl.Distance(metric=dist, obsm_key=layer, cell_wise_metric=self.cell_wise_metric)
+        self.cell_wise_metric = cell_wise_metric
+        self.aggregate = aggregate
+        self.distance = pt.tl.Distance(
+            metric=dist,
+            obsm_key=layer,
+            cell_wise_metric=self.cell_wise_metric,
+            agg_fct=valid_aggregate(aggregate),
+        )
 
-        self.DISTANCES_UNS_KEY = f"X_pertpy_{dist}"
+        self.DISTANCES_UNS_KEY = f"X_pert_{dist}"
         self.distance_metric = dist
-        # TODO: self.aggregate = aggregate maybe add the functions from pertpy
 
     def calculate_distance_matrix(self, force: bool = False):
-        """Calculate distances between samples"""
+        """
+        Calculate distances between samples using PertPy.
+
+        Parameters
+        ----------
+        force : bool, default: False
+            If True, recalculate the distance matrix even if it is already cached.
+
+        Returns
+        -------
+        np.ndarray
+            Distance matrix between samples.
+        """
         distances = super().calculate_distance_matrix(force=force)
 
         if distances is not None:
@@ -2309,7 +2380,7 @@ class PertPyDistances(SampleRepresentationMethod):
         self.adata.uns[self.DISTANCES_UNS_KEY] = distances
         self.adata.uns["bulk_parameters"] = {
             "sample_key": self.sample_key,
-            # TODO: "aggregate": self.aggregate, maybe add the functions from pertpy
+            "aggregate": self.aggregate,
             "distance_type": self.distance_metric,
         }
 
