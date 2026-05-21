@@ -33,4 +33,5 @@
     tl.evaluate_prediction
     tl.test_proportions
     tl.evaluate_representation
+    tl.PerturbationDistances
 ```
