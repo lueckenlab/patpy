@@ -14,3 +14,9 @@ build:
       html:
         - uvx hatch run docs:build
         - mv docs/_build $READTHEDOCS_OUTPUT
+
+# Tutorial notebooks live in the lueckenlab/patpy_tutorials git submodule
+# at docs/tutorials/notebooks/.
+submodules:
+  include: all
+  recursive: true

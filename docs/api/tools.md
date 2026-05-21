@@ -13,6 +13,7 @@
     :toctree: ../generated
 
     tl.PILOT
+    tl.PILOTGMVAE
     tl.GroupedPseudobulk
     tl.CellGroupComposition
     tl.MrVI
@@ -20,6 +21,11 @@
     tl.SCPoli
     tl.Pseudobulk
     tl.WassersteinTSNE
+    tl.PhEMD
+    tl.DiffusionEarthMoverDistance
+    tl.MOFA
+    tl.GloScope
+    tl.GloScope_py
     tl.SampleRepresentationMethod
     tl.describe_metadata
     tl.test_distances_significance

@@ -28,6 +28,27 @@ it is still possible to use different tools to manage dependencies, such as `uv`
 
 [hatch]: https://hatch.pypa.io/latest/
 
+## Cloning the repository
+
+The tutorial notebooks under `docs/tutorials/notebooks/` are not stored in this repository.
+They live in the separate [lueckenlab/patpy_tutorials][patpy-tutorials-repo] repository and are pulled in as a [git submodule][git-submodules].
+When you clone `patpy`, make sure to fetch submodules too:
+
+```bash
+git clone --recurse-submodules git@github.com:lueckenlab/patpy.git
+```
+
+If you already cloned without `--recurse-submodules`, run this once inside your clone:
+
+```bash
+git submodule update --init --recursive
+```
+
+Without this step, the `docs/tutorials/notebooks/` folder will be empty and `hatch run docs:build` will fail to render the tutorials.
+
+[patpy-tutorials-repo]: https://github.com/lueckenlab/patpy_tutorials
+[git-submodules]: https://git-scm.com/book/en/v2/Git-Tools-Submodules
+
 ## Installing dev dependencies
 
 In addition to the packages needed to _use_ this package,
@@ -217,10 +238,56 @@ in the root of the repository.
 
 [pytest]: https://docs.pytest.org/
 
+### Heavy dataset tests
+
+Tests marked with `@pytest.mark.dataset` download real datasets from Figshare (multi-GB) and are **skipped by default** — both locally and on every automatic CI run (PR, push to `main`, scheduled cron) — so day-to-day test runs stay fast. On CI they only run when the `Test` workflow is **dispatched manually** from the Actions tab (the `workflow_dispatch` trigger). Trigger one after changes to `src/patpy/datasets/`, or whenever you want to re-validate the Figshare downloads.
+
+If you change anything in `src/patpy/datasets/` (or otherwise want to validate the downloads) locally, opt in with `--run-datasets`:
+
+:::::{tabs}
+::::{group-tab} Hatch
+
+```bash
+hatch test -- --run-datasets
+```
+
+::::
+
+::::{group-tab} uv
+
+```bash
+uv run pytest --run-datasets
+```
+
+::::
+
+::::{group-tab} Pip
+
+```bash
+source .venv/bin/activate
+pytest --run-datasets
+```
+
+::::
+:::::
+
+To avoid re-downloading on every run, point pytest at a persistent cache directory by exporting `PATPY_TEST_DATASETDIR`:
+
+```bash
+export PATPY_TEST_DATASETDIR="$HOME/.cache/patpy-test-datasets"
+mkdir -p "$PATPY_TEST_DATASETDIR"
+pytest --run-datasets -k test_combat   # for example
+```
+
+You can also restrict the run to a single dataset loader with `-k` (e.g. `-k test_inflammation_atlas`) so you don't have to wait for every dataset to download.
+
 ### Continuous integration
 
 Continuous integration via GitHub actions will automatically run the tests on all pull requests and test
-against the minimum and maximum supported Python version.
+against the minimum and maximum supported Python version. Heavy `@pytest.mark.dataset` tests are skipped
+on every automatic run (PR, push to `main`, scheduled cron) — they would otherwise time out downloading
+multi-GB files. To run them on CI, dispatch the `Test` workflow manually from the Actions tab; see
+[Heavy dataset tests](#heavy-dataset-tests) above for the local opt-in workflow.
 
 Additionally, there’s a CI job that tests against pre-releases of all dependencies (if there are any).
 The purpose of this check is to detect incompatibilities of new package versions early on and
@@ -277,7 +344,8 @@ See scanpy’s {doc}`scanpy:dev/documentation` for more information on how to wr
 
 ### Tutorials with myst-nb and jupyter notebooks
 
-The documentation is set-up to render jupyter notebooks stored in the `docs/notebooks` directory using [myst-nb][].
+The documentation is set-up to render jupyter notebooks stored in the `docs/tutorials/notebooks/` directory using [myst-nb][].
+That directory is a [git submodule][git-submodules] of [lueckenlab/patpy_tutorials][patpy-tutorials-repo] — see [Cloning the repository](#cloning-the-repository) for the initial setup, and [Editing tutorial notebooks](#editing-tutorial-notebooks-submodule-workflow) below for the day-to-day workflow.
 Currently, only notebooks in `.ipynb` format are supported that will be included with both their input and output cells.
 It is your responsibility to update and re-run the notebook whenever necessary.
 
@@ -285,6 +353,53 @@ If you are interested in automatically running notebooks as part of the continuo
 please check out [this feature request][issue-render-notebooks] in the `cookiecutter-scverse` repository.
 
 [issue-render-notebooks]: https://github.com/scverse/cookiecutter-scverse/issues/40
+
+#### Editing tutorial notebooks (submodule workflow)
+
+Tutorial notebooks live in [lueckenlab/patpy_tutorials][patpy-tutorials-repo] and are pinned in `patpy` at a specific commit. Because the notebooks live in a different repository, **a single notebook change typically requires two pull requests** — one in each repo:
+
+1. A PR on [lueckenlab/patpy_tutorials][patpy-tutorials-repo] containing the actual notebook changes.
+2. A PR on [lueckenlab/patpy][patpy-repo] that bumps the submodule pointer to the new tutorials commit, so the patpy docs build (and Read the Docs preview) renders the updated notebooks.
+
+The day-to-day commands look like this:
+
+**1. Edit and open a PR in the tutorials submodule.** From the patpy repo root:
+
+```bash
+cd docs/tutorials/notebooks
+git checkout -b my-tutorial-update     # submodules check out a detached HEAD by default
+# ... edit notebooks ...
+git add <file>.ipynb
+git commit -m "Update <tutorial>"
+git push -u origin my-tutorial-update
+# then open a PR on lueckenlab/patpy_tutorials and get it reviewed/merged
+```
+
+**2. Bump the pointer in your patpy PR.** Back in the parent repo, fast-forward the submodule to the merged tutorials commit (or to your branch if you want a preview before the tutorials PR is merged) and commit the pointer bump on your patpy feature branch:
+
+```bash
+cd ../../..                                              # back to patpy repo root
+git checkout my-feature-branch                           # your patpy PR branch
+git submodule update --remote docs/tutorials/notebooks   # fast-forward to the new tutorials commit
+git add docs/tutorials/notebooks
+git commit -m "Bump tutorials submodule"
+git push
+```
+
+`git status` in `patpy` will then show no submodule diff. Without this pointer bump, your patpy PR (and the Read the Docs preview built for it) will keep rendering the old notebook content even after the tutorials PR is merged.
+
+**Tip.** Strictly speaking the two PRs can move in either order, but the cleanest sequence is: open and merge the tutorials PR first, then open the patpy PR with the pointer bump on top of it. That way the patpy PR's RTD preview shows the final state.
+
+**Pulling tutorial updates from someone else.** Run this from the patpy root:
+
+```bash
+git submodule update --init --recursive             # if you don't have the submodule yet
+git submodule update --remote docs/tutorials/notebooks  # fast-forward to the latest pinned commit
+```
+
+**Common gotcha.** If `git status` in `patpy` shows `modified: docs/tutorials/notebooks (new commits)`, you have local commits in the submodule that aren't pushed yet, or you forgot the pointer bump described above.
+
+[patpy-repo]: https://github.com/lueckenlab/patpy
 
 #### Hints
 

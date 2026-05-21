@@ -161,16 +161,19 @@ def setup(app):
 
 
 nbsphinx_thumbnails = {
-    "notebooks/representation_methods_example": "_static/patpy_logo.png",
-    "notebooks/sources_of_variation_with_gloscope": "_static/patpy_logo.png",
-    "notebooks/Patient_trajectories_example": "_static/patpy_logo.png",
-    "notebooks/supervised_methods_example": "_static/patpy_logo.png",
-    "notebooks/differential_analysis": "_static/patpy_logo.png",
-    "notebooks/synthetic_data_generation": "_static/patpy_logo.png",
-    "notebooks/distances_test_example": "_static/patpy_logo.png",
+    "tutorials/notebooks/representation_methods_example": "_static/patpy_logo.png",
+    "tutorials/notebooks/sources_of_variation_with_gloscope": "_static/patpy_logo.png",
+    "tutorials/notebooks/Patient_trajectories_example": "_static/patpy_logo.png",
+    "tutorials/notebooks/supervised_methods_example": "_static/patpy_logo.png",
+    "tutorials/notebooks/differential_analysis": "_static/patpy_logo.png",
+    "tutorials/notebooks/synthetic_data_generation": "_static/patpy_logo.png",
+    "tutorials/notebooks/distances_test_example": "_static/patpy_logo.png",
 }
 
 # -- nbsphinx configuration --------------------------------------------------
+# Tutorial notebooks live in the lueckenlab/patpy_tutorials submodule mounted
+# at docs/tutorials/notebooks/. For those pages, the "view source" link should
+# point at the tutorials repo on GitHub instead of patpy.
 nbsphinx_prolog = """
 {% set docname = env.doc2path(env.docname, base=None) %}
 
@@ -180,7 +183,11 @@ nbsphinx_prolog = """
         <p class="admonition-title">Note</p>
         <p>
             This page was generated from
+            {% if docname.startswith('tutorials/notebooks/') %}
+            <a class="reference external" href="https://github.com/lueckenlab/patpy_tutorials/blob/main/{{ docname[len('tutorials/notebooks/'):]|e }}">{{ docname|e }}</a>.
+            {% else %}
             <a class="reference external" href="https://github.com/lueckenlab/patpy/blob/{{ env.config.release|e }}/docs/{{ docname|e }}">{{ docname|e }}</a>.
+            {% endif %}
         </p>
     </div>
 

@@ -8,6 +8,106 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.16.6
+
+### Fixed
+
+- Dependencies for patpy[milo-edger] amd patpy[de]. Previously, they allowed python 3.11, but this version is not supported by pertpy and caused problems on installation
+
+## 0.16.5
+
+### Added
+
+- Interface to PILOT_GMA_VAE sample representation method at `patpy.tl.sample_representation.PILOTGMVAE`
+
+### Fixed
+
+- Added missing method references to the API docs
+
+## 0.16.4
+
+### Added
+
+- `patpy.datasets.combat_stephenson`: harmonized COMBAT + Stephenson COVID-19 PBMC cohort (251 samples / 1,399,435 cells / 1,856 genes) with shared cell_coarse_aligned annotations and joint PCA/scVI/scANVI embeddings.
+- `patpy.datasets.inflammation_atlas`: inflammation atlas cross-study dataset. Added only scANVI latents. 3 splits (main / external / validation) selected through a split argument, each with its own DatasetInfo (cell_type_key is Level1 for main, Level1pred for external/validation).
+
+### Changed
+
+- Turn off running dataset tests manually, they can now only be triggered manually
+
+### Fixed
+
+- Add locking scanpy test file to prevent concurrent reading and failing tests: https://github.com/scverse/scanpy/issues/4097
+
+## 0.16.3
+
+### Fixed
+
+- Downloading COMBAT meta adata did not work due to incorrect link for the programmatic access
+
+## 0.16.2
+
+### Changed
+
+- Move tutorials to submodule. Adapted the CI process and updated contributor information
+
+## 0.16.1
+
+### Added
+
+- `evaluate_representation(..., method="permanova")` for categorical outcomes: PERMANOVA pseudo-F (single factor, same decomposition as ``vegan::adonis2``) with permutation p-values in pure Python
+
+### Changed
+
+- Moved distances caching from anndata object to the instance of the sample representation class
+- Renamed dataset loaders `combat_preprocessed`, `hlca_preprocessed`, `onek1k_preprocessed`, `stephenson_preprocessed`, `ticatlas_preprocessed` to `combat`, `hlca`, `onek1k`, `stephenson`, `ticatlas` (breaking; no deprecation aliases).
+
+### Added
+
+- `kind: Literal["raw", "processed"] = "processed"` argument on every dataset loader. Currently only the processed variants are wired up; `kind="raw"` raises `NotImplementedError` until raw URLs are provided.
+- `load_metadata: bool = False` argument on `patpy.datasets.combat` that additionally downloads the ~4 MB sample-metadata `AnnData` (Figshare ID `64291092`) and returns it as an extra tuple element. Combined with `return_dataset_info`, the return order is `(adata, meta_adata, info)`.
+
+### Deleted
+
+- `DISTANCES_UNS_KEY` from sample representation methods
+- `combat_preprocessed`, `hlca_preprocessed`, `onek1k_preprocessed`, `stephenson_preprocessed`, `ticatlas_preprocessed` (use `combat`, `hlca`, `onek1k`, `stephenson`, `ticatlas` instead).
+
+## 0.16.0 – datasets module
+
+### Added
+
+- `datasets` module with functions to download preprocessed datasets
+- `patpy/datasets/_datasets/DatasetInfo` data class to define information about datasets
+- `patpy/datasets/_datasets/_load_dataset` util function
+- `patpy/datasets/_datasets/combat_preprocessed` dataset
+- `patpy/datasets/_datasets/stephenson_preprocessed`
+- `patpy/datasets/_datasets/hlca_preprocessed` dataset
+- `patpy/datasets/_datasets/onek1k_preprocessed` dataset
+- `patpy/datasets/_datasets/ticatlas_preprocessed` dataset
+- Tests for loading datasets `tests/test_datasets.py`
+- Github workflow at `.github/workflows/test.yaml` with caching to not download datasets each time
+
+## 0.15.4
+
+### Fixed
+
+- `patpy.tl.evaluation.replicate_robustness` normalisation: the metric now reaches 0 in the worst case (replicate is the farthest neighbour for every sample).
+
+### Added
+
+- Tests for `replicate_robustness` covering best, worst, and intermediate configurations.
+- Expanded docstring for `replicate_robustness`.
+
+## 0.15.3
+
+### Fixed
+
+- The `n_neighbors` and `reverse_technical_score` parameters in `patpy.tl.evaluation/knn_prediction_score` were not used
+
+### Added
+
+- Tests for the fixed bugs
+
 ## 0.15.2
 
 ### Deleted

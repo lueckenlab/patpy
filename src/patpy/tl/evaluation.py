@@ -445,6 +445,130 @@ def _select_random_subset(distances, target, num_donors_subset=None, proportion_
     return distances_subset, target_subset
 
 
+def _permanova_ss_w(distance_sq: np.ndarray, grouping: np.ndarray) -> float:
+    """Within-group sum of squares ``S_W`` used in one-way PERMANOVA.
+
+    Matches the ``s_W`` term from Anderson (2001) and ``vegan::adonis2`` for a
+    single factor: sum over unordered within-group pairs ``(i, j), i<j`` of
+    ``distance_sq[i, j] / n_g`` where ``n_g`` is the sample size of that group.
+    ``distance_sq`` must hold squared distances (``d**2``).
+    """
+    n = distance_sq.shape[0]
+    counts = np.bincount(grouping)
+    i_u, j_u = np.triu_indices(n, k=1)
+    same = grouping[i_u] == grouping[j_u]
+    gi = grouping[i_u[same]]
+    return float((distance_sq[i_u[same], j_u[same]] / counts[gi]).sum())
+
+
+def permanova_pseudo_f_statistic(distances: np.ndarray, grouping: np.ndarray) -> float:
+    """PERMANOVA pseudo-:math:`F` for a precomputed distance matrix (one factor).
+
+    Use this when you already have pairwise distances between samples and a **categorical**
+    grouping (same length and order as rows/columns). It asks whether samples are more
+    dissimilar **between** groups than **within**, in the same spirit as a one-way ANOVA
+    but on distances (see :func:`associate_embedding_with_covariates` for an analogous
+    test on an embedding). The statistic is a ratio of between-group to within-group
+    variation of squared distances; **larger values mean stronger separation** of groups
+    in distance space.
+
+    This follows Anderson (2001) and is the single-factor decomposition used in
+    ``vegan::adonis2``. The label *pseudo*-:math:`F` reflects that the sampling
+    distribution is obtained by permutation (see :func:`permanova_test`), not an
+    :math:`F` table.
+
+    Parameters
+    ----------
+    distances
+        Square ``(n, n)`` dissimilarity matrix (zeros on the diagonal).
+    grouping
+        Length-``n`` group labels (any hashable values; recoded as contiguous integers).
+
+    Returns
+    -------
+    float
+        Pseudo-:math:`F` statistic.
+
+    References
+    ----------
+    Anderson, M.J. (2001). A new method for non-parametric multivariate analysis of
+    variance. *Austral Ecology* 26, 32-46.
+    """
+    d = np.asarray(distances, dtype=float)
+    if d.ndim != 2 or d.shape[0] != d.shape[1]:
+        raise ValueError("distances must be a square matrix.")
+    n = d.shape[0]
+    grp = np.asarray(grouping)
+    if grp.shape[0] != n:
+        raise ValueError("grouping length must match the distance matrix size.")
+    _, grp = np.unique(grp, return_inverse=True)
+    num_groups = int(np.unique(grp).size)
+    if num_groups < 2:
+        raise ValueError("PERMANOVA requires at least two groups.")
+    if n <= num_groups:
+        raise ValueError("PERMANOVA requires n_samples > n_groups.")
+    d_sq = d * d
+    s_t = d_sq.sum() / n / 2.0
+    s_w = _permanova_ss_w(d_sq, grp)
+    s_a = s_t - s_w
+    return (s_a / (num_groups - 1)) / (s_w / (n - num_groups))
+
+
+def permanova_test(
+    distances: np.ndarray,
+    target: np.ndarray | pd.Series,
+    permutations: int = 999,
+    random_state: int | np.random.Generator | None = None,
+) -> dict:
+    """Monte Carlo permutation test for :func:`permanova_pseudo_f_statistic`.
+
+    Randomly permutes group labels and recomputes the pseudo-:math:`F`. The p-value is
+    ``(1 + r) / (1 + permutations)``, where ``r`` counts permutations whose pseudo-:math:`F`
+    is at least the observed value (the observed statistic is included, as in ``vegan``).
+
+    Parameters
+    ----------
+    distances
+        Square distance matrix between samples.
+    target
+        Categorical group labels (one per row/column of ``distances``).
+    permutations
+        Number of random permutations of labels. If ``0``, p-value is ``nan``.
+    random_state
+        Seed or ``numpy.random.Generator`` for permutations.
+
+    Returns
+    -------
+    dict
+        Keys: ``pseudo_f``, ``p_value``, ``permutations``.
+    """
+    rng = np.random.default_rng(random_state)
+    codes, _ = pd.factorize(np.asarray(target), sort=True)
+    f_obs = permanova_pseudo_f_statistic(distances, codes.astype(int, copy=False))
+    if permutations == 0:
+        return {"pseudo_f": f_obs, "p_value": np.nan, "permutations": 0}
+    ge = 1
+    for _ in range(permutations):
+        perm = rng.permutation(codes)
+        if permanova_pseudo_f_statistic(distances, perm) >= f_obs - 1e-12:
+            ge += 1
+    p_value = ge / (permutations + 1)
+    return {"pseudo_f": f_obs, "p_value": p_value, "permutations": permutations}
+
+
+def _validate_permanova_target(target: pd.Series) -> None:
+    """Raise if ``target`` looks numeric/high-cardinality rather than a grouping factor."""
+    t = pd.Series(target)
+    n = len(t)
+    n_u = t.nunique(dropna=False)
+    if n_u < 2:
+        raise ValueError("PERMANOVA requires at least two distinct groups.")
+    if pd.api.types.is_numeric_dtype(t) and n_u > max(25, n // 2):
+        raise ValueError(
+            "PERMANOVA expects a categorical grouping; for continuous outcomes use method='knn' with task='regression'."
+        )
+
+
 def evaluate_representation(
     distances,
     target,
@@ -461,13 +585,14 @@ def evaluate_representation(
         Matrix of distances between samples
     target : array-like
         Vector with the values of a feature for each sample
-    method : Literal["knn", "distances", "proportions", "silhouette"]
+    method : Literal["knn", "distances", "proportions", "silhouette", "persistence", "permanova"]
         Method to use for evaluation:
         - knn: predict values of `target` using K-nearest neighbors and evaluate the prediction
         - distances: test if distances between samples are significantly different from the null distribution
         - proportions: test if distribution of `target` differs between groups (e.g. clusters)
-        - silhouette: calculate silhouette score for the given distances
+        - silhouette: calculate silhouette score using :func:`sklearn.metrics.silhouette_score` with ``metric='precomputed'``
         - persistence: calculate the persistence of connected components in filtration of a kNN graph based on the values of `target`
+        - permanova: PERMANOVA pseudo-F on the distance matrix for a categorical ``target`` (single factor, as in ``vegan::adonis2``). Larger ``score`` means stronger separation
     num_donors_subset : int, optional
         Absolute number of donors to include in the evaluation.
     proportion_donors_subset : float, optional
@@ -488,6 +613,9 @@ def evaluate_representation(
         - persistence:
             - max_feature_difference: maximum difference in the feature values allowed between connected nodes
             - n_neighbors: number of neighbors to use for constructing the kNN graph
+        - permanova:
+            - permutations: permutation count for the p-value (default 999). Use ``0`` to skip permutations (p-value ``nan``)
+            - random_state: seed or ``numpy.random.Generator`` for permutations
 
     Returns
     -------
@@ -500,6 +628,9 @@ def evaluate_representation(
         - method: name of the method used for evaluation
         There are other optional keys depending on the method used for evaluation.
     """
+    if not isinstance(target, pd.Series):
+        target = pd.Series(np.asarray(target))
+
     if num_donors_subset is not None or proportion_donors_subset is not None:
         distances, target = _select_random_subset(distances, target, num_donors_subset, proportion_donors_subset)
 
@@ -534,6 +665,33 @@ def evaluate_representation(
 
         ## The lower the total_lifetime, the better the representation
         result = {"score": result_ph["total_lifetime"], "metric": "total_lifetime"}
+
+    elif method == "permanova":
+        _validate_permanova_target(target)
+        params = dict(parameters)
+        permutations = int(params.pop("permutations", 999))
+        random_state = params.pop("random_state", None)
+        if params:
+            raise TypeError(f"Unexpected parameters for permanova: {sorted(params)}")
+
+        out = permanova_test(
+            distances,
+            target,
+            permutations=permutations,
+            random_state=random_state,
+        )
+        result = {
+            "score": out["pseudo_f"],
+            "metric": "permanova_pseudo_f",
+            "p_value": out["p_value"],
+            "permutations": out["permutations"],
+        }
+
+    else:
+        raise ValueError(
+            f"Unknown evaluation method {method!r}. Choose one of 'knn', 'distances', 'proportions', "
+            "'silhouette', 'persistence', 'permanova'."
+        )
 
     result["n_unique"] = len(np.unique(target))
     result["n_observations"] = len(target)  # Without missing values this number can change between features
@@ -689,7 +847,11 @@ def knn_prediction_score(
                         distances = distances.loc[meta_adata.obs_names][meta_adata.obs_names].values
 
                     result = evaluate_representation(
-                        distances=distances, target=meta_adata.obs[col], method="knn", task=task, n_neighbors=3
+                        distances=distances,
+                        target=meta_adata.obs[col],
+                        method="knn",
+                        task=task,
+                        n_neighbors=n_neighbors,
                     )
                 except (KeyError, ValueError, RuntimeError) as e:
                     print("Representation:", representation)
@@ -705,7 +867,7 @@ def knn_prediction_score(
                 result["covariate_type"] = covariate_type
 
                 # Inverse technical score to interpret them as batch effect removal
-                if covariate_type == "technical":
+                if reverse_technical_score and covariate_type == "technical":
                     result["score"] = 1 - result["score"]
 
                 if result["metric"] == "spearman_r":
@@ -717,15 +879,57 @@ def knn_prediction_score(
 
 
 def replicate_robustness(distances_df: pd.DataFrame, replicate_identity_function=_identity_up_to_suffix) -> float:
-    """Compute the replicate robustness metric, which checks how close the repliicate samples are to each other
+    """Compute the replicate robustness metric, which checks how close the replicate samples are to each other.
+
+    For every sample, the rank of its replicate is found in the list of distances to
+    all other samples (sorted ascending, self excluded). Ranks are then averaged and
+    normalised so the score lies in ``[0, 1]``:
+
+    - ``1.0`` — every sample's replicate is its nearest neighbour (perfect robustness).
+    - ``0.0`` — every sample's replicate is its farthest neighbour (worst case).
+    - values in between mix the two regimes.
 
     Parameters
     ----------
-    distances_df: pd.DataFrame
-        The distances between samples. Must be a data frame with samples names in index and columns.
-    replicate_identity_function: Callable
-        A function that takes names of two samples and returns True if they are replicates
+    distances_df : pd.DataFrame
+        Square distance matrix with sample names on both index and columns. Each
+        sample is expected to have exactly one replicate present in the matrix
+        (besides itself).
+    replicate_identity_function : Callable, optional
+        Function ``(name, names) -> list[bool]`` that returns, for a single
+        sample ``name`` and an iterable of candidate ``names``, a boolean mask
+        flagging which candidates are replicates of ``name``. Exactly one
+        ``True`` is expected per call.
 
+        The default, :func:`_identity_up_to_suffix`, treats two samples as
+        replicates when their names match up to the part before the last
+        underscore. For instance ``"donor1_a"`` and ``"donor1_b"`` are
+        replicates (both strip to ``"donor1"``), while ``"donor1_a"`` and
+        ``"donor2_a"`` are not. Pass a custom function if your naming scheme
+        differs (e.g. replicates encoded in a separate metadata column).
+
+    Returns
+    -------
+    float
+        The replicate robustness score in ``[0, 1]``.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> import pandas as pd
+    >>> from patpy.tl.evaluation import replicate_robustness
+    >>> names = ["donor1_a", "donor1_b", "donor2_a", "donor2_b"]
+    >>> dist = np.array(
+    ...     [
+    ...         [0.0, 0.1, 1.0, 1.0],
+    ...         [0.1, 0.0, 1.0, 1.0],
+    ...         [1.0, 1.0, 0.0, 0.1],
+    ...         [1.0, 1.0, 0.1, 0.0],
+    ...     ]
+    ... )
+    >>> distances_df = pd.DataFrame(dist, index=names, columns=names)
+    >>> replicate_robustness(distances_df)
+    1.0
     """
     replicate_indexes = np.zeros(distances_df.shape[0])
 
@@ -735,7 +939,10 @@ def replicate_robustness(distances_df: pd.DataFrame, replicate_identity_function
         replicate_idx = np.where(replicate_identity_function(col, dists_to_others.index))[0].item()
         replicate_indexes[i] = replicate_idx
 
-    return 1 - np.mean(replicate_indexes)
+    # Max possible rank of a replicate is len(replicate_indexes) - 2: there are
+    # len(replicate_indexes) - 1 other samples after dropping self, indexed 0..n-2.
+    max_rank = len(replicate_indexes) - 2
+    return 1 - np.mean(replicate_indexes) / max_rank
 
 
 def associate_embedding_with_covariates(

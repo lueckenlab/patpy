@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "patpy"
-version = "0.15.2"
+version = "0.16.6"
 description = "A toolbox for patient or sample representation from single-cell data"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -36,7 +36,9 @@ dependencies = [
 ]
 
 optional-dependencies.de = [
-  "pertpy[de]>=1.0.5",
+  # pertpy>=1.0.5 requires Python>=3.12; gate the extra so resolution succeeds
+  # on Python 3.11 (patpy core still installs, but pertpy-backed DE is unavailable).
+  "pertpy[de]>=1.0.5; python_version>='3.12'",
 ]
 optional-dependencies.dev = [
   # CLI for bumping the version number
@@ -76,7 +78,9 @@ optional-dependencies.helical = [
   "helical>=1.8.3",
 ]
 optional-dependencies.milo-edger = [
-  "pertpy[milo-edger]>=1.0.5",
+  # pertpy>=1.0.5 requires Python>=3.12; gate the extra so resolution succeeds
+  # on Python 3.11 (patpy core still installs, but milo/edgeR is unavailable).
+  "pertpy[milo-edger]>=1.0.5; python_version>='3.12'",
 ]
 optional-dependencies.mixmil = [
   "mixmil>=0.1.2",
@@ -105,6 +109,7 @@ optional-dependencies.scpoli = [
 ]
 optional-dependencies.test = [
   "coverage",
+  "filelock",   # cross-worker lock for pytest-xdist (scanpy download race)
   "pytest",
   "pytest-cov",
 ]
@@ -123,6 +128,7 @@ dev = [
 ]
 test = [
   "coverage>=7.10",
+  "filelock",       # cross-worker lock for pytest-xdist (scanpy download race)
   "pytest",
   "pytest-cov",     # For VS Code’s coverage functionality
 ]
@@ -227,6 +233,7 @@ addopts = [
 ]
 markers = [
   "helical: integration tests that load real Helical foundation models (slow, requires helical extra)",
+  "dataset: tests that download real datasets from the internet (slow, opt-in via --run-datasets)",
 ]
 
 [tool.coverage.run]

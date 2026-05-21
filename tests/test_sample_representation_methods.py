@@ -10,6 +10,7 @@ from patpy.tl._base_sample_method import _create_colormap
 from patpy.tl.sample_representation import (
     MOFA,
     PILOT,
+    PILOTGMVAE,
     CellGroupComposition,
     DiffusionEarthMoverDistance,
     GloScope,
@@ -67,22 +68,20 @@ _ALL_SR_METHODS = [
 ]
 
 
-def _assert_distances(distances, n_samples, uns, uns_key, *, symmetric=True):
-    """Assert that distances is a valid (n_samples, n_samples) matrix stored in uns."""
+def _assert_distances(distances, n_samples, method, *, symmetric=True):
+    """Assert that distances is a valid (n_samples, n_samples) matrix cached on the method instance."""
     assert isinstance(distances, np.ndarray)
     assert distances.shape == (n_samples, n_samples)
     if symmetric:
         assert np.allclose(distances, distances.T, atol=1e-5)
-    assert uns_key in uns
-    assert np.array_equal(uns[uns_key], distances)
+    assert method._distances is not None
+    assert np.array_equal(method._distances, distances)
 
 
-def _assert_cache_respected(method, uns, computed_distances, extra_uns=None):
+def _assert_cache_respected(method, computed_distances):
     """Assert that calculate_distance_matrix() returns the cached value without recomputing."""
     sentinel = np.full_like(computed_distances, fill_value=-1.0)
-    uns[method.DISTANCES_UNS_KEY] = sentinel  # Rewrite the calculated matrix with an arbitrary one
-    if extra_uns:  # Needed for WassersteinTSNE as it stores extra info in uns
-        uns.update(extra_uns)
+    method._distances = sentinel  # Overwrite cached matrix with an arbitrary one
     assert np.array_equal(method.calculate_distance_matrix(), sentinel)
 
 
@@ -104,8 +103,8 @@ def test_distance_matrix_is_computed_and_cached(method_cls, kwargs, synthetic_ad
     assert isinstance(distances, np.ndarray)
     assert distances.shape == (n_samples, n_samples)
     assert np.allclose(distances, distances.T)
-    assert method.DISTANCES_UNS_KEY in adata.uns
-    assert np.array_equal(adata.uns[method.DISTANCES_UNS_KEY], distances)
+    assert method._distances is not None
+    assert np.array_equal(method._distances, distances)
 
 
 # Ensures all methods respect cached distances unless explicitly forced to recompute.
@@ -118,12 +117,12 @@ def test_distance_matrix_uses_cache_when_present(method_cls, kwargs, synthetic_a
     baseline = method.calculate_distance_matrix(force=True)
 
     cached = np.full_like(baseline, fill_value=-1.0)
-    adata.uns[method.DISTANCES_UNS_KEY] = cached
+    method._distances = cached
 
     distances = method.calculate_distance_matrix()
 
     assert np.array_equal(distances, cached)
-    assert adata.uns[method.DISTANCES_UNS_KEY] is cached
+    assert method._distances is cached
 
 
 # ---------------------------------------------------------------------------
@@ -184,8 +183,8 @@ def test_mrvi(synthetic_adata):
     method.prepare_anndata(adata)
     distances = method.calculate_distance_matrix(force=True)
 
-    _assert_distances(distances, n_samples, adata.uns, method.DISTANCES_UNS_KEY)
-    _assert_cache_respected(method, adata.uns, distances)
+    _assert_distances(distances, n_samples, method)
+    _assert_cache_respected(method, distances)
 
 
 # ---------------------------------------------------------------------------
@@ -207,8 +206,8 @@ def test_wasserstein_tsne(pbmc3k_adata):
     method.prepare_anndata(adata)
     distances = method.calculate_distance_matrix()
 
-    _assert_distances(distances, n_samples, adata.uns, method.DISTANCES_UNS_KEY, symmetric=False)
-    _assert_cache_respected(method, adata.uns, distances, extra_uns={"wasserstein_covariance_weight": 0.5})
+    _assert_distances(distances, n_samples, method, symmetric=False)
+    _assert_cache_respected(method, distances)
 
 
 # ---------------------------------------------------------------------------
@@ -233,8 +232,63 @@ def test_pilot(pbmc3k_adata):
     method.prepare_anndata(adata)
     distances = method.calculate_distance_matrix(force=True)
 
-    _assert_distances(distances, n_samples, adata.uns, method.DISTANCES_UNS_KEY)
-    _assert_cache_respected(method, adata.uns, distances)
+    _assert_distances(distances, n_samples, method)
+    _assert_cache_respected(method, distances)
+
+
+# ---------------------------------------------------------------------------
+# PILOTGMVAE (requires pilotgm)
+# ---------------------------------------------------------------------------
+
+
+def test_pilotgmvae(pbmc3k_adata):
+    pytest.importorskip("pilotgm.core", exc_type=Exception)
+    adata = pbmc3k_adata.copy()
+    adata.obs["state"] = "control"
+    n_samples = adata.obs[SAMPLE_KEY].nunique()
+
+    method = PILOTGMVAE(
+        sample_key=SAMPLE_KEY,
+        sample_state_col="state",
+        layer="X_pca",
+        num_classes=3,
+        epochs=1,
+        dataset_name="test_pilotgmvae",
+    )
+    method.prepare_anndata(adata)
+    distances = method.calculate_distance_matrix(force=True)
+
+    _assert_distances(distances, n_samples, method)
+    _assert_cache_respected(method, distances)
+
+
+def test_pilotgmvae_sample_representation(pbmc3k_adata):
+    pytest.importorskip("pilotgm.core", exc_type=Exception)
+    adata = pbmc3k_adata.copy()
+    adata.obs["state"] = "control"
+    n_samples = adata.obs[SAMPLE_KEY].nunique()
+    num_classes = 3
+
+    method = PILOTGMVAE(
+        sample_key=SAMPLE_KEY,
+        sample_state_col="state",
+        layer="X_pca",
+        num_classes=num_classes,
+        epochs=1,
+        dataset_name="test_pilotgmvae_repr",
+    )
+    method.prepare_anndata(adata)
+    method.calculate_distance_matrix(force=True)
+
+    assert method.sample_representation is not None
+    assert method.sample_representation.shape == (n_samples, num_classes)
+    assert np.allclose(method.sample_representation.sum(axis=1), 1.0, atol=1e-5)
+
+
+def test_pilotgmvae_cell_group_key_is_none():
+    pytest.importorskip("pilotgm.core", exc_type=Exception)
+    method = PILOTGMVAE(sample_key=SAMPLE_KEY, sample_state_col="state", layer="X_pca")
+    assert method.cell_group_key is None
 
 
 # ---------------------------------------------------------------------------
@@ -252,8 +306,8 @@ def test_scpoli(synthetic_adata):
     distances = method.calculate_distance_matrix(force=True)
 
     # SCPoli replaces self.adata with an optimized copy; check through the method object
-    _assert_distances(distances, n_samples, method.adata.uns, method.DISTANCES_UNS_KEY)
-    _assert_cache_respected(method, method.adata.uns, distances)
+    _assert_distances(distances, n_samples, method)
+    _assert_cache_respected(method, distances)
 
 
 # ---------------------------------------------------------------------------
@@ -271,8 +325,8 @@ def test_phemd(pbmc3k_adata):
     method.prepare_anndata(adata)
     distances = method.calculate_distance_matrix(force=True)
 
-    _assert_distances(distances, n_samples, adata.uns, method.DISTANCES_UNS_KEY)
-    _assert_cache_respected(method, adata.uns, distances)
+    _assert_distances(distances, n_samples, method)
+    _assert_cache_respected(method, distances)
 
 
 # ---------------------------------------------------------------------------
@@ -289,8 +343,8 @@ def test_diffusion_emd(pbmc3k_adata):
     method.prepare_anndata(adata)
     distances = method.calculate_distance_matrix(force=True)
 
-    _assert_distances(distances, n_samples, adata.uns, method.DISTANCES_UNS_KEY)
-    _assert_cache_respected(method, adata.uns, distances)
+    _assert_distances(distances, n_samples, method)
+    _assert_cache_respected(method, distances)
 
 
 # ---------------------------------------------------------------------------
@@ -313,8 +367,8 @@ def test_mofa(pbmc3k_adata):
     method.prepare_anndata(adata)
     distances = method.calculate_distance_matrix(force=True)
 
-    _assert_distances(distances, n_samples, adata.uns, method.DISTANCES_UNS_KEY)
-    _assert_cache_respected(method, adata.uns, distances)
+    _assert_distances(distances, n_samples, method)
+    _assert_cache_respected(method, distances)
 
 
 # ---------------------------------------------------------------------------
@@ -342,8 +396,8 @@ def test_gloscope_r(pbmc3k_adata):
     method.prepare_anndata(adata)
     distances = method.calculate_distance_matrix(force=True)
 
-    _assert_distances(distances, n_samples, adata.uns, method.DISTANCES_UNS_KEY, symmetric=False)
-    _assert_cache_respected(method, adata.uns, distances)
+    _assert_distances(distances, n_samples, method, symmetric=False)
+    _assert_cache_respected(method, distances)
 
 
 # ---------------------------------------------------------------------------
@@ -360,8 +414,8 @@ def test_gloscope_py(pbmc3k_adata):
     method.prepare_anndata(adata)
     distances = method.calculate_distance_matrix(force=True)
 
-    _assert_distances(distances, n_samples, adata.uns, method.DISTANCES_UNS_KEY)
-    _assert_cache_respected(method, adata.uns, distances)
+    _assert_distances(distances, n_samples, method)
+    _assert_cache_respected(method, distances)
 
 
 # ---------------------------------------------------------------------------
@@ -815,11 +869,11 @@ def test_wasserstein_tsne_warns_when_recomputing_with_different_weight(pbmc3k_ad
     method.prepare_anndata(adata)
     method.calculate_distance_matrix(covariance_weight=0.5)
 
-    with pytest.warns(UserWarning, match="Rewriting"):
+    with pytest.warns(UserWarning, match="Recomputing Wasserstein distances"):
         new_distances = method.calculate_distance_matrix(covariance_weight=0.3)
 
     assert new_distances.shape == (adata.obs[SAMPLE_KEY].nunique(), adata.obs[SAMPLE_KEY].nunique())
-    assert adata.uns["wasserstein_covariance_weight"] == 0.3
+    assert method._covariance_weight == 0.3
 
 
 # ---------------------------------------------------------------------------
@@ -881,6 +935,21 @@ class TestCheckAdataLoaded:
             cell_group_key=PBMC_CELL_KEY,
             sample_state_col="state",
             layer="X_pca",
+        )
+        method.prepare_anndata(adata)
+        method._check_adata_loaded()
+
+    def test_adata_loaded_true_after_prepare_anndata_pilotgmvae(self, pbmc3k_adata):
+        pytest.importorskip("pilotgm.core", exc_type=Exception)
+        adata = pbmc3k_adata.copy()
+        adata.obs["state"] = "control"
+        method = PILOTGMVAE(
+            sample_key=SAMPLE_KEY,
+            sample_state_col="state",
+            layer="X_pca",
+            num_classes=3,
+            epochs=1,
+            dataset_name="test_pilotgmvae_loaded",
         )
         method.prepare_anndata(adata)
         method._check_adata_loaded()
@@ -1036,7 +1105,7 @@ class TestSampleOrderingConsistency:
             )
 
     def test_distance_matrix_cached_correctly(self, synthetic_adata):
-        """Distance matrix should be cached in adata.uns with correct key."""
+        """Distance matrix should be cached on the method instance."""
         for cls, kwargs in LIGHTWEIGHT_METHODS:
             method = cls(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, **kwargs)
             adata = synthetic_adata.copy()
@@ -1044,13 +1113,9 @@ class TestSampleOrderingConsistency:
 
             dist = method.calculate_distance_matrix(force=True)
 
-            # Check cache key exists
-            assert method.DISTANCES_UNS_KEY in method.adata.uns, (
-                f"{cls.__name__}: distance matrix not cached in adata.uns"
-            )
-
-            # Check cached value matches returned value
-            cached_dist = method.adata.uns[method.DISTANCES_UNS_KEY]
+            assert method._distances is not None, f"{cls.__name__}: distance matrix not cached on instance"
             np.testing.assert_array_equal(
-                dist, cached_dist, err_msg=f"{cls.__name__}: cached distance matrix doesn't match returned value"
+                dist,
+                method._distances,
+                err_msg=f"{cls.__name__}: cached distance matrix doesn't match returned value",
             )

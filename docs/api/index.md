@@ -10,6 +10,7 @@ import patpy
 :maxdepth: 2
 :includehidden:
 
+datasets
 preprocessing
 tools
 plotting

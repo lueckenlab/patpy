@@ -202,14 +202,6 @@ class TestDistanceMatrix:
 
 
 class TestCaching:
-    def test_distances_cached_in_uns(self, simple_adata):
-        comp = CellGroupComposition(sample_key="sample", cell_group_key="cell_type", apply_clr=True)
-        comp.prepare_anndata(simple_adata)
-        comp.calculate_distance_matrix()
-
-        assert "X_composition" in simple_adata.uns
-        assert "composition_parameters" in simple_adata.uns
-
     def test_parameters_stored_correctly(self, simple_adata):
         comp = CellGroupComposition(sample_key="sample", cell_group_key="cell_type", apply_clr=True)
         comp.prepare_anndata(simple_adata)
@@ -236,8 +228,8 @@ class TestCaching:
         comp.prepare_anndata(simple_adata)
 
         distances1 = comp.calculate_distance_matrix()
-        # Modify cached value
-        simple_adata.uns["X_composition"] = np.zeros_like(distances1)
+        # Modify cached value on the method instance
+        comp._distances = np.zeros_like(distances1)
 
         # Without force, should return cached (zeros)
         distances_cached = comp.calculate_distance_matrix(force=False)
