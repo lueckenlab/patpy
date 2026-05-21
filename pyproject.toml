@@ -97,7 +97,7 @@ optional-dependencies.pascient = [
   "s3fs",
 ]
 optional-dependencies.pert-distances = [
-  "pertpy>=1.0.5", # TODO: maybe add additional pertpy dependencies?
+  "pertpy>=1.0.5",
 ]
 optional-dependencies.pilot = [
   "pilotpy",
