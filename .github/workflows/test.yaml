@@ -7,6 +7,10 @@ on:
     branches: [main]
   schedule:
     - cron: "0 5 1,15 * *"
+  # Manual trigger for the heavy `@pytest.mark.dataset` suite (multi-GB Figshare
+  # downloads). These are not run on PR / push / schedule — opt in by dispatching
+  # this workflow from the Actions tab. See docs/contributing.md.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -70,21 +74,27 @@ jobs:
           python-version: ${{ matrix.env.python }}
       - name: create hatch environment
         run: uvx hatch env create ${{ matrix.env.name }}
+      # Heavy "dataset" tests (multi-GB downloads from Figshare) only run when the
+      # workflow is dispatched manually from the Actions tab — they're too slow
+      # to gate PRs / push-to-main on. Contributors should run them locally when
+      # touching dataset code (see docs/contributing.md).
       - name: Cache test datasets
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/cache@v4
         with:
           path: ~/.cache/patpy-test-datasets
           # Bump the suffix to invalidate the cache (e.g. when the figshare file ID changes).
-          key: patpy-test-datasets-figshare-64217586-64225884-64225983-64226109-64226097-v1
+          key: patpy-test-datasets-figshare-64217586-64225884-64225983-64226109-64226097-64291092-v2
       - name: run tests using hatch
         env:
           MPLBACKEND: agg
           PLATFORM: ${{ matrix.os }}
           DISPLAY: :42
+          DATASET_FLAG: ${{ github.event_name == 'workflow_dispatch' && '--run-datasets' || '' }}
         run: |
           export PATPY_TEST_DATASETDIR="$HOME/.cache/patpy-test-datasets"
           mkdir -p "$PATPY_TEST_DATASETDIR"
-          uvx hatch run ${{ matrix.env.name }}:run-cov -v --color=yes -n auto --run-datasets
+          uvx hatch run ${{ matrix.env.name }}:run-cov -v --color=yes -n auto $DATASET_FLAG
       - name: generate coverage report
         run: |
           # See https://coverage.readthedocs.io/en/latest/config.html#run-patch

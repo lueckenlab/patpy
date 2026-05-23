@@ -238,10 +238,56 @@ in the root of the repository.
 
 [pytest]: https://docs.pytest.org/
 
+### Heavy dataset tests
+
+Tests marked with `@pytest.mark.dataset` download real datasets from Figshare (multi-GB) and are **skipped by default** — both locally and on every automatic CI run (PR, push to `main`, scheduled cron) — so day-to-day test runs stay fast. On CI they only run when the `Test` workflow is **dispatched manually** from the Actions tab (the `workflow_dispatch` trigger). Trigger one after changes to `src/patpy/datasets/`, or whenever you want to re-validate the Figshare downloads.
+
+If you change anything in `src/patpy/datasets/` (or otherwise want to validate the downloads) locally, opt in with `--run-datasets`:
+
+:::::{tabs}
+::::{group-tab} Hatch
+
+```bash
+hatch test -- --run-datasets
+```
+
+::::
+
+::::{group-tab} uv
+
+```bash
+uv run pytest --run-datasets
+```
+
+::::
+
+::::{group-tab} Pip
+
+```bash
+source .venv/bin/activate
+pytest --run-datasets
+```
+
+::::
+:::::
+
+To avoid re-downloading on every run, point pytest at a persistent cache directory by exporting `PATPY_TEST_DATASETDIR`:
+
+```bash
+export PATPY_TEST_DATASETDIR="$HOME/.cache/patpy-test-datasets"
+mkdir -p "$PATPY_TEST_DATASETDIR"
+pytest --run-datasets -k test_combat   # for example
+```
+
+You can also restrict the run to a single dataset loader with `-k` (e.g. `-k test_inflammation_atlas`) so you don't have to wait for every dataset to download.
+
 ### Continuous integration
 
 Continuous integration via GitHub actions will automatically run the tests on all pull requests and test
-against the minimum and maximum supported Python version.
+against the minimum and maximum supported Python version. Heavy `@pytest.mark.dataset` tests are skipped
+on every automatic run (PR, push to `main`, scheduled cron) — they would otherwise time out downloading
+multi-GB files. To run them on CI, dispatch the `Test` workflow manually from the Actions tab; see
+[Heavy dataset tests](#heavy-dataset-tests) above for the local opt-in workflow.
 
 Additionally, there’s a CI job that tests against pre-releases of all dependencies (if there are any).
 The purpose of this check is to detect incompatibilities of new package versions early on and

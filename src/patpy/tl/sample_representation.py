@@ -1000,8 +1000,6 @@ class PILOTGMVAE(SampleRepresentationMethod):
     Source: https://academic.oup.com/bib/article/26/5/bbaf547/8287234?login=true
     """
 
-    DISTANCES_UNS_KEY = "X_pilotgmvae_distances"
-
     def __init__(
         self,
         sample_key: str,
@@ -1097,9 +1095,16 @@ class PILOTGMVAE(SampleRepresentationMethod):
         self.epsilon = epsilon
 
     def prepare_anndata(self, adata):
+        """Train PILOT GM VAE model"""
         super().prepare_anndata(adata)
 
-        from pilotgm.core import train_gmvae
+        try:
+            from pilotgm.core import train_gmvae
+        except ImportError:
+            raise ImportError(
+                "PILOT-GM-VAE is not installed. "
+                "Install it using: pip install 'git+https://github.com/vis7219/PILOT-GM-VAE_fork.git'"
+            ) from None
 
         train_gmvae(
             adata=self.adata,
@@ -1133,7 +1138,14 @@ class PILOTGMVAE(SampleRepresentationMethod):
         self._fitted = True
 
     def calculate_distance_matrix(self, force: bool = False):
-        from pilotgm.core import gmmvae_wasserstein_distance
+        """Compute Wasserstein distances between sample and sample representation"""
+        try:
+            from pilotgm.core import gmmvae_wasserstein_distance
+        except ImportError:
+            raise ImportError(
+                "PILOT-GM-VAE is not installed. "
+                "Install it using: pip install 'git+https://github.com/vis7219/PILOT-GM-VAE_fork.git'"
+            ) from None
 
         # Check if already calculated
         distances = super().calculate_distance_matrix(force=force)
@@ -1159,7 +1171,6 @@ class PILOTGMVAE(SampleRepresentationMethod):
         # Distance
         distances = self.adata.uns["EMD_df"].loc[self.samples, self.samples].to_numpy()
         distances = make_matrix_symmetric(distances)
-        self.adata.uns[self.DISTANCES_UNS_KEY] = distances
         self._distances = distances
 
         # Sample Representation

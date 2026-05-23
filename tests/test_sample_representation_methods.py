@@ -242,7 +242,7 @@ def test_pilot(pbmc3k_adata):
 
 
 def test_pilotgmvae(pbmc3k_adata):
-    pytest.importorskip("pilotgm")
+    pytest.importorskip("pilotgm.core", exc_type=Exception)
     adata = pbmc3k_adata.copy()
     adata.obs["state"] = "control"
     n_samples = adata.obs[SAMPLE_KEY].nunique()
@@ -263,7 +263,7 @@ def test_pilotgmvae(pbmc3k_adata):
 
 
 def test_pilotgmvae_sample_representation(pbmc3k_adata):
-    pytest.importorskip("pilotgm")
+    pytest.importorskip("pilotgm.core", exc_type=Exception)
     adata = pbmc3k_adata.copy()
     adata.obs["state"] = "control"
     n_samples = adata.obs[SAMPLE_KEY].nunique()
@@ -286,7 +286,7 @@ def test_pilotgmvae_sample_representation(pbmc3k_adata):
 
 
 def test_pilotgmvae_cell_group_key_is_none():
-    pytest.importorskip("pilotgm")
+    pytest.importorskip("pilotgm.core", exc_type=Exception)
     method = PILOTGMVAE(sample_key=SAMPLE_KEY, sample_state_col="state", layer="X_pca")
     assert method.cell_group_key is None
 
@@ -935,6 +935,21 @@ class TestCheckAdataLoaded:
             cell_group_key=PBMC_CELL_KEY,
             sample_state_col="state",
             layer="X_pca",
+        )
+        method.prepare_anndata(adata)
+        method._check_adata_loaded()
+
+    def test_adata_loaded_true_after_prepare_anndata_pilotgmvae(self, pbmc3k_adata):
+        pytest.importorskip("pilotgm.core", exc_type=Exception)
+        adata = pbmc3k_adata.copy()
+        adata.obs["state"] = "control"
+        method = PILOTGMVAE(
+            sample_key=SAMPLE_KEY,
+            sample_state_col="state",
+            layer="X_pca",
+            num_classes=3,
+            epochs=1,
+            dataset_name="test_pilotgmvae_loaded",
         )
         method.prepare_anndata(adata)
         method._check_adata_loaded()

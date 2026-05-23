@@ -13,6 +13,9 @@ from .evaluation import (
     test_distances_significance,
     test_proportions,
 )
+from .factorial_comparison import (
+    FactorialDE,
+)
 from .sample_representation import (
     MOFA,
     PILOT,
