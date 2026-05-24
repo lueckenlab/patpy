@@ -161,7 +161,7 @@ def setup(app):
 
 
 nbsphinx_thumbnails = {
-    "tutorials/notebooks/representation_methods_example": "_static/patpy_logo.png",
+    "tutorials/notebooks/benchmarking_sample_representation_methods": "_static/patpy_logo.png",
     "tutorials/notebooks/sources_of_variation_with_gloscope": "_static/patpy_logo.png",
     "tutorials/notebooks/Patient_trajectories_example": "_static/patpy_logo.png",
     "tutorials/notebooks/supervised_methods_example": "_static/patpy_logo.png",
