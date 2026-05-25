@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "patpy"
-version = "0.16.5"
+version = "0.17.0"
 description = "A toolbox for patient or sample representation from single-cell data"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -94,6 +94,12 @@ optional-dependencies.pascient = [
 ]
 optional-dependencies.pilot = [
   "pilotpy",
+]
+# `sampleclr` is not yet on PyPI; install it manually from the repository:
+#   pip install git+https://github.com/lueckenlab/sampleclr.git@main
+optional-dependencies.sampleclr = [
+  "torch>=1.13",
+  "umap-learn",
 ]
 # `pulsar` is not on PyPI; install it manually:
 #   pip install git+https://github.com/snap-stanford/PULSAR.git@main

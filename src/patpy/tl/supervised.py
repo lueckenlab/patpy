@@ -193,6 +193,18 @@ class SupervisedSampleMethod(BaseSampleMethod):
 
         return labels, tasks
 
+    def pretrain(self, **kwargs) -> None:
+        """Optional self-supervised / unsupervised pretraining phase.
+
+        The default implementation is a no-op.  Subclasses with pretraining stage overrides this
+
+        Raises
+        ------
+        RuntimeError
+            If called before :meth:`prepare_anndata`.
+        """
+        self._check_adata_loaded()
+
     def fine_tune(self, labels: list[str] | str, tasks: list[_PREDICTION_TASKS] | _PREDICTION_TASKS, **kwargs):
         """Fine-tune / continue training the model on new or existing labels.
 
@@ -2316,3 +2328,707 @@ class PaSCient(SupervisedSampleMethod):
                 scores[cell_mask] = dot / (cell_norms * patient_norm)
 
         return scores
+
+
+class SampleCLR(SupervisedSampleMethod):
+    """Donor-level representation via SampleCLR (Shitov, Frey, Dehkordi et al.).
+
+    SampleCLR learns sample-level embeddings from single-cell data with a
+    contrastive objective: two random subsamples of cells from the same
+    donor must map to similar embeddings, while subsamples from different
+    donors must map to different embeddings.  Training has two phases:
+
+    - **Pretrain** (self-supervised): contrastive loss only; trains the
+      cell→sample aggregator and projector.  No labels are used.
+    - **Fine-tune** (supervised / joint): adds classification, regression,
+      or ordinal-regression heads on top of the donor embedding and trains
+      them, optionally jointly with the contrastive objective.
+
+
+    Parameters
+    ----------
+    sample_key : str
+        Column in ``adata.obs`` with donor / sample identifiers.
+    label_keys : list[str]
+        Donor-level target columns.  Used only when fine-tuning; pretrain
+        ignores them.
+    tasks : list[_PREDICTION_TASKS]
+        Prediction task per label key.  ``"ranking"`` is mapped to
+        SampleCLR's ``ordinal_regression`` head.
+    cell_group_key : str or None, optional
+        Column in ``adata.obs`` with cell-type annotations.  Forwarded as
+        ``cell_type_col`` to the SampleCLR aggregator (used by some
+        augmentations).
+    layer : str, default ``"X_pca"``
+        Key in ``adata.obsm`` with per-cell features.
+    output_dim : int, default 128
+        Dimensionality of the donor embedding.
+    n_cells_per_sample : int or list[int], default 1000
+        Number of cells subsampled per donor per batch (or a ``[min, max]``
+        range).
+    num_epochs_pretrain : int, default 100
+        Pretraining epochs.
+    num_epochs_fine_tune : int, default 100
+        Fine-tuning epochs.
+    batch_size : int, default 32
+        Donors per mini-batch.
+    contrastive_loss : str, default ``"XSampleCLR"``
+        Contrastive loss name.  See SampleCLR docs for the full list.
+    sample_similarity_graph : pandas.DataFrame or None, optional
+        Square donor-by-donor similarity used by the XSampleCLR loss.  When
+        ``batch_sampler_similarity_graph`` is not provided, this graph is
+        also reused by the batch-aware sampler.
+    batch_key : str or None, optional
+        ``adata.obs`` column with technical / batch labels.  When set, the
+        SampleCLR batch-aware sampler is enabled to balance in-batch vs
+        out-of-batch and kNN vs global samples in each mini-batch.
+        Forwarded to SampleCLR as ``batch_sampler_batch_col`` and toggles
+        ``use_batch_aware_sampler=True``.
+    class_balancing : {None, "balanced", "inverse_frequency", "effective_number"}, optional
+        Class-balancing strategy for supervised classification / ordinal
+        heads.  Forwarded as ``supervised_class_balancing``.  Use
+        ``"effective_number"`` together with *class_balance_beta* for
+        Cui et al. (2019) effective-number weighting.
+    class_balance_beta : float, default 0.9999
+        ``beta`` parameter for the ``"effective_number"`` strategy; ignored
+        otherwise.  Forwarded as ``supervised_class_balance_beta``.
+    device : str, default ``"cuda"``
+        Training / inference device.
+    seed : int, default 42
+        Random seed.
+    **model_kwargs
+        Forwarded to :class:`sampleclr.models.contrastive_model.ContrastiveModel`.
+        Useful advanced keys include ``use_batch_aware_sampler``,
+        ``batch_sampler_Pd`` / ``batch_sampler_PkNN`` / ``batch_sampler_k_neighbors``,
+        ``batch_sampler_type`` (``"single"`` / ``"multi"`` / ``"full"``),
+        ``batch_sampler_n_anchors_per_batch``, ``batch_sampler_anchor_grouping``,
+        ``batch_sampler_similarity_graph``, ``batch_sampler_adaptive_targets``,
+        ``batch_sampler_pseudo_batch_strategy``, ``aggregator_type``,
+        ``aggregator_normalization``, ``use_uncertainty_weighting``, and
+        ``train_ids`` / ``val_ids`` / ``test_ids`` for explicit splits.
+
+    Examples
+    --------
+    >>> model = SampleCLR(
+    ...     sample_key="donor_id",
+    ...     label_keys=["disease"],
+    ...     tasks=["classification"],
+    ...     layer="X_pca",
+    ...     batch_key="study_id",
+    ...     class_balancing="effective_number",
+    ... )
+    >>> model.prepare_anndata(
+    ...     adata,
+    ...     pretrain=True,
+    ...     fine_tune=True,
+    ...     pretrain_val_metric="loss",
+    ...     fine_tune_val_metric="total",
+    ... )
+    >>> embeddings = model.get_sample_representations()
+    """
+
+    _SAMPLECLR_TASK_MAP = {
+        "classification": "classification",
+        "regression": "regression",
+        "ranking": "ordinal_regression",
+    }
+
+    def __init__(
+        self,
+        sample_key: str,
+        label_keys: list[str] | str,
+        tasks: list[_PREDICTION_TASKS] | _PREDICTION_TASKS,
+        cell_group_key: str | None = None,
+        layer: str = "X_pca",
+        output_dim: int = 128,
+        n_cells_per_sample=1000,
+        num_epochs_pretrain: int = 100,
+        num_epochs_fine_tune: int = 100,
+        batch_size: int = 32,
+        contrastive_loss: str = "XSampleCLR",
+        sample_similarity_graph=None,
+        batch_key: str | None = None,
+        class_balancing: Literal["balanced", "inverse_frequency", "effective_number"] | None = None,
+        class_balance_beta: float = 0.9999,
+        device: str = "cuda",
+        seed: int = 42,
+        **model_kwargs,
+    ) -> None:
+        super().__init__(
+            sample_key=sample_key,
+            label_keys=label_keys,
+            tasks=tasks,
+            cell_group_key=cell_group_key,
+            layer=layer,
+            seed=seed,
+        )
+
+        self.output_dim = output_dim
+        self.n_cells_per_sample = n_cells_per_sample
+        self.num_epochs_pretrain = num_epochs_pretrain
+        self.num_epochs_fine_tune = num_epochs_fine_tune
+        self.batch_size = batch_size
+        self.contrastive_loss = contrastive_loss
+        self.sample_similarity_graph = sample_similarity_graph
+        self.batch_key = batch_key
+        self.class_balancing = class_balancing
+        self.class_balance_beta = class_balance_beta
+        self.device = device
+        self.model_kwargs = model_kwargs
+
+        self._sclr_model = None  # ContrastiveModel
+        self.sample_representation: pd.DataFrame | None = None
+
+    def _build_sampleclr_tasks(self) -> dict:
+        """Map patpy label_keys/tasks to SampleCLR's nested ``tasks`` dict."""
+        sampleclr_tasks: dict[str, list[str]] = {}
+        for label, task in zip(self.label_keys, self.tasks, strict=True):
+            if task not in self._SAMPLECLR_TASK_MAP:
+                raise ValueError(
+                    f"Unsupported task '{task}' for SampleCLR. Use one of {list(self._SAMPLECLR_TASK_MAP)}."
+                )
+            sclr_key = self._SAMPLECLR_TASK_MAP[task]
+            sampleclr_tasks.setdefault(sclr_key, []).append(label)
+        return sampleclr_tasks
+
+    def prepare_anndata(
+        self,
+        adata: sc.AnnData,
+        pretrain: bool = True,
+        fine_tune: bool = True,
+        *,
+        pretrain_num_epochs: int | None = None,
+        pretrain_num_warmup_epochs: int | None = None,
+        pretrain_val_metric: Literal["loss", "knn"] = "loss",
+        pretrain_max_training_time_minutes: float | None = None,
+        fine_tune_num_epochs: int | None = None,
+        fine_tune_num_warmup_epochs: int | None = None,
+        fine_tune_stage: Literal["joint", "only_supervised_with_agg"] = "joint",
+        fine_tune_val_metric: Literal["nn", "knn", "loss", "total"] = "knn",
+        fine_tune_max_training_time_minutes: float | None = None,
+        verbose: bool = True,
+    ) -> None:
+        """Initialise the SampleCLR model and optionally run pretrain + fine-tune.
+
+        Parameters
+        ----------
+        adata
+            Single-cell AnnData. Must contain :attr:`sample_key` and any
+            :attr:`label_keys` in ``.obs``, and per-cell features in
+            ``.obsm[self.layer]``.
+        pretrain
+            If True, run :meth:`pretrain` after construction.
+        fine_tune
+            If True (and supervised labels are configured), run
+            :meth:`fine_tune` on the labels passed at ``__init__``.
+
+        pretrain_num_epochs, pretrain_num_warmup_epochs, pretrain_val_metric, pretrain_max_training_time_minutes
+            Passed to :meth:`pretrain`.  See its docstring for details.
+        fine_tune_num_epochs, fine_tune_num_warmup_epochs, fine_tune_stage, fine_tune_val_metric, fine_tune_max_training_time_minutes
+            Passed to :meth:`fine_tune`.
+        verbose
+            Print per-epoch progress in both phases.
+        """
+        try:
+            from sampleclr.models.contrastive_model import ContrastiveModel
+        except ImportError as e:
+            raise ImportError(
+                "sampleclr is required. Install it from the SampleCLR repository (it is not yet on PyPI)."
+            ) from e
+
+        super().prepare_anndata(adata)
+
+        if self.layer not in adata.obsm:
+            raise ValueError(
+                f"layer='{self.layer}' not found in adata.obsm. "
+                f"SampleCLR requires per-cell features in adata.obsm['{self.layer}']."
+            )
+
+        sampleclr_tasks = self._build_sampleclr_tasks()
+
+        # Resolve batch-aware sampler / class-balancing options. Caller-supplied
+        # entries in model_kwargs win over the convenience parameters so power
+        # users can still override any sampler knob directly.
+        extra_kwargs = dict(self.model_kwargs)
+        if self.batch_key is not None:
+            extra_kwargs.setdefault("batch_sampler_batch_col", self.batch_key)
+            extra_kwargs.setdefault("use_batch_aware_sampler", True)
+        if self.class_balancing is not None:
+            extra_kwargs.setdefault("supervised_class_balancing", self.class_balancing)
+            extra_kwargs.setdefault("supervised_class_balance_beta", self.class_balance_beta)
+
+        self._sclr_model = ContrastiveModel(
+            adata=adata,
+            sample_key=self.sample_key,
+            tasks=sampleclr_tasks,
+            layer=self.layer,
+            cell_type_col=self.cell_group_key,
+            output_dim=self.output_dim,
+            n_cells_per_sample=self.n_cells_per_sample,
+            num_epochs_stage1=self.num_epochs_pretrain,
+            num_epochs_stage2=self.num_epochs_fine_tune,
+            batch_size=self.batch_size,
+            contrastive_loss=self.contrastive_loss,
+            sample_similarity_graph=self.sample_similarity_graph,
+            device=self.device,
+            seed=self.seed,
+            **extra_kwargs,
+        )
+
+        self.samples = np.array(self._sclr_model.train_dataset.unique_categories)
+
+        if pretrain:
+            self.pretrain(
+                num_epochs=pretrain_num_epochs,
+                num_warmup_epochs=pretrain_num_warmup_epochs,
+                val_metric=pretrain_val_metric,
+                verbose=verbose,
+                max_training_time_minutes=pretrain_max_training_time_minutes,
+            )
+
+        if fine_tune and self.label_keys:
+            self.fine_tune(
+                self.label_keys,
+                self.tasks,
+                num_epochs=fine_tune_num_epochs,
+                num_warmup_epochs=fine_tune_num_warmup_epochs,
+                stage=fine_tune_stage,
+                val_metric=fine_tune_val_metric,
+                verbose=verbose,
+                max_training_time_minutes=fine_tune_max_training_time_minutes,
+            )
+        else:
+            self._compute_sample_representations()
+            self._fitted = True
+
+    def pretrain(
+        self,
+        num_epochs: int | None = None,
+        num_warmup_epochs: int | None = None,
+        val_metric: Literal["loss", "knn"] = "loss",
+        verbose: bool = True,
+        max_training_time_minutes: float | None = None,
+    ) -> None:
+        """Run Stage 1 — self-supervised contrastive pretraining.
+
+        Parameters
+        ----------
+        num_epochs
+            Number of pretraining epochs. ``None`` uses
+            ``self.num_epochs_pretrain`` (from ``__init__``).
+        num_warmup_epochs
+            LR warmup epochs. ``None`` uses SampleCLR's
+            ``num_warmup_epochs_stage1`` default.
+        val_metric
+            Validation metric for early stopping: ``"loss"`` or ``"knn"``.
+        verbose
+            Print per-epoch progress.
+        max_training_time_minutes
+            Stop after this many minutes of wall-clock time. ``None`` =
+            unlimited.
+        """
+        if self._sclr_model is None:
+            raise RuntimeError("Call prepare_anndata() before pretrain().")
+        self._sclr_model.pretrain(
+            num_epochs=num_epochs,
+            num_warmup_epochs=num_warmup_epochs,
+            val_metric=val_metric,
+            verbose=verbose,
+            max_training_time_minutes=max_training_time_minutes,
+        )
+        self._compute_sample_representations()
+        self._fitted = True
+
+    def fine_tune(
+        self,
+        labels: list[str] | str,
+        tasks: list[_PREDICTION_TASKS] | _PREDICTION_TASKS,
+        num_epochs: int | None = None,
+        num_warmup_epochs: int | None = None,
+        stage: Literal["joint", "only_supervised_with_agg"] = "joint",
+        val_metric: Literal["nn", "knn", "loss", "total"] = "knn",
+        verbose: bool = True,
+        max_training_time_minutes: float | None = None,
+        epoch_offset: int = 0,
+    ) -> None:
+        """Run Stage 2 — supervised / joint fine-tuning.
+
+        For labels configured at ``__init__`` SampleCLR's native heads are
+        trained end-to-end. For labels *not* present at ``__init__`` the
+        method falls back to sklearn linear probes via
+        :meth:`SupervisedSampleMethod.fine_tune` on the frozen donor
+        embedding.
+
+        Parameters
+        ----------
+        labels : list[str] or str
+            Labels to fine-tune for.
+        tasks : list[_PREDICTION_TASKS] or _PREDICTION_TASKS
+            Corresponding prediction tasks.
+        num_epochs
+            Number of fine-tuning epochs. ``None`` uses
+            ``self.num_epochs_fine_tune`` (from ``__init__``).
+        num_warmup_epochs
+            Backbone-frozen warmup epochs. ``None`` uses SampleCLR's
+            ``num_warmup_epochs_stage2`` default.
+        stage
+            ``"joint"`` (contrastive + supervised) or
+            ``"only_supervised_with_agg"`` (supervised only, aggregator
+            unfrozen).
+        val_metric
+            Validation metric for early stopping: ``"nn"``, ``"knn"``,
+            ``"loss"`` or ``"total"``.
+        verbose
+            Print per-epoch progress.
+        max_training_time_minutes
+            Stop after this many minutes of wall-clock time. ``None`` =
+            unlimited.
+        epoch_offset
+            Offset for the per-epoch step counter, so step-level metrics
+            stay continuous across pretrain → fine_tune.
+        """
+        if self._sclr_model is None:
+            raise RuntimeError("Call prepare_anndata() before fine_tune().")
+
+        labels_list = [labels] if isinstance(labels, str) else list(labels)
+        tasks_list = [tasks] if isinstance(tasks, str) else list(tasks)
+
+        existing = set(self.label_keys)
+        new_labels = [l for l in labels_list if l not in existing]
+
+        if new_labels:
+            warnings.warn(
+                f"SampleCLR's prediction heads are configured at construction time; "
+                f"labels {new_labels} were not present then. Falling back to sklearn "
+                "linear probes on the frozen donor embedding for these labels.",
+                stacklevel=2,
+            )
+            super().fine_tune(labels_list, tasks_list)
+            return
+
+        self._sclr_model.fine_tune(
+            num_epochs=num_epochs,
+            num_warmup_epochs=num_warmup_epochs,
+            stage=stage,
+            val_metric=val_metric,
+            verbose=verbose,
+            max_training_time_minutes=max_training_time_minutes,
+            epoch_offset=epoch_offset,
+        )
+        self._compute_sample_representations()
+        self._fitted = True
+
+    def _compute_sample_representations(
+        self,
+        subset_size: int | None = None,
+        cell_selection: Literal["random", "eigenvector"] = "random",
+        eigenvector_col: str = "eigenvector_centrality",
+        eigenvector_use_rep: str | None = None,
+        eigenvector_n_neighbors: int = 15,
+    ) -> pd.DataFrame:
+        """Run the trained projector + aggregator over ``self.adata`` to extract per-donor embeddings.
+
+        Wraps :func:`sampleclr.utils.get_sample_representations_from_adata`
+
+        Parameters
+        ----------
+        subset_size
+            Number of cells to use per donor. ``None`` = use all cells
+            (default, matches the previous behaviour). Pass an int to cap
+            inference memory; cells are sampled with replacement when a
+            donor has fewer cells than ``subset_size``.
+        cell_selection
+            ``"random"`` (default) or ``"eigenvector"``. The latter selects
+            the most central cells per donor and requires either a
+            precomputed ``adata.obs[eigenvector_col]`` or a
+            ``eigenvector_use_rep`` obsm key for on-the-fly computation.
+        eigenvector_col, eigenvector_use_rep, eigenvector_n_neighbors
+            Forwarded to :func:`get_sample_representations_from_adata`.
+        """
+        from sampleclr.utils import get_sample_representations_from_adata
+
+        donors = list(self.samples)
+        reps = get_sample_representations_from_adata(
+            projector=self._sclr_model.projector,
+            aggregator=self._sclr_model.aggregator,
+            adata=self.adata,
+            sample_key=self.sample_key,
+            layer=self.layer,
+            meta_obs_names=donors,
+            subset_size=subset_size,
+            device=self._sclr_model.device,
+            cell_selection=cell_selection,
+            eigenvector_col=eigenvector_col,
+            eigenvector_use_rep=eigenvector_use_rep,
+            eigenvector_n_neighbors=eigenvector_n_neighbors,
+        )
+
+        cols = [f"dim_{i}" for i in range(reps.shape[1])]
+        self.sample_representation = pd.DataFrame(reps, index=donors, columns=cols)
+        return self.sample_representation
+
+    def get_sample_representations(self) -> pd.DataFrame:
+        """Return per-donor embeddings.
+
+        Returns
+        -------
+        pd.DataFrame
+            Shape ``(n_donors, output_dim)``, indexed by donor ID.
+            Columns are named ``"dim_0"``, ``"dim_1"``, …
+        """
+        self._check_adata_loaded()
+        if self.sample_representation is None:
+            self._compute_sample_representations()
+        return self.sample_representation
+
+    def _find_native_head(self, label: str):
+        """Locate the SampleCLR head trained for *label*.
+
+        Returns
+        -------
+        (head, head_kind, n_classes) or (None, None, None)
+            ``head_kind`` is one of ``"classification"``, ``"regression"``,
+            ``"ordinal"``.  Returns all-None when *label* has no native head
+            (e.g. it was added later via sklearn-probe fallback).
+        """
+        sclr = self._sclr_model
+        for i, t in enumerate(sclr.classification_tasks):
+            if t["column"] == label:
+                return sclr.classifiers[i], "classification", t["n_classes"]
+        for i, col in enumerate(sclr.regression_tasks):
+            if col == label:
+                return sclr.regressors[i], "regression", None
+        for i, t in enumerate(sclr.ordinal_regression_tasks):
+            if t["column"] == label:
+                return sclr.ordinal_regressors[i], "ordinal", t["n_classes"]
+        return None, None, None
+
+    def _decode_classification_labels(self, label: str, n_classes: int) -> list:
+        """Recover original class labels from SampleCLR's ``<label>_encoded`` map."""
+        enc_col = f"{label}_encoded"
+        if enc_col in self.adata.obs.columns and label in self.adata.obs.columns:
+            pairs = self.adata.obs[[label, enc_col]].dropna().drop_duplicates()
+            inv = {int(c): orig for orig, c in zip(pairs[label].values, pairs[enc_col].values, strict=True)}
+            return [inv.get(i, i) for i in range(n_classes)]
+        return list(range(n_classes))
+
+    def _head_predict(self, label: str) -> tuple[np.ndarray, str, int | None]:
+        """Run *label*'s native head on the donor embeddings.
+
+        Returns
+        -------
+        out : np.ndarray
+            Raw head output, shape ``(n_donors, n_outputs)``.
+        head_kind : str
+            ``"classification"``, ``"regression"``, or ``"ordinal"``.
+        n_classes : int or None
+            Number of classes for classification / ordinal; ``None`` for regression.
+        """
+        import torch
+
+        head, head_kind, n_classes = self._find_native_head(label)
+        if head is None:
+            raise KeyError(f"No native SampleCLR head for label '{label}'.")
+        rep = self.get_sample_representations()
+        X = torch.tensor(rep.values, dtype=torch.float32, device=self._sclr_model.device)
+        head.eval()
+        with torch.no_grad():
+            out = head(X).cpu().numpy()
+        return out, head_kind, n_classes
+
+    def predict(self, label: str) -> pd.Series | pd.DataFrame:
+        """Predict *label* for every donor.
+
+        Uses SampleCLR's native head when *label* was configured at
+        ``__init__``; otherwise falls back to the sklearn linear probe fitted
+        by :meth:`SupervisedSampleMethod.fine_tune` on the frozen donor
+        embedding.
+
+        Parameters
+        ----------
+        label
+            Donor-level label to predict.  Must be in :attr:`label_keys`.
+
+        Returns
+        -------
+        pd.Series or pd.DataFrame
+            Classification: DataFrame with one ``prob_<class>`` column per
+            class and a ``"<label>_pred"`` column.
+            Regression: Series of values (un-scaled).
+            Ranking: Series of integer ordinal levels.
+        """
+        self._check_fitted()
+        if label not in self.label_keys:
+            raise ValueError(f"`label='{label}'` is not found in model label keys.")
+
+        head, head_kind, n_classes = self._find_native_head(label)
+        if head is None:
+            return super().predict(label)
+
+        out, _, _ = self._head_predict(label)
+
+        if head_kind == "classification":
+            import scipy.special
+
+            proba = scipy.special.softmax(out, axis=1)
+            classes = self._decode_classification_labels(label, n_classes)
+            result = pd.DataFrame(
+                {f"prob_{c}": proba[:, i] for i, c in enumerate(classes)},
+                index=self.samples,
+            )
+            result[f"{label}_pred"] = [classes[i] for i in proba.argmax(axis=1)]
+            return result
+
+        if head_kind == "regression":
+            preds = out.ravel()
+            mean = self._sclr_model.regression_target_means.get(label, 0.0)
+            std = self._sclr_model.regression_target_stds.get(label, 1.0)
+            preds = preds * std + mean
+            return pd.Series(preds, index=self.samples, name=label)
+
+        # ordinal
+        cumulative_probas = np.cumsum(out, axis=1)
+        preds = np.clip((cumulative_probas > 0.5).sum(axis=1).astype(int), 0, n_classes - 1)
+        return pd.Series(preds, index=self.samples, name=label)
+
+    def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
+        """Per-donor posterior scores from each configured SampleCLR head.
+
+        For every label in :attr:`label_keys` the corresponding head
+        is evaluated on the frozen donor embedding and reduced to a single
+        scalar per donor:
+        - classification → probability of the predicted class
+        - regression → predicted value (back on the original scale)
+        - ranking → predicted ordinal level
+
+        Parameters
+        ----------
+        force
+            Recompute even if cached results exist in ``adata.uns``.
+
+        Returns
+        -------
+        pd.DataFrame
+            Indexed by donor ID.  One ``"<label>_importance"`` column per
+            label key; an additional ``"average_importance"`` column for
+            multi-label models.
+        """
+        self._check_adata_loaded()
+
+        cache_key = "supervised_sample_importance"
+        if not force and cache_key in self.adata.uns:
+            return pd.DataFrame(self.adata.uns[cache_key], index=self.samples)
+
+        norms = np.linalg.norm(self.get_sample_representations().values, axis=1)
+
+        scores: dict[str, np.ndarray] = {}
+        for label in self.label_keys:
+            head, head_kind, n_classes = self._find_native_head(label)
+            if head is None:
+                scores[label] = norms
+                continue
+
+            out, _, _ = self._head_predict(label)
+            if head_kind == "classification":
+                import scipy.special
+
+                proba = scipy.special.softmax(out, axis=1)
+                scores[label] = proba.max(axis=1)
+            elif head_kind == "regression":
+                mean = self._sclr_model.regression_target_means.get(label, 0.0)
+                std = self._sclr_model.regression_target_stds.get(label, 1.0)
+                scores[label] = out.ravel() * std + mean
+            else:  # ordinal
+                cumulative = np.cumsum(out, axis=1)
+                scores[label] = np.clip((cumulative > 0.5).sum(axis=1).astype(float), 0, n_classes - 1)
+
+        sample_importance = pd.DataFrame(
+            {f"{k}_importance": scores[k] for k in self.label_keys},
+            index=self.samples,
+        )
+        if len(self.label_keys) > 1:
+            sample_importance.insert(0, "average_importance", sample_importance.mean(axis=1).values)
+
+        self.adata.uns[cache_key] = sample_importance.to_dict()
+        return sample_importance
+
+    def get_cell_importance(
+        self,
+        label: str | None = None,
+        force: bool = False,
+        obsm_key: str = "sampleclr_cell_attention",
+    ) -> pd.DataFrame:
+        """Per-cell aggregator attention weights from the multi-head aggregator.
+
+        Parameters
+        ----------
+        label
+            If given, return only ``"<label>_importance"``.  Defaults to
+            returning every label's column.
+        force
+            Recompute even if cached results exist in ``adata.obs``.
+        obsm_key
+            Key under which the full per-head attention matrix is stored in
+            ``adata.obsm``.  Defaults to ``"sampleclr_cell_attention"``.
+
+        Returns
+        -------
+        pd.DataFrame
+            Indexed by ``adata.obs_names``.  One ``"<label>_importance"``
+            column per requested label.
+        """
+        import torch
+
+        self._check_adata_loaded()
+
+        if label is not None and label not in self.label_keys:
+            raise ValueError(f"label='{label}' is not in label_keys={self.label_keys}.")
+
+        importance_cols = [f"{label}_importance"] if label else [f"{k}_importance" for k in self.label_keys]
+
+        cached = obsm_key in self.adata.obsm and all(c in self.adata.obs.columns for c in importance_cols)
+        if not force and cached:
+            return self.adata.obs[importance_cols]
+
+        sclr = self._sclr_model
+        sclr.aggregator.eval()
+
+        donor_col = self.adata.obs[self.sample_key].values
+        cells_arr = self.adata.obsm[self.layer]
+        n_cells = self.adata.n_obs
+
+        n_heads: int | None = None
+        cell_attention = None
+        mean_score = np.zeros(n_cells, dtype=np.float32)
+
+        for donor_id in self.samples:
+            mask = donor_col == donor_id
+            if not mask.any():
+                continue
+            cells = cells_arr[mask]
+            if hasattr(cells, "toarray"):
+                cells = cells.toarray()
+            x = torch.tensor(np.asarray(cells, dtype=np.float32), device=sclr.device).unsqueeze(0)
+            with torch.no_grad():
+                result = sclr.aggregator(x, return_weights=True)
+            if not isinstance(result, tuple):
+                continue
+            _, weights = result  # (1, n_cells_i, n_heads) for multihead aggregators
+            w_np = weights.squeeze(0).cpu().numpy()
+            if w_np.ndim == 1:
+                w_np = w_np[:, None]  # treat as single head
+
+            if n_heads is None:
+                n_heads = w_np.shape[1]
+                cell_attention = np.zeros((n_cells, n_heads), dtype=np.float32)
+
+            cell_attention[mask] = w_np
+            mean_score[mask] = w_np.mean(axis=1)
+
+        if cell_attention is not None:
+            self.adata.obsm[obsm_key] = cell_attention
+
+        for k in self.label_keys:
+            self.adata.obs[f"{k}_importance"] = mean_score
+
+        return self.adata.obs[importance_cols]

@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.17.0
+
+### Added
+
+- **`SampleCLR`** method wrapper (`tl/supervised/SampleCLR`) for training and fine-tuning the SampleCLR contrastive donor-level representation model (Shitov, Frey, Dehkordi et al.)
+### Changed
+
+- `SupervisedSampleMethod` now exposes a no-op `pretrain(**kwargs)` so every supervised method has a uniform `.pretrain()` entry point; subclasses with a real self-supervised stage (currently `SampleCLR`) override it.
+
 ## 0,16,5
 
 ### Added
