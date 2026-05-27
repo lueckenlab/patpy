@@ -2575,7 +2575,7 @@ class SampleCLR(SupervisedSampleMethod):
             **extra_kwargs,
         )
 
-        self.samples = np.array(self._sclr_model.train_dataset.unique_categories)
+        self.samples = np.array(self._sclr_model.metadata_all.index.values)
 
         if pretrain:
             self.pretrain(
