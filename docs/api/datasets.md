@@ -12,10 +12,10 @@
 .. autosummary::
     :toctree: ../generated
 
-    datasets.combat_preprocessed
-    datasets.hlca_preprocessed
-    datasets.onek1k_preprocessed
-    datasets.stephenson_preprocessed
-    datasets.ticatlas_preprocessed
+    datasets.combat
+    datasets.hlca
+    datasets.onek1k
+    datasets.stephenson
+    datasets.ticatlas
 
 ```

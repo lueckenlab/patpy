@@ -21,3 +21,6 @@ __pycache__/
 /docs/_build/
 /docs/notebooks/data/
 /docs/tutorials/notebooks/data/
+experiments.ipynb
+
+.claude

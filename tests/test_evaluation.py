@@ -7,10 +7,12 @@ from patpy.tl.evaluation import (
     _filter_missing,
     _get_normalized_distances,
     _get_null_distances_distribution,
+    _permanova_ss_w,
     _select_random_subset,
     evaluate_prediction,
     evaluate_representation,
     knn_prediction_score,
+    permanova_pseudo_f_statistic,
     predict_knn,
     replicate_robustness,
 )
@@ -90,8 +92,94 @@ def test_select_random_subset():
     assert target_subset.shape[0] == 2
 
 
-# Validate full evaluate_representation pipeline for k-NN classification.
-def test_evaluate_representation(toy_distances):
+# Using the same Pseudo-F tests as vegan reference examples (Anderson 2001).
+def test_permanova_pseudo_f_reference_no_ties():
+    d = np.array([[0, 1, 5, 4], [1, 0, 3, 2], [5, 3, 0, 3], [4, 2, 3, 0]], dtype=float)
+    f = permanova_pseudo_f_statistic(d, np.array([0, 0, 1, 1]))
+    assert f == pytest.approx(4.4)
+
+
+def test_permanova_pseudo_f_reference_ties():
+    d = np.array([[0, 1, 1, 4], [1, 0, 3, 2], [1, 3, 0, 3], [4, 2, 3, 0]], dtype=float)
+    f = permanova_pseudo_f_statistic(d, np.array([0, 0, 1, 1]))
+    assert f == pytest.approx(2.0)
+
+
+def _permanova_ss_w_double_loop(distance_sq: np.ndarray, grouping: np.ndarray) -> float:
+    """Reference implementation for vectorization regression test (Anderson / adonis2 S_W).
+    Included to make sure the vectorized implementation is equivalent."""
+    n = distance_sq.shape[0]
+    counts = np.bincount(grouping)
+    s_w = 0.0
+    for i in range(n):
+        g = grouping[i]
+        ng = counts[g]
+        row_sum = 0.0
+        for j in range(i + 1, n):
+            if grouping[j] == g:
+                row_sum += distance_sq[i, j]
+        s_w += row_sum / ng
+    return s_w
+
+
+def test_permanova_ss_w_vectorized_matches_double_loop():
+    rng = np.random.default_rng(0)
+    for n in (6, 9, 14):
+        for _ in range(8):
+            d = rng.random((n, n))
+            d = (d + d.T) / 2
+            np.fill_diagonal(d, 0)
+            d_sq = d * d
+            grouping = rng.integers(0, 4, size=n, dtype=int)
+            if len(np.unique(grouping)) < 2:
+                grouping[0] = (grouping[0] + 1) % 4
+            vec = _permanova_ss_w(d_sq, grouping)
+            ref = _permanova_ss_w_double_loop(d_sq, grouping)
+            assert vec == pytest.approx(ref)
+
+
+def test_permanova_non_contiguous_group_codes():
+    d = np.array([[0, 1, 5, 4], [1, 0, 3, 2], [5, 3, 0, 3], [4, 2, 3, 0]], dtype=float)
+    f1 = permanova_pseudo_f_statistic(d, np.array([0, 0, 1, 1]))
+    f2 = permanova_pseudo_f_statistic(d, np.array([10, 10, 20, 20]))
+    assert f1 == pytest.approx(f2)
+
+
+# Validate full evaluate_representation pipeline for PERMANOVA.
+def test_evaluate_representation_permanova(toy_distances):
+    distances, conditions = toy_distances
+
+    result = evaluate_representation(distances, target=conditions, method="permanova", permutations=199, random_state=0)
+
+    assert isinstance(result, dict)
+    assert result["method"] == "permanova"
+    assert result["metric"] == "permanova_pseudo_f"
+    assert "p_value" in result
+    assert np.isfinite(result["score"])
+    for key in ("score", "metric", "n_unique", "n_observations", "method"):
+        assert key in result
+
+
+def test_evaluate_representation_permanova_rejects_continuous_numeric():
+    n = 40
+    rng = np.random.default_rng(0)
+    d = rng.random((n, n))
+    d = (d + d.T) / 2
+    np.fill_diagonal(d, 0)
+    target = pd.Series(np.linspace(0, 1, n))
+
+    with pytest.raises(ValueError, match="categorical"):
+        evaluate_representation(d, target=target, method="permanova", permutations=9, random_state=0)
+
+
+def test_evaluate_representation_unknown_method(toy_distances):
+    distances, conditions = toy_distances
+
+    with pytest.raises(ValueError, match="Unknown evaluation method"):
+        evaluate_representation(distances, target=conditions, method="not_a_real_method")  # type: ignore[arg-type]
+
+
+def test_evaluate_representation_knn(toy_distances):
     distances, conditions = toy_distances
 
     result = evaluate_representation(distances, target=conditions, method="knn", n_neighbors=2, task="classification")
