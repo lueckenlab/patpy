@@ -529,6 +529,37 @@ class MixMIL(SupervisedSampleMethod):
         except ImportError as e:
             raise ImportError("mixmil is required. Install with: pip install mixmil") from e
 
+        # scikit-learn >= 1.7 removed the ``multi_class`` argument from
+        # LogisticRegressionCV (multinomial is now the default). mixmil
+        # (<= 0.1.2) still passes ``multi_class="multinomial"`` inside
+        # ``get_lr_init_params``, which raises ``TypeError`` on modern
+        # sklearn and breaks MixMIL's mean-model initialisation. Patch
+        # ``mixmil.utils.LogisticRegressionCV`` to ignore the removed kwarg.
+        # Version-guarded and idempotent.
+        try:
+            import sklearn
+            from packaging.version import parse as _vparse
+
+            import mixmil.utils as _mixmil_utils
+
+            if _vparse(sklearn.__version__) >= _vparse("1.7") and not getattr(
+                _mixmil_utils.LogisticRegressionCV, "_patpy_multiclass_compat", False
+            ):
+                _OrigLogisticRegressionCV = _mixmil_utils.LogisticRegressionCV
+
+                class _CompatLogisticRegressionCV(_OrigLogisticRegressionCV):
+                    _patpy_multiclass_compat = True
+
+                    def __init__(self, *args, multi_class=None, **kwargs):
+                        # Drop the removed ``multi_class`` kwarg; multinomial
+                        # is the default for multiclass in sklearn >= 1.7.
+                        super().__init__(*args, **kwargs)
+
+                _mixmil_utils.LogisticRegressionCV = _CompatLogisticRegressionCV
+        except Exception:
+            # Compat patch is best-effort; never block on it.
+            pass
+
         tasks = [tasks] if isinstance(tasks, str) else tasks
         all_tasks = self.tasks + tasks
         if len(set(all_tasks)) > 1:
