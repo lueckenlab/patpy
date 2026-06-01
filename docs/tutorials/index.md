@@ -14,6 +14,7 @@ Take a look at examples on how to use patpy for your analysis
     notebooks/differential_analysis.ipynb
     notebooks/synthetic_data_generation
     notebooks/distances_test_example
+    notebooks/immune_aging_multiresolution_composition
 ```
 
 ```{toctree}
