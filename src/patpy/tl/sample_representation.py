@@ -2004,7 +2004,6 @@ class scSLIDE(SampleRepresentationMethod):
         normalization_method: str = "ChiSquared",
         scale_factor: int = 10000,
     ):
-
         super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer)
         self.outcome_key = outcome_key
         self.n_features = n_features
