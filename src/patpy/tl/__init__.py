@@ -34,5 +34,6 @@ from .sample_representation import (
     correlate_cell_type_expression,
     correlate_composition,
     describe_metadata,
+    scSLIDE,
 )
 from .supervised import PULSAR, MixMIL, PaSCient
