@@ -66,7 +66,8 @@ def _download(  # pragma: no cover
         is_zip: Whether the downloaded archive should be extracted into `output_path`.
         timeout: Per-request timeout in seconds.
 
-    Returns:
+    Returns
+    -------
         The path of the downloaded file, or `output_path` if `is_zip` is True.
     """
     if output_path is None:
