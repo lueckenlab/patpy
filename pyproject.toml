@@ -26,11 +26,13 @@ dependencies = [
   "anndata>=0.8",
   "ehrapy",
   "gudhi",
+  "ipywidgets",
   "matplotlib>=3.6",
   "numpy>=1.23",
   "opentsne>=0.6",
   "pandas>=1.5",
   "plottable",
+  "pooch",
   "scipy>=1.10",
   "seaborn>=0.12",
 ]
