@@ -418,11 +418,12 @@ class BaseSampleMethod:
             Explicit list of sample labels (index values of
             :attr:`sample_representation`) to use as the test set.
             When provided, ``test_size`` and ``random_state`` are ignored.
-            Pass an empty list to train the probe on *all* samples (no
-            held-out evaluation) — useful when fitting a probe that will be
-            applied to a different cohort. When ``None``, a random split is
-            performed and the chosen test labels are stored in
-            :attr:`test_sample_labels` for reproducibility.
+            Pass an empty list to train the probe on *all* samples — useful
+            when fitting a probe that will be applied to a different cohort; the
+            returned metrics are then computed on the train set (see
+            ``evaluated_on`` below). When ``None``, a random split is performed
+            and the chosen test labels are stored in :attr:`test_sample_labels`
+            for reproducibility.
         store
             When ``True`` (supervised methods only), register the fitted probe
             so that :meth:`predict` can reuse it on the current (or a swapped-in)
@@ -434,14 +435,17 @@ class BaseSampleMethod:
         Returns
         -------
         dict
-            Keys: ``"model"``, ``"test_sample_labels"``,
+            Keys: ``"model"``, ``"test_sample_labels"``, ``"evaluated_on"``,
             ``"{target}_test"``, ``"{target}_pred"``.
 
             For classification: additionally ``"accuracy"`` and ``"f1"``.
             For regression: additionally ``"r2"``, ``"pearson"``,
             ``"spearman"`` and ``"mae"``.
 
-            Metrics are ``NaN`` when the test set is empty.
+            ``evaluated_on`` is ``"test"`` when a non-empty test set is used and
+            ``"train"`` when the probe was trained on all samples; in the latter
+            case the metrics and ``"{target}_test"``/``"{target}_pred"`` describe
+            the train set.
 
         Examples
         --------
@@ -490,10 +494,19 @@ class BaseSampleMethod:
 
         self.test_sample_labels = test_idx
         X_train = rep.loc[train_idx].values
-        X_test = rep.loc[test_idx].values
         y_train = target_values.loc[train_idx, target].values
-        y_test = target_values.loc[test_idx, target].values
-        has_test = len(test_idx) > 0
+
+        # Evaluate on the held-out test set when one is given; otherwise fall back to
+        # the train set so the returned metrics describe the fitted probe instead of
+        # being empty. ``evaluated_on`` records which set the metrics refer to.
+        if len(test_idx) > 0:
+            eval_X = rep.loc[test_idx].values
+            eval_y = target_values.loc[test_idx, target].values
+            evaluated_on = "test"
+        else:
+            eval_X = X_train
+            eval_y = y_train
+            evaluated_on = "train"
 
         if task == "classification":
             from sklearn.linear_model import LogisticRegression
@@ -501,14 +514,15 @@ class BaseSampleMethod:
 
             model = LogisticRegression(max_iter=1000, random_state=random_state, class_weight="balanced")
             model.fit(X_train, y_train)
-            y_pred = model.predict(X_test) if has_test else np.array([])
+            y_pred = model.predict(eval_X)
             result = {
                 "model": model,
                 "test_sample_labels": test_idx,
-                f"{target}_test": y_test,
+                "evaluated_on": evaluated_on,
+                f"{target}_test": eval_y,
                 f"{target}_pred": y_pred,
-                "accuracy": accuracy_score(y_test, y_pred) if has_test else np.nan,
-                "f1": f1_score(y_test, y_pred, average="weighted", zero_division=0) if has_test else np.nan,
+                "accuracy": accuracy_score(eval_y, y_pred),
+                "f1": f1_score(eval_y, y_pred, average="weighted", zero_division=0),
             }
         elif task == "regression":
             from sklearn.linear_model import Ridge
@@ -517,17 +531,18 @@ class BaseSampleMethod:
 
             model = Ridge(alpha=0.1)
             model.fit(X_train, y_train)
-            y_pred = model.predict(X_test) if has_test else np.array([])
-            metrics = evaluate_regression(y_test, y_pred) if has_test else {}
+            y_pred = model.predict(eval_X)
+            metrics = evaluate_regression(eval_y, y_pred)
             result = {
                 "model": model,
                 "test_sample_labels": test_idx,
-                f"{target}_test": y_test,
+                "evaluated_on": evaluated_on,
+                f"{target}_test": eval_y,
                 f"{target}_pred": y_pred,
-                "r2": metrics.get("r2", np.nan),
-                "pearson": metrics.get("pearson", np.nan),
-                "spearman": metrics.get("spearman", np.nan),
-                "mae": metrics.get("mae", np.nan),
+                "r2": metrics["r2"],
+                "pearson": metrics["pearson"],
+                "spearman": metrics["spearman"],
+                "mae": metrics["mae"],
             }
         else:
             raise ValueError(f"task must be 'classification' or 'regression', got '{task}'.")
