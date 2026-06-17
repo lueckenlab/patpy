@@ -135,6 +135,17 @@ class SupervisedSampleMethod(BaseSampleMethod):
         if label not in self._probes:
             raise RuntimeError(f"No probe fitted for label '{label}'. Call fine_tune() first.")
 
+        return self._predict_with_probe(label)
+
+    def _predict_with_probe(self, label: str) -> pd.Series | pd.DataFrame:
+        """Predict `label` with the fitted sklearn probe in ``self._probes``.
+
+        Shared by the default :meth:`predict` and by subclasses with a native
+        head (e.g. MixMIL) that nonetheless carry a probe for a task their
+        native likelihood cannot solve. The probe runs on the *current*
+        :meth:`get_sample_representations`, so swapping ``self.adata`` to a new
+        cohort and calling :meth:`predict` yields cross-cohort predictions.
+        """
         task = self.tasks[self.label_keys.index(label)]
         rep = self.get_sample_representations()
         X = rep.values
@@ -630,6 +641,12 @@ class MixMIL(SupervisedSampleMethod):
         self._check_fitted()
         if label not in self.label_keys:
             raise ValueError(f"`label='{label}'` is not found in model label keys.")
+
+        # A linear probe attached via fit_linear_probe(..., store=True) takes
+        # precedence: it lets MixMIL serve tasks (e.g. continuous regression)
+        # that its binomial/categorical native head cannot.
+        if label in self._probes:
+            return self._predict_with_probe(label)
 
         task = self.tasks[self.label_keys.index(label)]
 

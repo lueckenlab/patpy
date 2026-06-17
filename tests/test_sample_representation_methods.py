@@ -1119,3 +1119,41 @@ class TestSampleOrderingConsistency:
                 method._distances,
                 err_msg=f"{cls.__name__}: cached distance matrix doesn't match returned value",
             )
+
+
+# Pseudobulk stores its sample representation as a plain ndarray (not a DataFrame);
+# fit_linear_probe must still work by wrapping it with the sample index.
+def test_fit_linear_probe_regression_on_ndarray_representation(synthetic_adata):
+    adata = synthetic_adata.copy()
+    samples = adata.obs[SAMPLE_KEY].unique().tolist()
+    # Attach a continuous per-sample target.
+    sample_age = {sample: float(20 + 5 * i) for i, sample in enumerate(samples)}
+    adata.obs["age"] = adata.obs[SAMPLE_KEY].map(sample_age).astype(float)
+
+    method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X")
+    method.prepare_anndata(adata)
+
+    # Pseudobulk's representation is a bare ndarray — the probe must not choke on it.
+    assert not isinstance(method.sample_representation, pd.DataFrame)
+
+    test_samples = samples[:3]
+    result = method.fit_linear_probe("age", task="regression", test_sample_labels=test_samples)
+
+    from sklearn.linear_model import Ridge
+
+    assert isinstance(result["model"], Ridge)
+    assert set(result["test_sample_labels"]) == set(test_samples)
+    assert {"r2", "pearson", "spearman", "mae"} <= result.keys()
+    assert len(result["age_pred"]) == len(test_samples)
+
+
+# store=True only makes sense for supervised methods (which keep a _probes registry).
+def test_fit_linear_probe_store_unsupported_on_representation_method(synthetic_adata):
+    adata = synthetic_adata.copy()
+    adata.obs["age"] = adata.obs[SAMPLE_KEY].astype("category").cat.codes.astype(float)
+
+    method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X")
+    method.prepare_anndata(adata)
+
+    with pytest.raises(AttributeError, match="_probes"):
+        method.fit_linear_probe("age", task="regression", store=True)

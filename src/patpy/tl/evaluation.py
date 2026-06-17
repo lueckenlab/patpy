@@ -365,6 +365,71 @@ def evaluate_prediction(y_true, y_pred, task, **parameters):
     return {"score": score, "metric": metric}
 
 
+def evaluate_regression(y_true, y_pred):
+    """Compute standard regression metrics between true and predicted values.
+
+    A general-purpose helper (not tied to any particular target) that returns
+    the metrics most commonly reported for continuous predictions. Pairs in
+    which either ``y_true`` or ``y_pred`` is non-finite (NaN/inf) are dropped
+    before scoring. When fewer than three valid pairs remain the metrics are
+    not well defined and are returned as ``NaN``.
+
+    Parameters
+    ----------
+    y_true : array-like
+        Ground-truth continuous values.
+    y_pred : array-like
+        Predicted continuous values, aligned with ``y_true``.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the following keys:
+
+        - ``r2``: coefficient of determination (:func:`sklearn.metrics.r2_score`)
+        - ``spearman``: Spearman rank correlation
+        - ``pearson``: Pearson correlation
+        - ``mae``: mean absolute error
+        - ``n``: number of valid (finite) pairs used for scoring
+
+    Examples
+    --------
+    >>> evaluate_regression([1, 2, 3, 4], [1.1, 1.9, 3.2, 3.8])["mae"]  # doctest: +SKIP
+    0.15
+    """
+    from scipy.stats import pearsonr, spearmanr
+    from sklearn.metrics import mean_absolute_error, r2_score
+
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    if y_true.shape != y_pred.shape:
+        raise ValueError(f"y_true and y_pred must have the same shape, got {y_true.shape} and {y_pred.shape}.")
+
+    valid = np.isfinite(y_true) & np.isfinite(y_pred)
+    n_valid = int(valid.sum())
+    nan_result = {"r2": np.nan, "spearman": np.nan, "pearson": np.nan, "mae": np.nan, "n": n_valid}
+    if n_valid < 3:
+        return nan_result
+
+    y_true, y_pred = y_true[valid], y_pred[valid]
+
+    # Correlations are undefined when either input is constant; guard against it.
+    if np.std(y_true) < 1e-12 or np.std(y_pred) < 1e-12:
+        spearman = np.nan
+        pearson = np.nan
+    else:
+        spearman = float(spearmanr(y_true, y_pred).statistic)
+        pearson = float(pearsonr(y_true, y_pred)[0])
+
+    return {
+        "r2": float(r2_score(y_true, y_pred)),
+        "spearman": spearman,
+        "pearson": pearson,
+        "mae": float(mean_absolute_error(y_true, y_pred)),
+        "n": n_valid,
+    }
+
+
 def test_proportions(target, groups):
     """Run statistical test to check if distribution of `target` differs between `groups`
 

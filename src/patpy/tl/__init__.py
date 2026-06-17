@@ -7,6 +7,7 @@ from .condition_comparison import (
 from .evaluation import (
     associate_embedding_with_covariates,
     evaluate_prediction,
+    evaluate_regression,
     evaluate_representation,
     persistence_evaluation,
     predict_knn,
