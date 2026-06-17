@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning][].
 
 ### Changed
 
-- `fit_linear_probe` now also works for sample-representation methods whose embedding is a plain ndarray or is computed lazily (via `calculate_distance_matrix`), tolerates an empty test set (train on all samples, for a transferable probe), and returns `spearman` and `mae` alongside `r2`/`pearson` for regression.
+- `fit_linear_probe` now also works for sample-representation methods whose embedding is a plain ndarray or is computed lazily (via `calculate_distance_matrix`), accepts an empty test set to train on all samples (returning metrics on the train set, with a new `evaluated_on` key reporting `"test"`/`"train"`), and returns `spearman` and `mae` alongside `r2`/`pearson` for regression.
 - Supervised `predict()` resolves probe-backed labels through a shared `_predict_with_probe`; `MixMIL.predict` uses a stored regression probe when one is present, so a continuous target can ride on top of its binomial head.
 
 ## 0.16.6

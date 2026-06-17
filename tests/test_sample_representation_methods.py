@@ -1144,7 +1144,27 @@ def test_fit_linear_probe_regression_on_ndarray_representation(synthetic_adata):
     assert isinstance(result["model"], Ridge)
     assert set(result["test_sample_labels"]) == set(test_samples)
     assert {"r2", "pearson", "spearman", "mae"} <= result.keys()
+    assert result["evaluated_on"] == "test"
     assert len(result["age_pred"]) == len(test_samples)
+
+
+# An empty test set trains on all samples and reports metrics on the train set
+# (not NaN), flagging evaluated_on="train".
+def test_fit_linear_probe_empty_test_evaluates_on_train(synthetic_adata):
+    adata = synthetic_adata.copy()
+    samples = adata.obs[SAMPLE_KEY].unique().tolist()
+    adata.obs["age"] = adata.obs[SAMPLE_KEY].map({s: float(20 + 5 * i) for i, s in enumerate(samples)}).astype(float)
+
+    method = Pseudobulk(sample_key=SAMPLE_KEY, cell_group_key=CELL_KEY, layer="X")
+    method.prepare_anndata(adata)
+    result = method.fit_linear_probe("age", task="regression", test_sample_labels=[])
+
+    assert result["evaluated_on"] == "train"
+    assert result["test_sample_labels"] == []
+    assert np.isfinite(result["r2"])
+    assert np.isfinite(result["mae"])
+    # all samples were used for training, and the metrics are reported on them
+    assert len(result["age_pred"]) == len(samples)
 
 
 # store=True only makes sense for supervised methods (which keep a _probes registry).
