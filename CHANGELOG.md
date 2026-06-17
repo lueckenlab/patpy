@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.16.7
+
+### Added
+
+- `patpy.tl.evaluate_regression(y_true, y_pred)`: general-purpose regression metrics (`r2`, `spearman`, `pearson`, `mae`, `n`) for any predicted/true vectors, with non-finite masking and `NaN` when fewer than three valid pairs remain.
+- `PaSCient` regression support: `tasks=["regression"]` trains a per-view MSE head with automatic target standardisation, enabling continuous donor-level targets (e.g. age) instead of only classification.
+- `BaseSampleMethod.fit_linear_probe(..., store=True)` registers the fitted probe in `self._probes` so `predict()` can serve it afterwards — e.g. attaching a continuous-regression head on top of a classification-only model such as `MixMIL`.
+
+### Changed
+
+- `fit_linear_probe` now also works for sample-representation methods whose embedding is a plain ndarray or is computed lazily (via `calculate_distance_matrix`), tolerates an empty test set (train on all samples, for a transferable probe), and returns `spearman` and `mae` alongside `r2`/`pearson` for regression.
+- Supervised `predict()` resolves probe-backed labels through a shared `_predict_with_probe`; `MixMIL.predict` uses a stored regression probe when one is present, so a continuous target can ride on top of its binomial head.
+
 ## 0.16.6
 
 ### Fixed
