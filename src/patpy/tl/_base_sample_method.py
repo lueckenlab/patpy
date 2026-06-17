@@ -339,14 +339,18 @@ class BaseSampleMethod:
         :meth:`get_sample_representations`. An ndarray is wrapped using
         :attr:`samples` as the index.
         """
-        rep = self.sample_representation
-        if rep is None and hasattr(self, "get_sample_representations"):
+        if hasattr(self, "get_sample_representations"):
+            # Supervised methods recompute the embedding from the current adata;
+            # always call it fresh so a cached representation from a previously
+            # loaded cohort is never reused (it would mis-align with the labels).
             rep = self.get_sample_representations()
-        if rep is None and hasattr(self, "calculate_distance_matrix"):
-            # Representation methods (e.g. Pseudobulk) populate sample_representation
-            # lazily when the distance matrix is computed.
-            self.calculate_distance_matrix()
+        else:
             rep = self.sample_representation
+            if rep is None and hasattr(self, "calculate_distance_matrix"):
+                # Representation methods (e.g. Pseudobulk) populate
+                # sample_representation lazily when the distance matrix is computed.
+                self.calculate_distance_matrix()
+                rep = self.sample_representation
         if rep is None:
             raise RuntimeError(
                 f"{type(self).__name__} has no sample representation. Call prepare_anndata "
