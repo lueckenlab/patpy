@@ -357,6 +357,32 @@ class BaseSampleMethod:
 
         return axes
 
+    def _get_sample_representation_frame(self) -> "pd.DataFrame":
+        """Return the sample representation as a DataFrame indexed by sample.
+
+        Works for every method flavour: representation methods set
+        :attr:`sample_representation` directly (sometimes as a plain ndarray),
+        while supervised methods may only expose it lazily through
+        :meth:`get_sample_representations`. An ndarray is wrapped using
+        :attr:`samples` as the index.
+        """
+        rep = self.sample_representation
+        if rep is None and hasattr(self, "get_sample_representations"):
+            rep = self.get_sample_representations()
+        if rep is None and hasattr(self, "calculate_distance_matrix"):
+            # Representation methods (e.g. Pseudobulk) populate sample_representation
+            # lazily when the distance matrix is computed.
+            self.calculate_distance_matrix()
+            rep = self.sample_representation
+        if rep is None:
+            raise RuntimeError(
+                f"{type(self).__name__} has no sample representation. Call prepare_anndata "
+                "(and, for supervised methods, get_sample_representations) before fitting a probe."
+            )
+        if not isinstance(rep, pd.DataFrame):
+            rep = pd.DataFrame(np.asarray(rep), index=self.samples)
+        return rep
+
     def fit_linear_probe(
         self,
         target: str,
@@ -364,8 +390,17 @@ class BaseSampleMethod:
         test_size: float = 0.2,
         random_state: int = 42,
         test_sample_labels: list | None = None,
+        store: bool = False,
     ) -> dict:
         """Fit a linear probe on top of sample embeddings.
+
+        The probe is a plain sklearn model (:class:`~sklearn.linear_model.Ridge`
+        for regression, balanced :class:`~sklearn.linear_model.LogisticRegression`
+        for classification) trained on the method's sample representation. This
+        works for any method that produces a per-sample embedding, including
+        supervised methods whose native head solves a *different* task (e.g.
+        training a regression probe on top of a classification model such as
+        :class:`~patpy.tl.MixMIL`).
 
         Parameters
         ----------
@@ -383,9 +418,18 @@ class BaseSampleMethod:
             Explicit list of sample labels (index values of
             :attr:`sample_representation`) to use as the test set.
             When provided, ``test_size`` and ``random_state`` are ignored.
-            When ``None``, a random split is performed and the chosen test
-            labels are stored in :attr:`test_sample_labels` for
-            reproducibility.
+            Pass an empty list to train the probe on *all* samples (no
+            held-out evaluation) — useful when fitting a probe that will be
+            applied to a different cohort. When ``None``, a random split is
+            performed and the chosen test labels are stored in
+            :attr:`test_sample_labels` for reproducibility.
+        store
+            When ``True`` (supervised methods only), register the fitted probe
+            so that :meth:`predict` can reuse it on the current (or a swapped-in)
+            cohort. The probe is saved in ``self._probes[target]`` and *target*
+            is added to ``self.label_keys`` / ``self.tasks`` if not already
+            present. This is how a regression head is attached to a
+            classification-only model.
 
         Returns
         -------
@@ -394,28 +438,45 @@ class BaseSampleMethod:
             ``"{target}_test"``, ``"{target}_pred"``.
 
             For classification: additionally ``"accuracy"`` and ``"f1"``.
-            For regression: additionally ``"r2"`` and ``"pearson"``.
+            For regression: additionally ``"r2"``, ``"pearson"``,
+            ``"spearman"`` and ``"mae"``.
+
+            Metrics are ``NaN`` when the test set is empty.
 
         Examples
         --------
         >>> result = model.fit_linear_probe(target="age", task="regression")
-        >>> print(f"Pearson r = {result['pearson']:.3f}")
+        >>> print(f"Pearson r = {result['pearson']:.3f}")  # doctest: +SKIP
+
+        Attach a regression head to a classification model and predict:
+
+        >>> model.fit_linear_probe("age", task="regression", store=True)  # doctest: +SKIP
+        >>> ages = model.predict("age")  # doctest: +SKIP
         """
+        # Note: we intentionally do not call _check_fitted() here. Representation
+        # methods never flip the _fitted flag (their embedding is computed lazily),
+        # yet they have a perfectly good sample representation to probe. Supervised
+        # methods that are not trained will instead raise when their representation
+        # is requested below.
         self._check_adata_loaded()
-        self._check_fitted()
 
         if target not in self.adata.obs.columns:
             raise ValueError(f"target='{target}' not found in adata.obs.")
+        if store and not hasattr(self, "_probes"):
+            raise AttributeError(
+                "store=True is only supported for supervised methods that maintain a `_probes` registry."
+            )
 
-        rep = self.sample_representation
+        rep = self._get_sample_representation_frame()
         all_labels = rep.index
 
         # Extract target values from adata.obs (works for all sample methods)
         target_values = self._extract_metadata(columns=[target])
 
         if test_sample_labels is not None:
-            test_idx = list(test_sample_labels)
-            train_idx = [lbl for lbl in all_labels if lbl not in set(test_idx)]
+            test_set = set(test_sample_labels)
+            test_idx = [lbl for lbl in all_labels if lbl in test_set]
+            train_idx = [lbl for lbl in all_labels if lbl not in test_set]
         else:
             from sklearn.model_selection import train_test_split
 
@@ -432,39 +493,49 @@ class BaseSampleMethod:
         X_test = rep.loc[test_idx].values
         y_train = target_values.loc[train_idx, target].values
         y_test = target_values.loc[test_idx, target].values
+        has_test = len(test_idx) > 0
 
         if task == "classification":
             from sklearn.linear_model import LogisticRegression
             from sklearn.metrics import accuracy_score, f1_score
 
-            clf = LogisticRegression(max_iter=1000, random_state=random_state, class_weight="balanced")
-            clf.fit(X_train, y_train)
-            y_pred = clf.predict(X_test)
-            return {
-                "model": clf,
+            model = LogisticRegression(max_iter=1000, random_state=random_state, class_weight="balanced")
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test) if has_test else np.array([])
+            result = {
+                "model": model,
                 "test_sample_labels": test_idx,
                 f"{target}_test": y_test,
                 f"{target}_pred": y_pred,
-                "accuracy": accuracy_score(y_test, y_pred),
-                "f1": f1_score(y_test, y_pred, average="weighted", zero_division=0),
+                "accuracy": accuracy_score(y_test, y_pred) if has_test else np.nan,
+                "f1": f1_score(y_test, y_pred, average="weighted", zero_division=0) if has_test else np.nan,
             }
-
         elif task == "regression":
-            from scipy.stats import pearsonr
             from sklearn.linear_model import Ridge
-            from sklearn.metrics import r2_score
 
-            reg = Ridge(alpha=0.1)
-            reg.fit(X_train, y_train)
-            y_pred = reg.predict(X_test)
-            pearson_r, _ = pearsonr(y_test, y_pred)
-            return {
-                "model": reg,
+            from patpy.tl.evaluation import evaluate_regression
+
+            model = Ridge(alpha=0.1)
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test) if has_test else np.array([])
+            metrics = evaluate_regression(y_test, y_pred) if has_test else {}
+            result = {
+                "model": model,
                 "test_sample_labels": test_idx,
                 f"{target}_test": y_test,
                 f"{target}_pred": y_pred,
-                "r2": r2_score(y_test, y_pred),
-                "pearson": pearson_r,
+                "r2": metrics.get("r2", np.nan),
+                "pearson": metrics.get("pearson", np.nan),
+                "spearman": metrics.get("spearman", np.nan),
+                "mae": metrics.get("mae", np.nan),
             }
+        else:
+            raise ValueError(f"task must be 'classification' or 'regression', got '{task}'.")
 
-        raise ValueError(f"task must be 'classification' or 'regression', got '{task}'.")
+        if store:
+            self._probes[target] = result["model"]
+            if hasattr(self, "label_keys") and target not in self.label_keys:
+                self.label_keys.append(target)
+                self.tasks.append(task)
+
+        return result
