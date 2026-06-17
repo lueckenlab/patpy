@@ -140,11 +140,11 @@ class SupervisedSampleMethod(BaseSampleMethod):
     def _predict_with_probe(self, label: str) -> pd.Series | pd.DataFrame:
         """Predict `label` with the fitted sklearn probe in ``self._probes``.
 
-        Shared by the default :meth:`predict` and by subclasses with a native
-        head (e.g. MixMIL) that nonetheless carry a probe for a task their
-        native likelihood cannot solve. The probe runs on the *current*
-        :meth:`get_sample_representations`, so swapping ``self.adata`` to a new
-        cohort and calling :meth:`predict` yields cross-cohort predictions.
+        Shared by the default ``predict`` and by subclasses with a native head
+        (e.g. MixMIL) that nonetheless carry a probe for a task their native
+        likelihood cannot solve. The probe runs on the *current*
+        ``get_sample_representations``, so swapping ``self.adata`` to a new cohort
+        and calling ``predict`` yields cross-cohort predictions.
         """
         task = self.tasks[self.label_keys.index(label)]
         rep = self.get_sample_representations()

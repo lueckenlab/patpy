@@ -365,10 +365,10 @@ class BaseSampleMethod:
         """Return the sample representation as a DataFrame indexed by sample.
 
         Works for every method flavour: representation methods set
-        :attr:`sample_representation` directly (sometimes as a plain ndarray),
-        while supervised methods may only expose it lazily through
-        :meth:`get_sample_representations`. An ndarray is wrapped using
-        :attr:`samples` as the index.
+        ``sample_representation`` directly (sometimes as a plain ndarray), while
+        supervised methods may only expose it lazily through
+        ``get_sample_representations``. An ndarray is wrapped using ``samples``
+        as the index.
         """
         if hasattr(self, "get_sample_representations"):
             # Supervised methods recompute the embedding from the current adata;
@@ -402,13 +402,12 @@ class BaseSampleMethod:
     ) -> dict:
         """Fit a linear probe on top of sample embeddings.
 
-        The probe is a plain sklearn model (:class:`~sklearn.linear_model.Ridge`
-        for regression, balanced :class:`~sklearn.linear_model.LogisticRegression`
-        for classification) trained on the method's sample representation. This
-        works for any method that produces a per-sample embedding, including
-        supervised methods whose native head solves a *different* task (e.g.
-        training a regression probe on top of a classification model such as
-        :class:`~patpy.tl.MixMIL`).
+        The probe is a plain sklearn model (``Ridge`` for regression, balanced
+        ``LogisticRegression`` for classification) trained on the method's sample
+        representation. This works for any method that produces a per-sample
+        embedding, including supervised methods whose native head solves a
+        *different* task (e.g. training a regression probe on top of a
+        classification model such as ``MixMIL``).
 
         Parameters
         ----------
@@ -424,17 +423,17 @@ class BaseSampleMethod:
             ``test_sample_labels`` is not provided).
         test_sample_labels
             Explicit list of sample labels (index values of
-            :attr:`sample_representation`) to use as the test set.
+            ``sample_representation``) to use as the test set.
             When provided, ``test_size`` and ``random_state`` are ignored.
             Pass an empty list to train the probe on *all* samples — useful
             when fitting a probe that will be applied to a different cohort; the
             returned metrics are then computed on the train set (see
             ``evaluated_on`` below). When ``None``, a random split is performed
-            and the chosen test labels are stored in :attr:`test_sample_labels`
+            and the chosen test labels are stored in ``test_sample_labels``
             for reproducibility.
         store
             When ``True`` (supervised methods only), register the fitted probe
-            so that :meth:`predict` can reuse it on the current (or a swapped-in)
+            so that ``predict`` can reuse it on the current (or a swapped-in)
             cohort. The probe is saved in ``self._probes[target]`` and *target*
             is added to ``self.label_keys`` / ``self.tasks`` if not already
             present. This is how a regression head is attached to a
