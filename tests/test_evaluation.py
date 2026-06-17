@@ -10,6 +10,7 @@ from patpy.tl.evaluation import (
     _permanova_ss_w,
     _select_random_subset,
     evaluate_prediction,
+    evaluate_regression,
     evaluate_representation,
     knn_prediction_score,
     permanova_pseudo_f_statistic,
@@ -338,3 +339,58 @@ def test_replicate_robustness_intermediate():
     # Half the samples have replicate at rank 0; the other half at rank n-2.
     # Mean rank = (n-2)/2; normalised score = 1 - 0.5 = 0.5.
     assert score == pytest.approx(0.5)
+
+
+# A perfect prediction should score r2/pearson == 1 and mae == 0.
+def test_evaluate_regression_perfect_fit():
+    y_true = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+
+    result = evaluate_regression(y_true, y_true.copy())
+
+    assert result["n"] == 5
+    assert result["r2"] == pytest.approx(1.0)
+    assert result["pearson"] == pytest.approx(1.0)
+    assert result["spearman"] == pytest.approx(1.0)
+    assert result["mae"] == pytest.approx(0.0)
+
+
+# Non-finite pairs are dropped before scoring; only the finite ones count.
+def test_evaluate_regression_drops_non_finite():
+    y_true = np.array([1.0, 2.0, 3.0, 4.0, np.nan])
+    y_pred = np.array([1.0, 2.0, 3.0, np.inf, 5.0])
+
+    result = evaluate_regression(y_true, y_pred)
+
+    # The last two pairs contain nan/inf and are dropped, leaving 3 valid pairs.
+    assert result["n"] == 3
+    assert result["mae"] == pytest.approx(0.0)
+
+
+# Fewer than three valid pairs leaves the metrics undefined (NaN).
+def test_evaluate_regression_too_few_points():
+    result = evaluate_regression([1.0, 2.0], [1.0, 2.0])
+
+    assert result["n"] == 2
+    assert np.isnan(result["r2"])
+    assert np.isnan(result["spearman"])
+    assert np.isnan(result["pearson"])
+    assert np.isnan(result["mae"])
+
+
+# A constant prediction makes the correlations undefined but keeps r2/mae finite.
+def test_evaluate_regression_constant_prediction():
+    y_true = np.array([1.0, 2.0, 3.0, 4.0])
+    y_pred = np.array([2.5, 2.5, 2.5, 2.5])
+
+    result = evaluate_regression(y_true, y_pred)
+
+    assert np.isnan(result["spearman"])
+    assert np.isnan(result["pearson"])
+    assert np.isfinite(result["r2"])
+    assert result["mae"] == pytest.approx(1.0)
+
+
+# Mismatched shapes are a programming error and should raise.
+def test_evaluate_regression_shape_mismatch():
+    with pytest.raises(ValueError):
+        evaluate_regression([1.0, 2.0, 3.0], [1.0, 2.0])
