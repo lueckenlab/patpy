@@ -1565,6 +1565,7 @@ class PaSCient(SupervisedSampleMethod):
         emb_dim = self.patient_emb_dim  # 512
 
         if task == "regression":
+
             class _RegressionLoss(nn.Module):
                 """MSE between predicted scalar and target, averaged over the (single) view."""
 
@@ -1697,7 +1698,10 @@ class PaSCient(SupervisedSampleMethod):
 
         if self._pascient_model is None:
             self._pascient_model = self._build_model(
-                n_genes, n_classes, class_counts=class_counts, task=task,
+                n_genes,
+                n_classes,
+                class_counts=class_counts,
+                task=task,
             )
 
         # -- Dataset that produces SampleBatch per donor ----------------

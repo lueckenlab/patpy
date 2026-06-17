@@ -357,7 +357,7 @@ class BaseSampleMethod:
 
         return axes
 
-    def _get_sample_representation_frame(self) -> "pd.DataFrame":
+    def _get_sample_representation_frame(self) -> pd.DataFrame:
         """Return the sample representation as a DataFrame indexed by sample.
 
         Works for every method flavour: representation methods set
