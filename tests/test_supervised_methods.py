@@ -1527,3 +1527,25 @@ def test_mixmil_native_classification_still_works_after_storing_probe(mixmil_mod
     disease_pred = mixmil_model.predict("disease")
     assert isinstance(disease_pred, pd.DataFrame)
     assert "disease_pred" in disease_pred.columns
+
+
+@_skip_no_mixmil
+def test_mixmil_probe_predict_survives_cohort_swap(mixmil_model, basic_adata):
+    """A model reused across cohorts must not reuse a stale representation cache.
+
+    Regression test: fit a probe on cohort A, then re-point the model at cohort B
+    (different donor IDs) and predict. Previously the cached sample_representation
+    from A leaked into the probe lookup and raised a KeyError; the prediction must
+    now be indexed by cohort B's donors.
+    """
+    mixmil_model.fit_linear_probe("age", task="regression", test_sample_labels=[], store=True)
+
+    cohort_b = basic_adata.copy()
+    cohort_b.obs["donor_id"] = "B_" + cohort_b.obs["donor_id"].astype(str)
+    mixmil_model.adata = cohort_b
+    mixmil_model.samples = pd.unique(cohort_b.obs["donor_id"]).tolist()
+
+    predictions = mixmil_model.predict("age")
+
+    assert set(predictions.index) == set(cohort_b.obs["donor_id"].unique())
+    assert np.issubdtype(predictions.values.dtype, np.floating)

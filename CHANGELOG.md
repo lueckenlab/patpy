@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning][].
 - `fit_linear_probe` now also works for sample-representation methods whose embedding is a plain ndarray or is computed lazily (via `calculate_distance_matrix`), accepts an empty test set to train on all samples (returning metrics on the train set, with a new `evaluated_on` key reporting `"test"`/`"train"`), and returns `spearman` and `mae` alongside `r2`/`pearson` for regression.
 - Supervised `predict()` resolves probe-backed labels through a shared `_predict_with_probe`; `MixMIL.predict` uses a stored regression probe when one is present, so a continuous target can ride on top of its binomial head.
 
+### Fixed
+
+- `MixMIL.get_sample_representations` now indexes the embedding by the donor order produced by `_build_bags` rather than `self.samples`, so labels stay matched to embeddings when the model is re-pointed at a new cohort.
+- `fit_linear_probe` recomputes the representation from the current `adata` for supervised methods instead of reusing a cached one, preventing a stale cross-cohort representation from corrupting the probe.
+- `_move_layer_to_X` skips the `None` layer key (newer AnnData exposes `X` as `layers[None]`), fixing an `AnnData` construction error on recent anndata versions.
+
 ## 0.16.6
 
 ### Fixed
