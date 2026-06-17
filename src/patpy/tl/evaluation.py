@@ -366,36 +366,30 @@ def evaluate_prediction(y_true, y_pred, task, **parameters):
 
 
 def evaluate_regression(y_true, y_pred):
-    """Compute standard regression metrics between true and predicted values.
+    """Compute standard regression metrics between true and predicted values
 
     A general-purpose helper (not tied to any particular target) that returns
     the metrics most commonly reported for continuous predictions. Pairs in
-    which either ``y_true`` or ``y_pred`` is non-finite (NaN/inf) are dropped
-    before scoring. When fewer than three valid pairs remain the metrics are
-    not well defined and are returned as ``NaN``.
+    which either `y_true` or `y_pred` is non-finite (NaN/inf) are dropped before
+    scoring. When fewer than three valid pairs remain the metrics are not well
+    defined and are returned as NaN.
 
     Parameters
     ----------
     y_true : array-like
-        Ground-truth continuous values.
+        Ground-truth continuous values
     y_pred : array-like
-        Predicted continuous values, aligned with ``y_true``.
+        Predicted continuous values, aligned with `y_true`
 
     Returns
     -------
     result : dict
-        Dictionary with the following keys:
-
-        - ``r2``: coefficient of determination (:func:`sklearn.metrics.r2_score`)
-        - ``spearman``: Spearman rank correlation
-        - ``pearson``: Pearson correlation
-        - ``mae``: mean absolute error
-        - ``n``: number of valid (finite) pairs used for scoring
-
-    Examples
-    --------
-    >>> evaluate_regression([1, 2, 3, 4], [1.1, 1.9, 3.2, 3.8])["mae"]  # doctest: +SKIP
-    0.15
+        Result of evaluation with the following keys:
+        - r2: coefficient of determination (`sklearn.metrics.r2_score`)
+        - spearman: Spearman rank correlation
+        - pearson: Pearson correlation
+        - mae: mean absolute error
+        - n: number of valid (finite) pairs used for scoring
     """
     from scipy.stats import pearsonr, spearmanr
     from sklearn.metrics import mean_absolute_error, r2_score
