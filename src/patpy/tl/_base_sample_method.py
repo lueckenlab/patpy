@@ -114,7 +114,9 @@ class BaseSampleMethod:
         filtered_layers = {
             key: np.copy(layer)
             for key, layer in self.adata.layers.items()
-            if key is not None and key != self.layer and layer.shape == self.adata.layers.get(self.layer, np.empty(0)).shape
+            if key is not None
+            and key != self.layer
+            and layer.shape == self.adata.layers.get(self.layer, np.empty(0)).shape
         }
         # Copy everything except from .var* to new adata, with correct layer in X
         new_adata = sc.AnnData(
