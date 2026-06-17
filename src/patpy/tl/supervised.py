@@ -844,7 +844,12 @@ class MixMIL(SupervisedSampleMethod):
         self._check_adata_loaded()
         import torch
 
-        Xs, _, _ = self._build_bags()
+        # `_build_bags` returns donors in pd.Categorical (alphabetical) order; the
+        # embeddings below follow that same order, so we index by `categories` (and
+        # align `self.samples` to it) rather than the possibly-differently-ordered
+        # `self.samples`. This keeps donor labels matched to their embeddings even
+        # when the model is re-pointed at a new cohort.
+        Xs, categories, _ = self._build_bags()
 
         with torch.no_grad():
             w, _ = self._model.get_weights(Xs)
@@ -858,7 +863,8 @@ class MixMIL(SupervisedSampleMethod):
 
         embeddings_arr = np.stack(embeddings)
         cols = [f"dim_{i}" for i in range(embeddings_arr.shape[1])]
-        self.sample_representation = pd.DataFrame(embeddings_arr, index=self.samples, columns=cols)
+        self.samples = categories
+        self.sample_representation = pd.DataFrame(embeddings_arr, index=categories, columns=cols)
 
         return self.sample_representation
 
