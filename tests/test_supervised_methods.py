@@ -1481,3 +1481,71 @@ class TestEdgeCases:
         """fit_linear_probe should raise ValueError if target not in adata.obs."""
         with pytest.raises(ValueError, match="not found in adata.obs"):
             pulsar_model.fit_linear_probe(target="nonexistent_column", task="regression")
+
+
+# ---------------------------------------------------------------------------
+# Linear-probe regression head on a classification-only model (MixMIL)
+# ---------------------------------------------------------------------------
+
+
+@_skip_no_mixmil
+def test_mixmil_fit_linear_probe_regression(mixmil_model):
+    """A regression probe can be fit on MixMIL's representation (native head is binomial)."""
+    from sklearn.linear_model import Ridge
+
+    test_samples = ["donor_00", "donor_01", "donor_02"]
+    result = mixmil_model.fit_linear_probe("age", task="regression", test_sample_labels=test_samples)
+
+    assert isinstance(result["model"], Ridge)
+    assert {"r2", "pearson", "spearman", "mae"} <= result.keys()
+    assert len(result["age_pred"]) == len(test_samples)
+
+
+@_skip_no_mixmil
+def test_mixmil_predict_via_stored_regression_probe(mixmil_model):
+    """store=True attaches a regression head so predict() returns continuous values."""
+    mixmil_model.fit_linear_probe("age", task="regression", test_sample_labels=[], store=True)
+
+    assert "age" in mixmil_model.label_keys
+    assert "age" in mixmil_model._probes
+    assert mixmil_model.tasks[mixmil_model.label_keys.index("age")] == "regression"
+
+    predictions = mixmil_model.predict("age")
+
+    assert isinstance(predictions, pd.Series)
+    assert len(predictions) == N_DONORS
+    assert np.issubdtype(predictions.values.dtype, np.floating)
+    assert list(predictions.index) == list(mixmil_model.samples)
+
+
+@_skip_no_mixmil
+def test_mixmil_native_classification_still_works_after_storing_probe(mixmil_model):
+    """Storing a regression probe must not break the native classification head."""
+    mixmil_model.fit_linear_probe("age", task="regression", test_sample_labels=[], store=True)
+
+    # The native binomial head still serves the originally trained label.
+    disease_pred = mixmil_model.predict("disease")
+    assert isinstance(disease_pred, pd.DataFrame)
+    assert "disease_pred" in disease_pred.columns
+
+
+@_skip_no_mixmil
+def test_mixmil_probe_predict_survives_cohort_swap(mixmil_model, basic_adata):
+    """A model reused across cohorts must not reuse a stale representation cache.
+
+    Regression test: fit a probe on cohort A, then re-point the model at cohort B
+    (different donor IDs) and predict. Previously the cached sample_representation
+    from A leaked into the probe lookup and raised a KeyError; the prediction must
+    now be indexed by cohort B's donors.
+    """
+    mixmil_model.fit_linear_probe("age", task="regression", test_sample_labels=[], store=True)
+
+    cohort_b = basic_adata.copy()
+    cohort_b.obs["donor_id"] = "B_" + cohort_b.obs["donor_id"].astype(str)
+    mixmil_model.adata = cohort_b
+    mixmil_model.samples = pd.unique(cohort_b.obs["donor_id"]).tolist()
+
+    predictions = mixmil_model.predict("age")
+
+    assert set(predictions.index) == set(cohort_b.obs["donor_id"].unique())
+    assert np.issubdtype(predictions.values.dtype, np.floating)

@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.16.7
+
+### Added
+
+- `patpy.tl.evaluate_regression(y_true, y_pred)`: general-purpose regression metrics (`r2`, `spearman`, `pearson`, `mae`, `n`) for any predicted/true vectors, with non-finite masking and `NaN` when fewer than three valid pairs remain.
+- `PaSCient` regression support: `tasks=["regression"]` trains a per-view MSE head with automatic target standardisation, enabling continuous donor-level targets (e.g. age) instead of only classification.
+- `BaseSampleMethod.fit_linear_probe(..., store=True)` registers the fitted probe in `self._probes` so `predict()` can serve it afterwards — e.g. attaching a continuous-regression head on top of a classification-only model such as `MixMIL`.
+
+### Changed
+
+- `fit_linear_probe` now also works for sample-representation methods whose embedding is a plain ndarray or is computed lazily (via `calculate_distance_matrix`), accepts an empty test set to train on all samples (returning metrics on the train set, with a new `evaluated_on` key reporting `"test"`/`"train"`), and returns `spearman` and `mae` alongside `r2`/`pearson` for regression.
+- Supervised `predict()` resolves probe-backed labels through a shared `_predict_with_probe`; `MixMIL.predict` uses a stored regression probe when one is present, so a continuous target can ride on top of its binomial head.
+
+### Fixed
+
+- `MixMIL.get_sample_representations` now indexes the embedding by the donor order produced by `_build_bags` rather than `self.samples`, so labels stay matched to embeddings when the model is re-pointed at a new cohort.
+- `fit_linear_probe` recomputes the representation from the current `adata` for supervised methods instead of reusing a cached one, preventing a stale cross-cohort representation from corrupting the probe.
+- `_move_layer_to_X` skips the `None` layer key (newer AnnData exposes `X` as `layers[None]`), fixing an `AnnData` construction error on recent anndata versions.
+
 ## 0.16.6
 
 ### Fixed

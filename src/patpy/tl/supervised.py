@@ -135,6 +135,17 @@ class SupervisedSampleMethod(BaseSampleMethod):
         if label not in self._probes:
             raise RuntimeError(f"No probe fitted for label '{label}'. Call fine_tune() first.")
 
+        return self._predict_with_probe(label)
+
+    def _predict_with_probe(self, label: str) -> pd.Series | pd.DataFrame:
+        """Predict `label` with the fitted sklearn probe in ``self._probes``.
+
+        Shared by the default ``predict`` and by subclasses with a native head
+        (e.g. MixMIL) that nonetheless carry a probe for a task their native
+        likelihood cannot solve. The probe runs on the *current*
+        ``get_sample_representations``, so swapping ``self.adata`` to a new cohort
+        and calling ``predict`` yields cross-cohort predictions.
+        """
         task = self.tasks[self.label_keys.index(label)]
         rep = self.get_sample_representations()
         X = rep.values
@@ -631,6 +642,12 @@ class MixMIL(SupervisedSampleMethod):
         if label not in self.label_keys:
             raise ValueError(f"`label='{label}'` is not found in model label keys.")
 
+        # A linear probe attached via fit_linear_probe(..., store=True) takes
+        # precedence: it lets MixMIL serve tasks (e.g. continuous regression)
+        # that its binomial/categorical native head cannot.
+        if label in self._probes:
+            return self._predict_with_probe(label)
+
         task = self.tasks[self.label_keys.index(label)]
 
         # Build tensors for inference
@@ -815,7 +832,12 @@ class MixMIL(SupervisedSampleMethod):
         self._check_adata_loaded()
         import torch
 
-        Xs, _, _ = self._build_bags()
+        # `_build_bags` returns donors in pd.Categorical (alphabetical) order; the
+        # embeddings below follow that same order, so we index by `categories` (and
+        # align `self.samples` to it) rather than the possibly-differently-ordered
+        # `self.samples`. This keeps donor labels matched to their embeddings even
+        # when the model is re-pointed at a new cohort.
+        Xs, categories, _ = self._build_bags()
 
         with torch.no_grad():
             w, _ = self._model.get_weights(Xs)
@@ -829,7 +851,8 @@ class MixMIL(SupervisedSampleMethod):
 
         embeddings_arr = np.stack(embeddings)
         cols = [f"dim_{i}" for i in range(embeddings_arr.shape[1])]
-        self.sample_representation = pd.DataFrame(embeddings_arr, index=self.samples, columns=cols)
+        self.samples = categories
+        self.sample_representation = pd.DataFrame(embeddings_arr, index=categories, columns=cols)
 
         return self.sample_representation
 
@@ -1483,7 +1506,13 @@ class PaSCient(SupervisedSampleMethod):
         self._extract_embeddings(adata)
         self._fitted = True
 
-    def _build_model(self, n_genes: int, n_classes: int, class_counts: list[int] | None = None):
+    def _build_model(
+        self,
+        n_genes: int,
+        n_classes: int,
+        class_counts: list[int] | None = None,
+        task: str = "classification",
+    ):
         """Build a fresh PaSCient model from pascient component classes.
 
         Parameters
@@ -1491,17 +1520,21 @@ class PaSCient(SupervisedSampleMethod):
         n_genes
             Number of input genes.
         n_classes
-            Number of prediction outputs.
+            Number of prediction outputs (set to ``1`` for regression).
         class_counts
-            Per-class sample counts for loss weighting.  When provided,
-            ``CrossEntropyLossViews`` uses inverse counts so that
+            Per-class sample counts for loss weighting (classification only).
+            When provided, ``CrossEntropyLossViews`` uses inverse counts so
             under-represented classes receive higher loss.
+        task
+            ``"classification"`` (default) routes through
+            ``CrossEntropyLossViews``. ``"regression"`` swaps in a per-view
+            mean-squared error loss.
 
         Returns
         -------
         pascient.model.sample_predictor.SamplePredictor
             A ``SamplePredictor`` instance with the default PaSCient
-            architecture.
+            architecture and a task-appropriate prediction loss.
         """
         from functools import partial
         from types import SimpleNamespace
@@ -1525,16 +1558,37 @@ class PaSCient(SupervisedSampleMethod):
         latent_dim = self.latent_dim  # 1024
         emb_dim = self.patient_emb_dim  # 512
 
-        from pascient.components.losses import CrossEntropyLossViews
+        if task == "regression":
 
-        # Minimal losses config expected by SamplePredictor.init_losses()
-        # CrossEntropyLossViews internally inverts the weights (1/w),
-        # so passing class counts upweights rare classes.
-        loss_kwargs = {"weight": class_counts} if class_counts is not None else {}
+            class _RegressionLoss(nn.Module):
+                """MSE between predicted scalar and target, averaged over the (single) view."""
+
+                def __init__(self):
+                    super().__init__()
+                    self.mse = nn.MSELoss()
+
+                def forward(self, logits, target):
+                    # logits: (B, V, 1) where V = #views. target: (B,) or (B, 1).
+                    if logits.ndim == 3 and logits.shape[-1] == 1:
+                        logits = logits.squeeze(-1)
+                    if logits.ndim == 2 and logits.shape[1] == 1:
+                        logits = logits.squeeze(1)
+                    target = target.to(logits.dtype).view(logits.shape)
+                    return self.mse(logits, target)
+
+            loss_factory = _RegressionLoss
+        else:
+            from pascient.components.losses import CrossEntropyLossViews
+
+            # CrossEntropyLossViews internally inverts the weights (1/w),
+            # so passing class counts upweights rare classes.
+            loss_kwargs = {"weight": class_counts} if class_counts is not None else {}
+            loss_factory = partial(CrossEntropyLossViews, **loss_kwargs)
+
         losses = SimpleNamespace(
             sample_prediction_loss=SimpleNamespace(
                 weight=1.0,
-                loss_fn=partial(CrossEntropyLossViews, **loss_kwargs),
+                loss_fn=loss_factory,
                 labels=self.label_keys[:1],
             ),
         )
@@ -1618,15 +1672,31 @@ class PaSCient(SupervisedSampleMethod):
             # receive higher loss via CrossEntropyLossViews's 1/w scheme).
             class_counts = [int((label_vals == c).sum()) for c in classes]
         else:
+            # Regression: z-score the target so MSE is on a unit scale.
+            # Without this, raw targets like ages (40-89) make the initial
+            # loss ~thousands and gradients explode into NaN within a few
+            # steps. We store the mean/std so ``_predict_native`` can
+            # de-normalise back to the original scale.
             n_classes = 1
-            y_map = {d: float(v) for d, v in zip(self.labels.index, label_vals, strict=True)}
+            float_vals = np.asarray(label_vals, dtype=np.float64)
+            self._regression_mean = float(np.nanmean(float_vals))
+            self._regression_std = float(np.nanstd(float_vals)) or 1.0
+            y_map = {
+                d: float((v - self._regression_mean) / self._regression_std)
+                for d, v in zip(self.labels.index, label_vals, strict=True)
+            }
             self._class_names = None
             class_counts = None
 
         self._trained_label = label_key
 
         if self._pascient_model is None:
-            self._pascient_model = self._build_model(n_genes, n_classes, class_counts=class_counts)
+            self._pascient_model = self._build_model(
+                n_genes,
+                n_classes,
+                class_counts=class_counts,
+                task=task,
+            )
 
         # -- Dataset that produces SampleBatch per donor ----------------
 
@@ -1687,6 +1757,8 @@ class PaSCient(SupervisedSampleMethod):
             enable_checkpointing=False,
             logger=False,
             enable_progress_bar=True,
+            gradient_clip_val=1.0,
+            gradient_clip_algorithm="norm",
         )
         self._pascient_model.train()
         trainer.fit(self._pascient_model, train_dataloaders=train_dl, val_dataloaders=val_dl)
@@ -2083,7 +2155,10 @@ class PaSCient(SupervisedSampleMethod):
             result[f"{label}_pred"] = [classes[i] for i in proba.argmax(axis=1)]
             return result
         else:
-            return pd.Series(preds_arr.ravel(), index=donor_ids, name=label)
+            # De-normalise the z-scored target back to the original scale.
+            mean = getattr(self, "_regression_mean", 0.0)
+            std = getattr(self, "_regression_std", 1.0)
+            return pd.Series(preds_arr.ravel() * std + mean, index=donor_ids, name=label)
 
     def get_sample_importance(self, force: bool = False) -> pd.DataFrame:
         """Per-donor importance derived from the L2 norm of patient embeddings.
