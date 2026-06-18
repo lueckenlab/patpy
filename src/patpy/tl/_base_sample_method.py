@@ -109,7 +109,7 @@ class BaseSampleMethod:
             return self.adata
 
         # getting only those layers with the same shape of the new X matrix from adata.layers[self.layer] to be copied in the new anndata below.
-        # Newer anndata exposes ``X`` as ``layers[None]``; skip that key so we don't
+        # anndata >= 0.13 exposes ``X`` as ``layers[None]``; skip that key so we don't
         # re-inject it as a layer and clash with the explicit ``X`` passed below.
         filtered_layers = {
             key: np.copy(layer)
