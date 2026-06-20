@@ -1944,6 +1944,193 @@ class MOFA(SampleRepresentationMethod):
         return distances
 
 
+class scSLIDE(SampleRepresentationMethod):
+    """Sample representation using scSLIDE, a landmark-based method for computing sample-level distances from single-cell data.
+
+    Cells are projected into a shared landmark space via PLS-guided WNN embedding, and pairwise euclidean distances
+    between samples are computed from centered landmark density profiles.
+
+    Source publication: https://doi.org/10.64898/2025.12.10.693462
+
+    Parameters
+    ----------
+    sample_key : str
+        Column in `.obs` containing sample (patient) IDs.
+    cell_group_key : str
+        Column in `.obs` containing cell type annotations. Used for correlation-based landmark selection and grouping.
+    outcome_key : str
+        Column in `.obs` containing the outcome/response variable. Used to guide PLS embedding.
+    layer : str
+        Layer in AnnData to use as gene expression input. Use ``"X"`` for `.X`, or a key in `.layers`.
+    n_features : int, default: 2000
+        Number of highly variable genes to select before landmark construction.
+    ncells_per_group : int, default: 1000
+        Number of cells to sample per sample group for sketch-based training.
+    ncells_landmark : int, default: 2000
+        Total number of landmark cells to select.
+    ncomp : int, default: 20
+        Number of PLS components to compute.
+    pls_function : str, default: "cppls"
+        PLS function to use. One of ``"cppls"``, ``"plsr"``, ``"spls"``.
+    k_nn : int, default: 5
+        Number of nearest neighbours for WNN graph construction.
+    reduction : str, default: "PCA"
+        Name of the pre-computed dimensionality reduction in the Seurat object to use alongside PLS for WNN.
+
+        ``Note:`` Alternate names of PCA/UMAP is taken as PCA/UMAP. For example, ``X_pca``/``X_UMAP`` will be treated as as
+        PCA/UMAP respectively.
+    reduction_dims : int, default: 128
+        Number of dimensions from ``reduction`` to use.
+    normalization_method : str, default: "ChiSquared"
+        Normalization method for landmark density profiles. One of ``"ChiSquared"``, ``"LogNormalize"``.
+    scale_factor : int, default: 10000
+        Scale factor for ``"LogNormalize"`` normalization.
+    """
+
+    def __init__(
+        self,
+        sample_key: str,
+        cell_group_key: str,
+        outcome_key: str,
+        layer: str,
+        n_features: int = 2000,
+        ncells_per_group: int = 1000,
+        ncells_landmark: int = 2000,
+        ncomp: int = 20,
+        pls_function: str = "cppls",
+        k_nn: int = 5,
+        reduction: str = "PCA",  # PCA and UMAP will be changed accordingly when converting to R object
+        reduction_dims: int = 128,
+        normalization_method: str = "ChiSquared",
+        scale_factor: int = 10000,
+    ):
+        super().__init__(sample_key=sample_key, cell_group_key=cell_group_key, layer=layer)
+        self.outcome_key = outcome_key
+        self.n_features = n_features
+        self.ncells_per_group = ncells_per_group
+        self.ncells_landmark = ncells_landmark
+        self.ncomp = ncomp
+        self.pls_function = pls_function
+        self.k_nn = k_nn
+        self.reduction = reduction
+        self.reduction_dims = reduction_dims
+        self.normalization_method = normalization_method
+        self.scale_factor = scale_factor
+
+    def prepare_anndata(self, adata):
+        """Prepare anndata for scSLIDE calculation"""
+        super().prepare_anndata(adata=adata)
+
+        import rpy2.robjects as ro
+
+        ro.r("library(Seurat)")
+        ro.r("library(scSLIDE)")
+
+        self._fitted = True
+
+    def calculate_distance_matrix(self, force: bool = False):
+        """Calculate distances between samples represented as scSLIDE embeddings"""
+        distances = super().calculate_distance_matrix(force)
+
+        if distances is not None:
+            return distances
+
+        import anndata2ri
+        import numpy as np
+        import rpy2.robjects as ro
+        from rpy2.robjects.conversion import localconverter
+        from scipy.spatial.distance import cdist
+
+        # Import necessary packages in R
+        ro.r("library(Seurat)")
+        ro.r("library(scSLIDE)")
+        ro.r("library(SingleCellExperiment)")
+
+        # Convert annodata -> SingleCellExperiment -> Seurat object
+        with localconverter(anndata2ri.converter):
+            sce = ro.conversion.py2rpy(self.adata)
+
+        ro.globalenv["sce"] = sce
+        ro.r(f'seurat_obj <- as.Seurat(sce, counts = "{self.layer}", data = "{self.layer}")')
+
+        # Find top variable features (genes)
+        ro.r(f"seurat_obj <- FindVariableFeatures(seurat_obj, nfeatures = {self.n_features})")
+
+        # Prepare the sample object using scSLIDE's PrepareSampleObject function. It does
+        # 1. Training subset creation
+        # 2. Landmark cell selection
+        # 3. Response-oriented embedding
+        # 4. Neighbor graph construction
+        # See: https://satijalab.github.io/scSLIDE/articles/scSLIDE_COVID19.html
+        print("Preparing sample object in R using scSLIDE's PrepareSampleObject function...")
+        ro.r(f"""
+            object <- PrepareSampleObject(
+                object = seurat_obj,
+                assay = "originalexp",
+                add.hvg = TRUE,
+                group.by.CorTest = "{self.cell_group_key}",
+                Y = "{self.outcome_key}",
+                sketch.training = TRUE,
+                group.by.Sketch = "{self.sample_key}",
+                ncells.per.group = {self.ncells_per_group},
+                ncells.landmark = {self.ncells_landmark},
+                ncomp = {self.ncomp},
+                pls.function = "{self.pls_function}",
+                k.nn = {self.k_nn},
+                name.reduction.1 = "{self.reduction}",
+                dims.reduction.1 = 1:{self.reduction_dims},
+                fix.wnn.weights = c(0.5, 0.5),
+                verbose = TRUE
+            )
+        """)
+
+        # Generate the landmarks x sample object
+        ro.r(f"""
+            sample_obj <- GenerateSampleObject(
+                object = object,
+                sketch.assay = "LANDMARK",
+                nn.name = "weighted.nn",
+                group.by = "{self.sample_key}",
+                rename.group.by = "{self.cell_group_key}",
+                k.nn = {self.k_nn},
+                normalization.method = "{self.normalization_method}",
+                scale.factor = {self.scale_factor},
+                add.meta.data = TRUE,
+                return.seurat = TRUE,
+            )
+        """)
+
+        # Centering that data
+        ro.r("sample_obj <- ScaleData(sample_obj, features = rownames(sample_obj), do.scale = FALSE, do.center = TRUE)")
+
+        # Converting it into anndata object and getting parwise distance matrix
+        with localconverter(anndata2ri.converter):
+            sample_adata = ro.r("as.SingleCellExperiment(sample_obj)")
+
+        X = np.array(sample_adata.layers["scaledata"])
+        dist_matrix = cdist(X, X, metric="euclidean")
+
+        self.sample_representation = X
+        self._distances = dist_matrix
+        self.adata.uns["scSLIDE_parameters"] = {
+            "sample_key": self.sample_key,
+            "cell_group_key": self.cell_group_key,
+            "outcome_key": self.outcome_key,
+            "n_features": self.n_features,
+            "ncells_per_group": self.ncells_per_group,
+            "ncells_landmark": self.ncells_landmark,
+            "ncomp": self.ncomp,
+            "pls_function": self.pls_function,
+            "k_nn": self.k_nn,
+            "reduction": self.reduction,
+            "reduction_dims": self.reduction_dims,
+            "normalization_method": self.normalization_method,
+            "scale_factor": self.scale_factor,
+        }
+
+        return dist_matrix
+
+
 class GloScope(SampleRepresentationMethod):
     """A class that loads a file to R using rpy2 and follows the same interface as other SampleRepresentation methods"""
 

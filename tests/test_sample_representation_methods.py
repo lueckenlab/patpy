@@ -27,6 +27,7 @@ from patpy.tl.sample_representation import (
     correlate_cell_type_expression,
     correlate_composition,
     make_matrix_symmetric,
+    scSLIDE,
     valid_aggregate,
     valid_distance_metric,
 )
@@ -65,6 +66,7 @@ _ALL_SR_METHODS = [
     pytest.param(MOFA, {}, id="MOFA"),
     pytest.param(GloScope, {}, id="GloScope", marks=_skip_if_missing("rpy2")),
     pytest.param(GloScope_py, {}, id="GloScope_py"),
+    pytest.param(scSLIDE, {"outcome_key": "disease", "layer": "X"}, id="scSLIDE", marks=_skip_if_missing("rpy2")),
 ]
 
 
@@ -411,6 +413,50 @@ def test_gloscope_py(pbmc3k_adata):
     n_samples = adata.obs[SAMPLE_KEY].nunique()
 
     method = GloScope_py(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca")
+    method.prepare_anndata(adata)
+    distances = method.calculate_distance_matrix(force=True)
+
+    _assert_distances(distances, n_samples, method)
+    _assert_cache_respected(method, distances)
+
+
+# ---------------------------------------------------------------------------
+# scSLIDE (requires rpy2, Seurat R package, and scSLIDE R package)
+# ---------------------------------------------------------------------------
+
+
+def _skip_if_scslide_unavailable():
+    """Skip the test if rpy2 or the Seurat/scSLIDE R packages are not available."""
+    pytest.importorskip("rpy2")
+    try:
+        import rpy2.robjects as ro
+
+        ro.r("library(Seurat)")
+        ro.r("library(scSLIDE)")
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"Seurat/scSLIDE R packages not available: {exc}")
+
+
+def test_scslide(pbmc3k_adata):
+    _skip_if_scslide_unavailable()
+    adata = pbmc3k_adata.copy()
+    # PLS inside PrepareSampleObject requires variation in the outcome variable;
+    # assign alternating labels so there are at least two levels.
+    sample_ids = sorted(adata.obs[SAMPLE_KEY].unique())
+    disease_map = {sid: ("case" if i < len(sample_ids) // 2 else "control") for i, sid in enumerate(sample_ids)}
+    adata.obs["disease"] = adata.obs[SAMPLE_KEY].map(disease_map)
+    n_samples = adata.obs[SAMPLE_KEY].nunique()
+
+    method = scSLIDE(
+        sample_key=SAMPLE_KEY,
+        cell_group_key=PBMC_CELL_KEY,
+        outcome_key="disease",
+        n_features=500,
+        ncells_per_group=100,
+        ncells_landmark=500,
+        reduction_dims=50,
+        layer="X",
+    )
     method.prepare_anndata(adata)
     distances = method.calculate_distance_matrix(force=True)
 
@@ -995,6 +1041,14 @@ class TestCheckAdataLoaded:
         pytest.importorskip("pynndescent")
         method = GloScope_py(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca")
         method.prepare_anndata(pbmc3k_adata.copy())
+        method._check_adata_loaded()
+
+    def test_adata_loaded_true_after_prepare_anndata_scslide(self, pbmc3k_adata):
+        _skip_if_scslide_unavailable()
+        adata = pbmc3k_adata.copy()
+        adata.obs["disease"] = "control"
+        method = scSLIDE(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, outcome_key="disease", layer="X")
+        method.prepare_anndata(adata)
         method._check_adata_loaded()
 
 

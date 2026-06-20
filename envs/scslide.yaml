@@ -1,0 +1,11 @@
+name: scslide
+channels:
+  - conda-forge
+dependencies:
+  - r-base=4.6.0
+  - rtools
+  - anndata
+  - jupyter
+  - pip:
+    - rpy2
+    - anndata2ri
