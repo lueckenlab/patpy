@@ -17,6 +17,7 @@ from patpy.tl.sample_representation import (
     GloScope_py,
     GroupedPseudobulk,
     MrVI,
+    PerturbationDistances,
     PhEMD,
     Pseudobulk,
     RandomVector,
@@ -65,6 +66,7 @@ _ALL_SR_METHODS = [
     pytest.param(MOFA, {}, id="MOFA"),
     pytest.param(GloScope, {}, id="GloScope", marks=_skip_if_missing("rpy2")),
     pytest.param(GloScope_py, {}, id="GloScope_py"),
+    pytest.param(PerturbationDistances, {}, id="PerturbationDistances", marks=_skip_if_missing("pertpy")),
 ]
 
 
@@ -852,6 +854,24 @@ def test_gloscope_py_with_n_components(pbmc3k_adata):
 
 
 # ---------------------------------------------------------------------------
+# PerturbationDistances
+# ---------------------------------------------------------------------------
+
+
+def test_perturbation_distances(pbmc3k_adata):
+    pytest.importorskip("pertpy")
+    adata = pbmc3k_adata.copy()
+    n_samples = adata.obs[SAMPLE_KEY].nunique()
+
+    method = PerturbationDistances(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca")
+    method.prepare_anndata(adata)
+    distances = method.calculate_distance_matrix(force=True)
+
+    assert distances.shape == (n_samples, n_samples)
+    assert np.allclose(distances, distances.T, atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
 # WassersteinTSNE recomputation with different covariance_weight
 # ---------------------------------------------------------------------------
 
@@ -994,6 +1014,12 @@ class TestCheckAdataLoaded:
     def test_adata_loaded_true_after_prepare_anndata_gloscope_py(self, pbmc3k_adata):
         pytest.importorskip("pynndescent")
         method = GloScope_py(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca")
+        method.prepare_anndata(pbmc3k_adata.copy())
+        method._check_adata_loaded()
+
+    def test_adata_loaded_true_after_prepare_anndata_perturbation_distances(self, pbmc3k_adata):
+        pytest.importorskip("pertpy")
+        method = PerturbationDistances(sample_key=SAMPLE_KEY, cell_group_key=PBMC_CELL_KEY, layer="X_pca")
         method.prepare_anndata(pbmc3k_adata.copy())
         method._check_adata_loaded()
 

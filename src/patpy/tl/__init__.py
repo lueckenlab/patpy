@@ -27,6 +27,7 @@ from .sample_representation import (
     GloScope_py,
     GroupedPseudobulk,
     MrVI,
+    PerturbationDistances,
     Pseudobulk,
     RandomVector,
     SampleRepresentationMethod,
