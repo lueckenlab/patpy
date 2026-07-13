@@ -13,6 +13,9 @@
     :toctree: ../generated
 
     datasets.combat
+    datasets.combat_stephenson
+    datasets.inflammation_atlas
+    datasets.download_gene_sets
     datasets.hlca
     datasets.onek1k
     datasets.stephenson

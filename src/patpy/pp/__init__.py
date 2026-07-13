@@ -11,5 +11,6 @@ from .basic import (
     get_helical_embedding,
     is_count_data,
     prepare_data_for_phemd,
+    score_gene_sets,
     subsample,
 )

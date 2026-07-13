@@ -319,6 +319,160 @@ def fill_nan_distances(distances, n_max_distances=5):
     return distances
 
 
+def _map_genes_to_var_names(adata: sc.AnnData, genes: list[str], gene_symbols: str | None) -> list[str]:
+    """Translate gene symbols into `adata.var_names`, dropping genes absent from `adata`.
+
+    When `gene_symbols` is `None`, `var_names` are assumed to be symbols already.
+    """
+    if gene_symbols is None:
+        available = set(adata.var_names)
+        return [gene for gene in genes if gene in available]
+
+    symbol_to_var_name = pd.Series(adata.var_names, index=adata.var[gene_symbols].astype(str))
+    symbol_to_var_name = symbol_to_var_name[~symbol_to_var_name.index.duplicated(keep="first")]
+
+    present = [gene for gene in genes if gene in symbol_to_var_name.index]
+    return list(symbol_to_var_name.loc[present])
+
+
+def score_gene_sets(
+    adata: sc.AnnData,
+    sample_key: str,
+    cell_type_key: str | None = None,
+    cell_type: str | None = None,
+    pathways: list[str] | None = None,
+    gene_sets: dict[str, list[str]] | None = None,
+    layer: str | None = None,
+    gene_symbols: str | None = None,
+    samples: list | None = None,
+    aggregate: str = "mean",
+    ctrl_size: int = 50,
+    seed: int = 0,
+) -> pd.DataFrame:
+    """Score gene sets in the cells of one cell type and aggregate the scores per sample.
+
+    Cells are scored with :func:`scanpy.tl.score_genes` (mean expression of the gene set
+    minus the mean expression of a reference set matched on expression level), and the
+    per-cell scores are then aggregated within each sample.
+
+    The expression data must be normalised and log-transformed, as
+    :func:`scanpy.tl.score_genes` expects.
+
+    Parameters
+    ----------
+    adata : sc.AnnData
+        Cell-level annotated data object.
+    sample_key : str
+        Column in `adata.obs` identifying samples.
+    cell_type_key : str | None = None
+        Column in `adata.obs` with cell-type annotations. Must be given together with
+        `cell_type`; when both are `None`, all cells are scored.
+    cell_type : str | None = None
+        The cell type to score. Only cells of this type contribute to the scores.
+    pathways : list[str] | None = None
+        Names of the gene sets to score. Must be keys of `gene_sets`. Defaults to every
+        gene set in `gene_sets`.
+    gene_sets : dict[str, list[str]] | None = None
+        Mapping `{pathway: [gene_symbols]}`. Defaults to the immune subset of the MSigDB
+        Hallmark collection, downloaded with :func:`patpy.datasets.download_gene_sets`.
+    layer : str | None = None
+        Layer of `adata` holding the normalised log-expression. `None` means `.X`.
+    gene_symbols : str | None = None
+        Column in `adata.var` holding gene symbols. Use it when `var_names` are not
+        symbols (e.g. Ensembl IDs). When `None`, `var_names` are assumed to be symbols.
+    samples : list | None = None
+        Samples making up the index of the returned frame. Defaults to the unique samples
+        of `adata`. Samples without cells of `cell_type` get `NaN` scores — pass the full
+        cohort here when `adata` only holds the cells of one cell type.
+    aggregate : str = "mean"
+        How per-cell scores are aggregated within a sample: `"mean"` or `"median"`.
+    ctrl_size : int = 50
+        Size of the reference gene set, passed to :func:`scanpy.tl.score_genes`.
+    seed : int = 0
+        Random seed for the reference gene sampling.
+
+    Returns
+    -------
+    scores : pd.DataFrame
+        Samples × pathways gene-set scores. Pathways whose genes are all absent from
+        `adata` are returned as `NaN` columns.
+
+    Examples
+    --------
+    >>> scores = score_gene_sets(
+    ...     adata,
+    ...     sample_key="sampleID",
+    ...     cell_type_key="Level1",
+    ...     cell_type="Mono",
+    ...     pathways=["HALLMARK_INTERFERON_ALPHA_RESPONSE"],
+    ... )  # doctest: +SKIP
+    """
+    if aggregate not in ("mean", "median"):
+        raise ValueError(f"aggregate must be 'mean' or 'median', got {aggregate!r}.")
+    if sample_key not in adata.obs.columns:
+        raise ValueError(f"sample_key='{sample_key}' not found in adata.obs.")
+    if (cell_type_key is None) != (cell_type is None):
+        raise ValueError("`cell_type_key` and `cell_type` must be given together.")
+    if cell_type_key is not None and cell_type_key not in adata.obs.columns:
+        raise ValueError(f"cell_type_key='{cell_type_key}' not found in adata.obs.")
+
+    if gene_sets is None:
+        from patpy.datasets import download_gene_sets
+
+        gene_sets = download_gene_sets(collections=("hallmark_immune",))["hallmark_immune"]
+
+    if pathways is None:
+        pathways = list(gene_sets)
+
+    unknown_pathways = [pathway for pathway in pathways if pathway not in gene_sets]
+    if unknown_pathways:
+        raise ValueError(f"Pathways not found in gene_sets: {unknown_pathways}")
+
+    if samples is None:
+        samples = list(adata.obs[sample_key].unique())
+
+    if cell_type is not None:
+        cells_of_cell_type = (adata.obs[cell_type_key] == cell_type).values
+
+        if not cells_of_cell_type.any():
+            warnings.warn(f"No cells of cell type '{cell_type}' found, returning NaN scores.", stacklevel=2)
+            return pd.DataFrame(np.nan, index=pd.Index(samples, name=sample_key), columns=pathways)
+
+        adata = adata[cells_of_cell_type]
+
+    # score_genes writes into .obs, which a view does not allow
+    adata = adata.copy()
+
+    cell_scores = {}
+
+    for pathway in pathways:
+        genes = _map_genes_to_var_names(adata, gene_sets[pathway], gene_symbols)
+
+        if not genes:
+            warnings.warn(f"No genes of pathway '{pathway}' found in adata, its score is NaN.", stacklevel=2)
+            cell_scores[pathway] = np.full(adata.n_obs, np.nan)
+            continue
+
+        sc.tl.score_genes(
+            adata,
+            gene_list=genes,
+            score_name=pathway,
+            layer=layer,
+            ctrl_size=ctrl_size,
+            random_state=seed,
+            use_raw=False,
+        )
+        cell_scores[pathway] = adata.obs[pathway].values
+
+    cell_scores = pd.DataFrame(cell_scores, index=adata.obs_names)
+    cell_scores[sample_key] = adata.obs[sample_key].values
+
+    scores = cell_scores.groupby(sample_key, observed=True).agg(aggregate)
+    scores.index = scores.index.astype(str)
+
+    return scores.reindex([str(sample) for sample in samples])
+
+
 def _feature_names(adata: sc.AnnData, layer: str) -> list[str]:
     """Return feature names for the slot `layer` points to.
 
