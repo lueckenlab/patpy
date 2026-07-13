@@ -1,3 +1,7 @@
+from .cluster_characterization import (
+    characterize_clusters,
+    cluster_covariate_enrichment,
+)
 from .condition_comparison import (
     ConditionComparison,
     build_all_pairwise_contrasts,

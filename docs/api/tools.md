@@ -33,4 +33,6 @@
     tl.evaluate_prediction
     tl.test_proportions
     tl.evaluate_representation
+    tl.characterize_clusters
+    tl.cluster_covariate_enrichment
 ```
