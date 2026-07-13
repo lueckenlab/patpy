@@ -319,6 +319,143 @@ def fill_nan_distances(distances, n_max_distances=5):
     return distances
 
 
+def _feature_names(adata: sc.AnnData, layer: str) -> list[str]:
+    """Return feature names for the slot `layer` points to.
+
+    Gene names are used for `.X` and `.layers`; `.obsm` matrices have no
+    feature names, so positional names `{layer}_{i}` are generated.
+    """
+    if layer in (None, "X") or layer in adata.layers:
+        return list(adata.var_names)
+
+    if layer in adata.obsm:
+        n_features = adata.obsm[layer].shape[1]
+        return [f"{layer}_{i}" for i in range(n_features)]
+
+    raise ValueError(f"layer='{layer}' not found in adata.obsm or adata.layers.")
+
+
+def aggregate_sample_info(
+    adata: sc.AnnData,
+    sample_key: str,
+    cell_type_key: str | None = None,
+    layer: str | None = None,
+    metadata_cols: list[str] | None = None,
+    cell_type_pseudobulk: bool = False,
+    aggregate: str = "mean",
+    fill_value: float = np.nan,
+) -> sc.AnnData:
+    """Aggregate a cell-level AnnData into a sample-level ("meta") AnnData.
+
+    Every piece of the output is optional and controlled by a key. With only
+    `sample_key` given, the result is an empty AnnData with one observation per
+    unique sample and no features and no metadata.
+
+    Parameters
+    ----------
+    adata : sc.AnnData
+        Cell-level annotated data object.
+    sample_key : str
+        Column in `adata.obs` identifying samples. Observations of the returned
+        object are the unique values of this column, in order of appearance.
+    cell_type_key : str | None = None
+        Column in `adata.obs` with cell-type (cell-group) annotations. When given,
+        cell-type composition is stored in `.obsm["cell_type_composition"]`.
+    layer : str | None = None
+        Source of the expression data to aggregate into `.X`. Looked up first in
+        `adata.obsm`, then in `adata.layers`; pass `"X"` to aggregate `adata.X`.
+        When `None`, no expression is aggregated and `.X` has zero features.
+    metadata_cols : list[str] | None = None
+        Columns of `adata.obs` to carry over to `.obs` of the returned object.
+    cell_type_pseudobulk : bool = False
+        If `True`, add one layer per cell type, named `{cell_type}_pseudobulk`,
+        holding the pseudobulk of that cell type only. Samples without cells of a
+        given cell type get `fill_value`. Requires `layer` and `cell_type_key`.
+    aggregate : str = "mean"
+        Aggregation function used for pseudobulk. One of `"mean"`, `"median"`, `"sum"`.
+    fill_value : float = np.nan
+        Value used for sample × cell-type combinations without cells.
+
+    Returns
+    -------
+    meta_adata : sc.AnnData
+        Sample-level object with `n_obs` equal to the number of unique samples.
+        `.X` holds the pseudobulk of `layer` (empty if `layer` is `None`),
+        `.obsm["cell_type_composition"]` the cell-type fractions,
+        `.layers["{cell_type}_pseudobulk"]` the per-cell-type pseudobulks, and
+        `.obs` the requested sample metadata.
+
+    Examples
+    --------
+    >>> meta_adata = aggregate_sample_info(
+    ...     adata,
+    ...     sample_key="sample_id",
+    ...     cell_type_key="cell_type",
+    ...     layer="X",
+    ...     metadata_cols=["disease", "sex"],
+    ...     cell_type_pseudobulk=True,
+    ... )  # doctest: +SKIP
+    """
+    # Imported here because patpy.tl imports patpy.pp at module level
+    from patpy.tl.sample_representation import CellGroupComposition, Pseudobulk
+
+    if sample_key not in adata.obs.columns:
+        raise ValueError(f"sample_key='{sample_key}' not found in adata.obs.")
+    if cell_type_key is not None and cell_type_key not in adata.obs.columns:
+        raise ValueError(f"cell_type_key='{cell_type_key}' not found in adata.obs.")
+    if cell_type_pseudobulk and (layer is None or cell_type_key is None):
+        raise ValueError("cell_type_pseudobulk=True requires both `layer` and `cell_type_key` to be set.")
+
+    samples = adata.obs[sample_key].unique()
+    sample_names = [str(sample) for sample in samples]
+
+    if metadata_cols:
+        obs = extract_metadata(adata, sample_key=sample_key, columns=list(metadata_cols), samples=samples)
+        obs.index = pd.Index(sample_names, name=sample_key)
+    else:
+        obs = pd.DataFrame(index=pd.Index(sample_names, name=sample_key))
+
+    if layer is None:
+        meta_adata = sc.AnnData(X=np.zeros((len(samples), 0)), obs=obs)
+    else:
+        pseudobulk = Pseudobulk(sample_key=sample_key, cell_group_key=cell_type_key, layer=layer)
+        pseudobulk.prepare_anndata(adata)
+
+        sample_pseudobulk = pseudobulk._get_pseudobulk(
+            aggregation=aggregate, fill_value=fill_value, aggregate_cell_types=False
+        )
+        var = pd.DataFrame(index=pd.Index(_feature_names(adata, layer), name="feature"))
+        meta_adata = sc.AnnData(X=sample_pseudobulk, obs=obs, var=var)
+
+        if cell_type_pseudobulk:
+            cell_type_pseudobulks = pseudobulk._get_pseudobulk(
+                aggregation=aggregate, fill_value=fill_value, aggregate_cell_types=True
+            )
+            for cell_type, cell_type_data in zip(pseudobulk.cell_groups, cell_type_pseudobulks, strict=True):
+                meta_adata.layers[f"{cell_type}_pseudobulk"] = cell_type_data
+
+    if cell_type_key is not None:
+        composition_method = CellGroupComposition(sample_key=sample_key, cell_group_key=cell_type_key)
+        composition_method.prepare_anndata(adata)
+        composition_method.calculate_distance_matrix()
+
+        # Cell-type fractions have one column per cell type, so they cannot live in
+        # .layers (which must match the shape of .X); .obsm is the fitting slot
+        composition = composition_method.sample_representation.copy()
+        composition.index = pd.Index(sample_names, name=sample_key)
+        composition.columns = [str(cell_type) for cell_type in composition.columns]
+        meta_adata.obsm["cell_type_composition"] = composition
+
+    meta_adata.uns["aggregate_sample_info"] = {
+        "sample_key": sample_key,
+        "cell_type_key": cell_type_key,
+        "layer": layer,
+        "aggregate": aggregate,
+    }
+
+    return meta_adata
+
+
 def _to_numpy(x):
     try:
         import torch

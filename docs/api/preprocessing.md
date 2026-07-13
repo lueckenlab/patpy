@@ -12,6 +12,7 @@
 .. autosummary::
     :toctree: ../generated
 
+    pp.aggregate_sample_info
     pp.prepare_data_for_phemd
     pp.convert_cell_types_to_phemd_format
     pp.calculate_compositional_metrics

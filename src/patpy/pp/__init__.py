@@ -1,4 +1,5 @@
 from .basic import (
+    aggregate_sample_info,
     calculate_cell_qc_metrics,
     calculate_compositional_metrics,
     calculate_n_cells_per_sample,
