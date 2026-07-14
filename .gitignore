@@ -24,3 +24,17 @@ __pycache__/
 experiments.ipynb
 
 .claude
+
+# Analysis outputs: data, logs and cluster job scripts never belong in the repo
+*.h5ad
+*.h5
+*.zarr/
+*.npz
+*.npy
+*.parquet
+*.pkl
+*.sbatch
+*.log
+/logs/
+/results/
+/scripts/

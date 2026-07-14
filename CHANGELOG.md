@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## 0.17.0
+
+### Added
+
+- `patpy.tl.characterize_clusters(adata, cluster_key, ...)`: one-vs-rest test of every numeric feature against every cluster of a sample representation, drawing features from `.obs` columns and from `.obsm` matrices (cell-type composition, per-cell-type pathway scores). Returns a tidy table with Cohen's d, AUROC and Benjamini-Hochberg FDR, so a cluster can be read off as "enriched for these cell types, these pathways".
+- `patpy.tl.cluster_covariate_enrichment(adata, cluster_key, covariates)`: per-cluster Fisher enrichment of each categorical level, plus a bias-corrected Cramér's V per covariate. Answers whether a clustering is tracking disease or merely the study a sample came from. Complements `associate_embedding_with_covariates`, which tests embedding components rather than cluster labels.
+- `patpy.pp.score_gene_sets(adata, sample_key, cell_type_key, cell_type, pathways, gene_sets, ...)`: sample × pathway activity scores for one cell type, wrapping `scanpy.tl.score_genes` and returning samples with no cells of that type as `NaN` rather than silently zero.
+- `patpy.datasets.download_gene_sets(collections=...)`: downloads and parses GMT gene-set collections (e.g. `hallmark_immune`) with the shared cached downloader.
+- `patpy.pp.aggregate_sample_info(adata, sample_key, ...)`: builds a sample-level ("meta") AnnData from a cell-level one, carrying cell-type composition, per-sample cell counts and the sample-constant metadata columns.
+
 ## 0.16.7
 
 ### Added
