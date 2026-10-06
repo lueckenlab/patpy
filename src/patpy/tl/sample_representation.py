@@ -439,7 +439,9 @@ def correlate_cell_type_expression(
         sample_targets = target_values.loc[cell_type_pseudobulk.samples].values
 
         # Calculate correlation for each gene
-        for gene_idx, gene_name in enumerate(var_names):  # TODO: potential bug when a layer with different n features is used
+        for gene_idx, gene_name in enumerate(
+            var_names
+        ):  # TODO: potential bug when a layer with different n features is used
             gene_expression = pseudobulks[:, gene_idx]
             correlation, p_value = correlation_fun(gene_expression, sample_targets, nan_policy="omit")
 
