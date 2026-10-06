@@ -263,14 +263,33 @@ def calculate_average_without_nans(array, axis=0, return_sample_sizes=True, defa
     return averages
 
 
-def correlate_composition(meta_adata, expression_adata, sample_key, cell_type_key, target, method="spearman"):
+def _sample_and_cell_data(meta_adata, expression_adata, sample_key, target):
+    """Return the sample-level data, the cell-level data, the sample key and the target per sample.
+
+    A DonorData is unpacked into the level of its samples, or of its donors when it has no sample
+    level, and the target may be a column of any of its tables.
+    """
+    if expression_adata is not None:
+        return meta_adata, expression_adata, sample_key, meta_adata.obs[target]
+    if not hasattr(meta_adata, "levels"):
+        raise ValueError("Pass expression_adata and sample_key, or a DonorData as meta_adata.")
+    level = "sample" if meta_adata.sample_id is not None else "donor"
+    key = meta_adata.sample_id if level == "sample" else meta_adata.donor_id
+    return meta_adata.levels[level], meta_adata, key, meta_adata.get_df(target, level=level)[target]
+
+
+def correlate_composition(
+    meta_adata, expression_adata=None, sample_key=None, cell_type_key=None, target=None, method="spearman"
+):
     """
     Correlate cell type composition with a target variable.
 
     Parameters
     ----------
-    meta_adata : AnnData
-        AnnData object containing metadata for each sample.
+    meta_adata : AnnData or DonorData
+        AnnData object containing metadata for each sample, or a ``DonorData`` that holds both the
+        sample metadata and the cells, in which case ``expression_adata`` and ``sample_key`` are
+        taken from it.
     expression_adata : AnnData
         AnnData object containing gene expression data.
     sample_key : str
@@ -299,6 +318,10 @@ def correlate_composition(meta_adata, expression_adata, sample_key, cell_type_ke
     else:
         raise ValueError('Method must be either "spearman" or "pearson"')
 
+    meta_adata, expression_adata, sample_key, target_values = _sample_and_cell_data(
+        meta_adata, expression_adata, sample_key, target
+    )
+
     # Calculate cell type composition using patpy tool
     composition = CellGroupComposition(sample_key, cell_type_key)
     composition.prepare_anndata(expression_adata)
@@ -314,7 +337,7 @@ def correlate_composition(meta_adata, expression_adata, sample_key, cell_type_ke
     cell_type_corrs = {}
 
     for cell_type in cell_type_fractions.columns:
-        correlation, p_value = correlation_fun(meta_adata.obs[target], cell_type_fractions[cell_type])
+        correlation, p_value = correlation_fun(target_values, cell_type_fractions[cell_type])
         cell_type_corrs[cell_type] = {"correlation": correlation, "p_value": p_value}
 
     cell_type_corrs = pd.DataFrame(cell_type_corrs).T
@@ -332,10 +355,10 @@ def correlate_composition(meta_adata, expression_adata, sample_key, cell_type_ke
 
 def correlate_cell_type_expression(
     meta_adata,
-    expression_adata,
-    sample_key,
-    cell_type_key,
-    target,
+    expression_adata=None,
+    sample_key=None,
+    cell_type_key=None,
+    target=None,
     layer="X",
     min_sample_size=50,
     method="spearman",
@@ -346,8 +369,10 @@ def correlate_cell_type_expression(
 
     Parameters
     ----------
-    meta_adata : AnnData
-        AnnData object containing metadata and target variable.
+    meta_adata : AnnData or DonorData
+        AnnData object containing metadata and target variable, or a ``DonorData`` that holds both the
+        sample metadata and the cells. Pseudobulks are then kept in ``obsm`` of its samples, or of
+        its donors when it has no sample level.
     expression_adata : AnnData
         AnnData object containing gene expression data.
     sample_key : str
@@ -385,8 +410,16 @@ def correlate_cell_type_expression(
     else:
         raise ValueError('Method must be either "spearman" or "pearson"')
 
+    meta_adata, expression_adata, sample_key, target_values = _sample_and_cell_data(
+        meta_adata, expression_adata, sample_key, target
+    )
     if min_sample_size is not None and min_sample_size > 0:
-        expression_adata = filter_small_samples(expression_adata, sample_key, min_sample_size)
+        if hasattr(expression_adata, "filter_donors_by_cells"):
+            level = "sample" if expression_adata.sample_id is not None else "donor"
+            expression_adata = expression_adata.filter_donors_by_cells(min_sample_size, level=level)
+        else:
+            expression_adata = filter_small_samples(expression_adata, sample_key, min_sample_size)
+    var_names = expression_adata.C.var_names if hasattr(expression_adata, "levels") else expression_adata.var_names
 
     cell_type_pseudobulk = GroupedPseudobulk(sample_key, cell_type_key, layer=layer)
     cell_type_pseudobulk.prepare_anndata(expression_adata)
@@ -399,18 +432,16 @@ def correlate_cell_type_expression(
 
         if keep_pseudobulks_in_data:
             meta_adata.obsm[f"{cell_type}_pseudobulk"] = pd.DataFrame(
-                pseudobulks, index=cell_type_pseudobulk.samples, columns=expression_adata.var_names
-            ).loc[meta_adata.obs_names]
+                pseudobulks, index=pd.Index(cell_type_pseudobulk.samples).astype(str), columns=var_names
+            ).reindex(meta_adata.obs_names)
 
         # Get the target values for the samples. Always make sure that the order is the same!
-        target_values = meta_adata.obs.loc[cell_type_pseudobulk.samples, target].values
+        sample_targets = target_values.loc[cell_type_pseudobulk.samples].values
 
         # Calculate correlation for each gene
-        for gene_idx, gene_name in enumerate(
-            expression_adata.var_names
-        ):  # TODO: potential bug when a layer with different n features is used
+        for gene_idx, gene_name in enumerate(var_names):  # TODO: potential bug when a layer with different n features is used
             gene_expression = pseudobulks[:, gene_idx]
-            correlation, p_value = correlation_fun(gene_expression, target_values, nan_policy="omit")
+            correlation, p_value = correlation_fun(gene_expression, sample_targets, nan_policy="omit")
 
             # Save the sample size. Nans appear when a cell type in a sample doesn't have any cells
             n_observations = (~np.isnan(gene_expression)).sum()
@@ -495,7 +526,8 @@ class SampleRepresentationMethod(BaseSampleMethod):
         Parameters
         ----------
         metadata : Optional[pd.DataFrame] = None
-            Metadata about samples to be added to .obs of AnnData object. Should contain samples in index
+            Metadata about samples to be added to .obs of AnnData object. Should contain samples in index.
+            Defaults to the sample and donor tables when the method was prepared with a ``DonorData``.
         *args, **kwargs
             Additional arguments to pass to calculate_distance_matrix method
 
@@ -513,6 +545,8 @@ class SampleRepresentationMethod(BaseSampleMethod):
         else:
             representation = np.array(self.embed())
 
+        if metadata is None and self.donor_data is not None:
+            metadata = self._unit_table()
         self.samples_adata = sc.AnnData(
             X=representation,
             obs=metadata.loc[self.samples] if metadata is not None else None,
@@ -803,6 +837,7 @@ class MrVI(SampleRepresentationMethod):
         from scvi.external import MRVI
 
         super().prepare_anndata(adata=adata)
+        self._ensure_cell_columns([self.batch_key])
 
         assert is_count_data(self._get_data()), "`layer` must contain count data with integer numbers"
 
@@ -892,6 +927,10 @@ class MrVI(SampleRepresentationMethod):
 
         distances_to_average = distances["cell" if groupby is None else groupby].values
         avg_distances, sample_sizes = calculate_average_without_nans(distances_to_average, axis=0)
+        if groupby is not None:
+            grouped = distances[groupby]
+            labels = grouped.coords[grouped.dims[0]].values
+            self.group_distances = {str(label): grouped.values[i] for i, label in enumerate(labels)}
 
         self.adata.uns["mrvi_parameters"] = {
             "batch_size": batch_size,
@@ -1097,6 +1136,7 @@ class PILOTGMVAE(SampleRepresentationMethod):
     def prepare_anndata(self, adata):
         """Train PILOT GM VAE model"""
         super().prepare_anndata(adata)
+        self._ensure_cell_columns([self.sample_state_col])
 
         try:
             from pilotgm.core import train_gmvae
@@ -1267,6 +1307,7 @@ class PILOT(SampleRepresentationMethod):
         if distances is not None:
             return distances
 
+        self._ensure_cell_columns([self.sample_state_col])
         # This runs all the calculations and adds several keys to .uns
         pt.tl.wasserstein_distance(
             self.adata,
@@ -1362,6 +1403,7 @@ class GroupedPseudobulk(SampleRepresentationMethod):
             samples_distances = scipy.spatial.distance.pdist(cell_group_embeddings, metric=distance_metric)
             distances[i] = scipy.spatial.distance.squareform(samples_distances)
 
+        self.group_distances = {str(group): distances[i] for i, group in enumerate(self.cell_groups)}
         avg_distances, sample_sizes = calculate_average_without_nans(distances, axis=0)
 
         self._distances = avg_distances
