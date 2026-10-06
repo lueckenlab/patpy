@@ -638,3 +638,39 @@ def inflammation_atlas(
     if return_dataset_info:
         return adata, _INFLAMMATION_ATLAS_INFOS[split]
     return adata
+
+
+def as_donordata(adata: AnnData, info: DatasetInfo, meta_adata: AnnData | None = None, keep_in_cells: bool = True):
+    """Combine a dataset and its sample metadata into a ``DonorData``.
+
+    Parameters
+    ----------
+    adata
+        Cells of a dataset loaded with patpy.
+    info
+        The ``DatasetInfo`` of the dataset, whose ``sample_key`` names the samples and whose
+        ``sample_metadata_columns`` are moved into the sample table.
+    meta_adata
+        A sample-level AnnData, such as the one returned by ``combat(load_metadata=True)``. When
+        given it becomes the donor-level side as it is.
+    keep_in_cells
+        Keep the sample metadata in ``adata.obs`` as well, for methods that read it from the cells.
+
+    Returns
+    -------
+    donordata.DonorData
+
+    Examples
+    --------
+    >>> adata, info = patpy.datasets.stephenson(return_dataset_info=True)
+    >>> dd = patpy.datasets.as_donordata(adata, info)
+    """
+    try:
+        from donordata import DonorData
+    except ImportError as e:
+        raise ImportError("donordata is required. Install with: pip install patpy[donordata]") from e
+
+    if meta_adata is not None:
+        return DonorData(D=meta_adata, C=adata, donor_id=info.sample_key)
+    columns = [c for c in info.sample_metadata_columns if c in adata.obs.columns and c != info.sample_key]
+    return DonorData.from_anndata(adata, donor_id=info.sample_key, columns=columns, keep_in_cells=keep_in_cells)

@@ -9,10 +9,12 @@ from .evaluation import (
     evaluate_prediction,
     evaluate_regression,
     evaluate_representation,
+    knn_prediction_score,
     persistence_evaluation,
     predict_knn,
     test_distances_significance,
     test_proportions,
+    trajectory_correlation,
 )
 from .factorial_comparison import (
     FactorialDE,

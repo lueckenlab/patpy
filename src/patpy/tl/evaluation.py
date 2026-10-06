@@ -767,6 +767,51 @@ def _get_col_from_adata(adata, col) -> pd.Series:
         return pd.Series(adata[:, col].X.toarray().flatten(), index=adata.obs_names)
 
 
+def _representation_distances(meta_adata, representation: str):
+    """Distance matrix of *representation*, stored in ``obsp`` or, by the older convention, in ``obsm``."""
+    key = f"{representation}_distances"
+    if key in meta_adata.obsp:
+        return meta_adata.obsp[key]
+    return meta_adata.obsm[key]
+
+
+def _representation_units(meta_adata, representations):
+    """Return *meta_adata*, or the samples of a DonorData as units when its representations live there.
+
+    A DonorData with a sample level keeps sample representations in ``obsm`` and ``obsp`` of its
+    samples. :meth:`~donordata.DonorData.flatten` turns the samples into the units, with the donor
+    covariates repeated for every sample, so the scores can be computed in the same way.
+    """
+    if getattr(meta_adata, "sample_id", None) is None:
+        return meta_adata
+    samples = meta_adata.levels["sample"]
+    keys = [f"{r}_distances" for r in representations]
+    if all(k in samples.obsp or k in samples.obsm for k in keys):
+        return meta_adata.flatten()
+    return meta_adata
+
+
+def _ensure_neighbors(meta_adata, representation: str, n_neighbors: int = 15) -> None:
+    """Compute the ``{representation}_neighbors`` graph from the stored distances when it is missing."""
+    neighbors_key = f"{representation}_neighbors"
+    if neighbors_key in meta_adata.uns:
+        return
+    distances_key = f"{representation}_distances"
+    n_neighbors = min(n_neighbors, meta_adata.n_obs - 1)
+    if distances_key in meta_adata.obsm:
+        sc.pp.neighbors(
+            meta_adata, use_rep=distances_key, key_added=neighbors_key, metric="precomputed", n_neighbors=n_neighbors
+        )
+        return
+    meta_adata.obsm[distances_key] = np.asarray(meta_adata.obsp[distances_key])
+    try:
+        sc.pp.neighbors(
+            meta_adata, use_rep=distances_key, key_added=neighbors_key, metric="precomputed", n_neighbors=n_neighbors
+        )
+    finally:
+        del meta_adata.obsm[distances_key]
+
+
 def trajectory_correlation(
     meta_adata, root_sample, trajectory_variable, representations=None, inverse_trajectory=False, force=False
 ):
@@ -775,7 +820,9 @@ def trajectory_correlation(
     Parameters
     ----------
     meta_adata: AnnData
-        The annotated data object with sample metadata
+        The annotated data object with sample metadata, for example ``dd.D`` of a DonorData after
+        assigning ``dd.D = dd.pseudobulk()``. Neighbor graphs ``{representation}_neighbors`` that
+        are missing are computed from the distances in ``obsp`` or ``obsm``.
     root_sample: str
         The root sample to use for the diffusion pseudotime. It must be a presumable start of the trajectory.
         For example, the healthiest patient if trajectory is the disease severity or the youngest patient if trajectory is the age.
@@ -820,6 +867,7 @@ def trajectory_correlation(
 
             else:
                 print(f"Computing diffmap for {representation}")
+                _ensure_neighbors(meta_adata, representation)
                 ep.tl.diffmap(meta_adata, neighbors_key=f"{representation}_neighbors")
                 meta_adata.obsm[f"X_{representation}_diffmap"] = meta_adata.obsm["X_diffmap"]
                 ep.tl.dpt(meta_adata, neighbors_key=f"{representation}_neighbors")
@@ -850,8 +898,11 @@ def knn_prediction_score(
 
     Parameters
     ----------
-    meta_adata: AnnData
-        The annotated data object with sample metadata
+    meta_adata: AnnData or DonorData
+        The annotated data object with sample metadata and the distances of every representation in
+        ``obsp`` or ``obsm`` under ``{representation}_distances``. A DonorData whose representations
+        are stored on its samples is scored per sample, with covariates from the sample and donor
+        tables.
     benchmark_schema: dict
         The benchmark schema to use. Must have the following structure:
         - Keys must be "relevant", "technical", and "contextual".
@@ -892,6 +943,7 @@ def knn_prediction_score(
     """
     if representations is None:
         representations = meta_adata.uns["sample_representations"]
+    meta_adata = _representation_units(meta_adata, representations)
 
     results = []
 
@@ -900,7 +952,7 @@ def knn_prediction_score(
             for col in benchmark_schema[covariate_type]:
                 task = benchmark_schema[covariate_type][col]
                 try:
-                    distances = meta_adata.obsm[f"{representation}_distances"]
+                    distances = _representation_distances(meta_adata, representation)
 
                     if isinstance(distances, pd.DataFrame):
                         distances = distances.loc[meta_adata.obs_names][meta_adata.obs_names].values

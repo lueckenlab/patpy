@@ -67,6 +67,9 @@ optional-dependencies.doc = [
   "sphinxcontrib-bibtex>=1",
   "sphinxext-opengraph",
 ]
+optional-dependencies.donordata = [
+  "donordata @ git+https://github.com/theislab/donordata.git",
+]
 optional-dependencies.gloscope-py-cpu = [
   "pynndescent",
 ]
@@ -92,6 +95,7 @@ optional-dependencies.mrvi = [
 optional-dependencies.pascient = [
   # `pascient` itself is not on PyPI; install it manually:
   #   pip install git+https://github.com/genentech/pascient.git@main
+  "donordata @ git+https://github.com/theislab/donordata.git",
   "hydra-core>=1.3",
   "lightning",
   "s3fs",

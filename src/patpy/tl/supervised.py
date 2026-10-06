@@ -79,7 +79,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
         self._probes: dict[str, object] = {}  # label → fitted sklearn probe model
         self._label_mappings: dict[str, tuple[list, dict]] = {}  # label_key → (classes, encode_dict)
 
-    def prepare_anndata(self, adata: sc.AnnData) -> None:
+    def prepare_anndata(self, adata) -> None:
         """Validate *adata*, populate :attr:`samples` and :attr:`labels`.
 
         Subclasses must call ``super().prepare_anndata(adata)`` before
@@ -88,8 +88,10 @@ class SupervisedSampleMethod(BaseSampleMethod):
         Parameters
         ----------
         adata
-            Single-cell AnnData.  Must contain :attr:`sample_key` and all
-            entries of :attr:`label_keys` in ``.obs``.
+            Single-cell AnnData that contains :attr:`sample_key` and all entries of
+            :attr:`label_keys` in ``.obs``, or a ``DonorData`` whose sample or donor
+            tables hold the labels. With a ``DonorData`` labels are stored once per
+            sample or donor instead of being repeated on every cell.
 
         Sets
         ----
@@ -99,7 +101,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
         """
         super().prepare_anndata(adata)
 
-        missing = [k for k in self.label_keys if k not in adata.obs.columns]
+        missing = [k for k in self.label_keys if not self._has_metadata(k)]
         if missing:
             raise ValueError(f"label_keys {missing} not found in adata.obs.")
 
@@ -191,7 +193,7 @@ class SupervisedSampleMethod(BaseSampleMethod):
             raise ValueError(f"labels (len={len(labels)}) and tasks (len={len(tasks)}) must have the same length.")
 
         for label in labels:
-            if label not in self.adata.obs.columns:
+            if not self._has_metadata(label):
                 raise ValueError(f"label '{label}' not found in adata.obs.columns.")
 
         for label, task in zip(labels, tasks, strict=True):
@@ -420,8 +422,10 @@ class MixMIL(SupervisedSampleMethod):
     lr : float, default 1e-3
         Adam learning rate.
     additional_covariates : list[str] or None, optional
-        Extra covariate columns from ``adata.obs`` (numeric) or keys from
-        ``adata.obsm`` to include as fixed effects.
+        Extra numeric covariate columns from ``adata.obs`` or the tables of a
+        ``DonorData``, or keys of matrices in ``obsm`` of the level that is
+        modelled, such as genotype principal components, to include as fixed
+        effects.
     dtype : str, default ``"float32"``
         Floating-point precision for all tensors.
     seed : int, default 67
@@ -490,6 +494,7 @@ class MixMIL(SupervisedSampleMethod):
             If True, train the model on loaded data for tasks and labels set at initialisation
         """
         super().prepare_anndata(adata)
+        adata = self.adata
 
         if self.layer not in adata.obsm and self.layer not in adata.layers and self.layer not in ("X", None):
             raise ValueError(
@@ -911,9 +916,14 @@ class MixMIL(SupervisedSampleMethod):
         covariate_list = [torch.ones((n_donors, 1), dtype=dtype_torch)]
 
         for cov in self.additional_covariates:
-            if cov in self.adata.obs.columns:
+            if self._has_metadata(cov):
                 vals = self._donor_col(cov).astype("float32")
                 covariate_list.append(torch.tensor(vals, dtype=dtype_torch).unsqueeze(1))
+            elif self.donor_data is not None and cov in self.donor_data.levels[self.unit_level].obsm:
+                units = self.donor_data.levels[self.unit_level]
+                rows = units.obs_names.get_indexer([str(s) for s in self.samples])
+                vals = np.asarray(units.obsm[cov], dtype="float32")[rows]
+                covariate_list.append(torch.from_numpy(vals.reshape(n_donors, -1)))
             elif cov in self.adata.obsm:
                 # obsm covariate — must already be donor-level (n_donors × d)
                 vals = self.adata.obsm[cov].astype("float32")
@@ -1064,6 +1074,7 @@ class PULSAR(SupervisedSampleMethod):
             ) from e
 
         super().prepare_anndata(adata)
+        adata = self.adata
 
         if self.layer not in adata.obsm:
             raise ValueError(
@@ -1102,8 +1113,12 @@ class PULSAR(SupervisedSampleMethod):
             self.device = "cpu"
             self._pulsar_model = self._pulsar_model.to("cpu").to(torch.bfloat16)
 
+        cells = self.adata
+        if self.label_keys[0] not in cells.obs.columns:
+            cells = self.donor_data.to_anndata(columns=[self.label_keys[0]])
+
         donor_embedding_collection = extract_donor_embeddings_from_h5ad(
-            adata,
+            cells,
             model=self._pulsar_model,
             label_name=self.label_keys[0],
             donor_id_key=self.sample_key,
@@ -1482,6 +1497,7 @@ class PaSCient(SupervisedSampleMethod):
             fine-tuned.
         """
         super().prepare_anndata(adata)
+        adata = self.adata
 
         if self.checkpoint_dir is not None:
             config_path, checkpoint_path = self._resolve_checkpoint_paths()
@@ -1630,8 +1646,9 @@ class PaSCient(SupervisedSampleMethod):
 
         Builds a :class:`~pascient.model.sample_predictor.SamplePredictor`
         (or reuses an existing one loaded from a checkpoint) and trains it
-        with ``lightning.Trainer.fit`` on a DataModule that wraps *adata*
-        into PaSCient's ``SampleBatch`` format.
+        with ``lightning.Trainer.fit`` on fixed-size donor bags drawn by
+        :class:`donordata.ml.MILDataset` and wrapped into PaSCient's
+        ``SampleBatch`` format.
 
         Parameters
         ----------
@@ -1643,7 +1660,6 @@ class PaSCient(SupervisedSampleMethod):
             Prediction task type.  Defaults to ``self.tasks[0]``.
         """
         import torch
-        from torch.utils.data import DataLoader, Dataset, random_split
 
         try:
             import lightning as L
@@ -1653,9 +1669,7 @@ class PaSCient(SupervisedSampleMethod):
                 "pascient and lightning are required for training. Install with: pip install patpy[pascient]"
             ) from e
 
-        expression = self._get_expression_matrix()
-        n_genes = expression.shape[1]
-        donor_col = adata.obs[self.sample_key].values
+        n_genes = self._get_data().shape[1]
 
         # Encode labels to integer class indices for classification
         label_key = label_key if label_key is not None else self.label_keys[0]
@@ -1698,54 +1712,7 @@ class PaSCient(SupervisedSampleMethod):
                 task=task,
             )
 
-        # -- Dataset that produces SampleBatch per donor ----------------
-
-        pascient_self = self  # capture for use inside nested class
-
-        class _DS(Dataset):
-            def __init__(self_, donors):
-                self_.donors = list(donors)
-
-            def __len__(self_):
-                return len(self_.donors)
-
-            def __getitem__(self_, idx):
-                donor_id = self_.donors[idx]
-                mask = donor_col == donor_id
-                x, pad, _ = pascient_self._subset_or_pad_cells(expression[mask])
-
-                x_t = torch.tensor(x[np.newaxis], dtype=torch.float32)
-                pad_t = torch.tensor(pad[np.newaxis], dtype=torch.bool)
-
-                if pascient_self.normalize:
-                    x_t, pad_t = pascient_self._lognormalize(x_t, pad_t)
-
-                return SampleBatch(
-                    x=x_t,
-                    padded_mask=pad_t,
-                    sample_metadata={label_key: torch.tensor(y_map[donor_id])},
-                    cell_metadata={},
-                    view_names=["view_0"],
-                )
-
-        def _collate(batch):
-            return SampleBatch(
-                x=torch.stack([b.x for b in batch]),
-                padded_mask=torch.stack([b.padded_mask for b in batch]),
-                sample_metadata={
-                    k: torch.stack([b.sample_metadata[k] for b in batch]) for k in batch[0].sample_metadata
-                },
-                cell_metadata={},
-                view_names=batch[0].view_names,
-            )
-
-        full_ds = _DS(self.samples)
-        n_val = max(1, int(len(full_ds) * self.val_fraction))
-        n_train = len(full_ds) - n_val
-        train_ds, val_ds = random_split(full_ds, [n_train, n_val], generator=torch.Generator().manual_seed(self.seed))
-
-        train_dl = DataLoader(train_ds, batch_size=self.batch_size, shuffle=True, collate_fn=_collate)
-        val_dl = DataLoader(val_ds, batch_size=self.batch_size, shuffle=False, collate_fn=_collate)
+        train_dl, val_dl = self._training_loaders(adata, label_key, y_map, task, SampleBatch)
 
         # -- Train via Lightning Trainer --------------------------------
 
@@ -1763,6 +1730,75 @@ class PaSCient(SupervisedSampleMethod):
         self._pascient_model.train()
         trainer.fit(self._pascient_model, train_dataloaders=train_dl, val_dataloaders=val_dl)
         self._pascient_model.eval()
+
+    def _training_loaders(self, adata: sc.AnnData, label_key: str, y_map: dict, task: str, batch_cls):
+        """Build training and validation loaders of fixed-size donor bags.
+
+        Bags come from :class:`donordata.ml.MILDataset` over a DonorData that pairs the
+        encoded targets with the cells of *adata*, so every donor contributes
+        :attr:`n_cells` subsampled or zero padded cells. Donors are split into
+        training and validation sets with :attr:`val_fraction`.
+
+        Parameters
+        ----------
+        adata
+            Cells to draw bags from.
+        label_key
+            Name of the target in the ``sample_metadata`` of every batch.
+        y_map
+            Encoded target of every donor.
+        task
+            ``"classification"`` yields integer targets, anything else float targets.
+        batch_cls
+            Batch container, ``pascient.data.data_structures.SampleBatch`` during training.
+
+        Returns
+        -------
+        tuple of torch.utils.data.DataLoader
+            Training and validation loaders.
+        """
+        import torch
+        from torch.utils.data import DataLoader, random_split
+
+        try:
+            from donordata import DonorData
+            from donordata.ml import MILDataset, mil_collate_fn
+        except ImportError as e:
+            raise ImportError(
+                "donordata is required for training PaSCient. Install with: pip install patpy[pascient]"
+            ) from e
+
+        targets = pd.DataFrame(
+            {"target": [y_map[d] for d in self.samples]},
+            index=pd.Index([str(d) for d in self.samples], name=self.sample_key),
+        )
+        bags = DonorData(D=targets, C=adata, donor_id=self.sample_key)
+        layer = None if self.layer in (None, "X") else self.layer
+        dataset = MILDataset(
+            bags, cell_layer=layer, donor_labels_key="target", n_cells=self.n_cells, random_state=self.seed
+        )
+
+        def collate(items):
+            batch = mil_collate_fn(items)
+            x, padded_mask = batch["cell_x"].unsqueeze(1), batch["cell_mask"].unsqueeze(1)
+            if self.normalize:
+                x, padded_mask = self._lognormalize(x, padded_mask)
+            y = batch["donor_y"].long() if task == "classification" else batch["donor_y"].float()
+            return batch_cls(
+                x=x,
+                padded_mask=padded_mask,
+                sample_metadata={label_key: y},
+                cell_metadata={},
+                view_names=["view_0"],
+            )
+
+        n_val = max(1, int(len(dataset) * self.val_fraction))
+        train_ds, val_ds = random_split(
+            dataset, [len(dataset) - n_val, n_val], generator=torch.Generator().manual_seed(self.seed)
+        )
+        train_dl = DataLoader(train_ds, batch_size=self.batch_size, shuffle=True, collate_fn=collate)
+        val_dl = DataLoader(val_ds, batch_size=self.batch_size, shuffle=False, collate_fn=collate)
+        return train_dl, val_dl
 
     def _get_expression_matrix(self) -> np.ndarray:
         """Return expression data as a dense float32 numpy array.
