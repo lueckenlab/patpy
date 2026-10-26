@@ -1,122 +1,122 @@
 name: Test
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  schedule:
-    - cron: "0 5 1,15 * *"
-  # Manual trigger for the heavy `@pytest.mark.dataset` suite (multi-GB Figshare
-  # downloads). These are not run on PR / push / schedule — opt in by dispatching
-  # this workflow from the Actions tab. See docs/contributing.md.
-  workflow_dispatch:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+    schedule:
+        - cron: "0 5 1,15 * *"
+    # Manual trigger for the heavy `@pytest.mark.dataset` suite (multi-GB Figshare
+    # downloads). These are not run on PR / push / schedule — opt in by dispatching
+    # this workflow from the Actions tab. See docs/contributing.md.
+    workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
 
 jobs:
-  # Get the test environment from hatch as defined in pyproject.toml.
-  # This ensures that the pyproject.toml is the single point of truth for test definitions and the same tests are
-  # run locally and on continuous integration.
-  # Check [[tool.hatch.envs.hatch-test.matrix]] in pyproject.toml and https://hatch.pypa.io/latest/environment/ for
-  # more details.
-  get-environments:
-    runs-on: ubuntu-latest
-    outputs:
-      envs: ${{ steps.get-envs.outputs.envs }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          filter: blob:none
-          fetch-depth: 0
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-      - name: Get test environments
-        id: get-envs
-        run: |
-          ENVS_JSON=$(uvx hatch env show --json | jq -c 'to_entries
-            | map(
-                select(.key | startswith("hatch-test"))
-                | {
-                    name: .key,
-                    label: (if (.key | contains("pre")) then .key + " (PRE-RELEASE DEPENDENCIES)" else .key end),
-                    python: .value.python
-                  }
-              )')
-          echo "envs=${ENVS_JSON}" | tee $GITHUB_OUTPUT
+    # Get the test environment from hatch as defined in pyproject.toml.
+    # This ensures that the pyproject.toml is the single point of truth for test definitions and the same tests are
+    # run locally and on continuous integration.
+    # Check [[tool.hatch.envs.hatch-test.matrix]] in pyproject.toml and https://hatch.pypa.io/latest/environment/ for
+    # more details.
+    get-environments:
+        runs-on: ubuntu-latest
+        outputs:
+            envs: ${{ steps.get-envs.outputs.envs }}
+        steps:
+            - uses: actions/checkout@v5
+              with:
+                  filter: blob:none
+                  fetch-depth: 0
+            - name: Install uv
+              uses: astral-sh/setup-uv@v7
+            - name: Get test environments
+              id: get-envs
+              run: |
+                  ENVS_JSON=$(uvx hatch env show --json | jq -c 'to_entries
+                    | map(
+                        select(.key | startswith("hatch-test"))
+                        | {
+                            name: .key,
+                            label: (if (.key | contains("pre")) then .key + " (PRE-RELEASE DEPENDENCIES)" else .key end),
+                            python: .value.python
+                          }
+                      )')
+                  echo "envs=${ENVS_JSON}" | tee $GITHUB_OUTPUT
 
-  # Run tests through hatch. Spawns a separate runner for each environment defined in the hatch matrix obtained above.
-  test:
-    needs: get-environments
-    permissions:
-       id-token: write  # for codecov OIDC
+    # Run tests through hatch. Spawns a separate runner for each environment defined in the hatch matrix obtained above.
+    test:
+        needs: get-environments
+        permissions:
+            id-token: write # for codecov OIDC
 
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-        env: ${{ fromJSON(needs.get-environments.outputs.envs) }}
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest]
+                env: ${{ fromJSON(needs.get-environments.outputs.envs) }}
 
-    name: ${{ matrix.env.label }}
-    runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ contains(matrix.env.name, 'pre') }}  # make "all-green" pass even if pre-release job fails
+        name: ${{ matrix.env.label }}
+        runs-on: ${{ matrix.os }}
+        continue-on-error: ${{ contains(matrix.env.name, 'pre') }} # make "all-green" pass even if pre-release job fails
 
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          filter: blob:none
-          fetch-depth: 0
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          python-version: ${{ matrix.env.python }}
-      - name: create hatch environment
-        run: uvx hatch env create ${{ matrix.env.name }}
-      # Heavy "dataset" tests (multi-GB downloads from Figshare) only run when the
-      # workflow is dispatched manually from the Actions tab — they're too slow
-      # to gate PRs / push-to-main on. Contributors should run them locally when
-      # touching dataset code (see docs/contributing.md).
-      - name: Cache test datasets
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/patpy-test-datasets
-          # Bump the suffix to invalidate the cache (e.g. when the figshare file ID changes).
-          key: patpy-test-datasets-figshare-64217586-64225884-64225983-64226109-64226097-64291092-v2
-      - name: run tests using hatch
-        env:
-          MPLBACKEND: agg
-          PLATFORM: ${{ matrix.os }}
-          DISPLAY: :42
-          DATASET_FLAG: ${{ github.event_name == 'workflow_dispatch' && '--run-datasets' || '' }}
-        run: |
-          export PATPY_TEST_DATASETDIR="$HOME/.cache/patpy-test-datasets"
-          mkdir -p "$PATPY_TEST_DATASETDIR"
-          uvx hatch run ${{ matrix.env.name }}:run-cov -v --color=yes -n auto $DATASET_FLAG
-      - name: generate coverage report
-        run: |
-          # See https://coverage.readthedocs.io/en/latest/config.html#run-patch
-          test -f .coverage || uvx hatch run ${{ matrix.env.name }}:cov-combine
-          uvx hatch run ${{ matrix.env.name }}:cov-report   # report visibly
-          uvx hatch run ${{ matrix.env.name }}:coverage xml # create report for upload
-      - name: Upload coverage
-        uses: codecov/codecov-action@v5
-        with:
-          fail_ci_if_error: true
-          use_oidc: true
+        steps:
+            - uses: actions/checkout@v5
+              with:
+                  filter: blob:none
+                  fetch-depth: 0
+            - name: Install uv
+              uses: astral-sh/setup-uv@v7
+              with:
+                  python-version: ${{ matrix.env.python }}
+            - name: create hatch environment
+              run: uvx hatch env create ${{ matrix.env.name }}
+            # Heavy "dataset" tests (multi-GB downloads from Figshare) only run when the
+            # workflow is dispatched manually from the Actions tab — they're too slow
+            # to gate PRs / push-to-main on. Contributors should run them locally when
+            # touching dataset code (see docs/contributing.md).
+            - name: Cache test datasets
+              if: github.event_name == 'workflow_dispatch'
+              uses: actions/cache@v4
+              with:
+                  path: ~/.cache/patpy-test-datasets
+                  # Bump the suffix to invalidate the cache (e.g. when the figshare file ID changes).
+                  key: patpy-test-datasets-figshare-64217586-64225884-64225983-64226109-64226097-64291092-v2
+            - name: run tests using hatch
+              env:
+                  MPLBACKEND: agg
+                  PLATFORM: ${{ matrix.os }}
+                  DISPLAY: :42
+                  DATASET_FLAG: ${{ github.event_name == 'workflow_dispatch' && '--run-datasets' || '' }}
+              run: |
+                  export PATPY_TEST_DATASETDIR="$HOME/.cache/patpy-test-datasets"
+                  mkdir -p "$PATPY_TEST_DATASETDIR"
+                  uvx hatch run ${{ matrix.env.name }}:run-cov -v --color=yes -n auto $DATASET_FLAG
+            - name: generate coverage report
+              run: |
+                  # See https://coverage.readthedocs.io/en/latest/config.html#run-patch
+                  test -f .coverage || uvx hatch run ${{ matrix.env.name }}:cov-combine
+                  uvx hatch run ${{ matrix.env.name }}:cov-report   # report visibly
+                  uvx hatch run ${{ matrix.env.name }}:coverage xml # create report for upload
+            - name: Upload coverage
+              uses: codecov/codecov-action@v5
+              with:
+                  fail_ci_if_error: true
+                  use_oidc: true
 
-  # Check that all tests defined above pass. This makes it easy to set a single "required" test in branch
-  # protection instead of having to update it frequently. See https://github.com/re-actors/alls-green#why.
-  check:
-    name: Tests pass in all hatch environments
-    if: always()
-    needs:
-      - get-environments
-      - test
-    runs-on: ubuntu-latest
-    steps:
-        - uses: re-actors/alls-green@release/v1
-          with:
-            jobs: ${{ toJSON(needs) }}
+    # Check that all tests defined above pass. This makes it easy to set a single "required" test in branch
+    # protection instead of having to update it frequently. See https://github.com/re-actors/alls-green#why.
+    check:
+        name: Tests pass in all hatch environments
+        if: always()
+        needs:
+            - get-environments
+            - test
+        runs-on: ubuntu-latest
+        steps:
+            - uses: re-actors/alls-green@release/v1
+              with:
+                  jobs: ${{ toJSON(needs) }}
