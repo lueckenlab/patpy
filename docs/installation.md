@@ -18,6 +18,7 @@ This is the preferred method to install patpy, as it will always install the mos
 If you don't have [pip] installed, this [Python installation guide] can guide you through the process.
 
 ### Development version
+
 You can install the most recent version from GitHub:
 ```console
 pip install git+https://github.com/lueckenlab/patpy.git@main
@@ -28,31 +29,37 @@ pip install git+https://github.com/lueckenlab/patpy.git@main
 patpy comes with several optional dependency groups that can be installed based on your needs. Besides groups for development or docs, there are sample representation methods with tricky dependencies. To work with them, install dependencies with the examples below.
 
 #### Development tools
+
 ```console
 pip install "patpy[dev]"
 ```
 
 #### Documentation
+
 ```console
 pip install "patpy[doc]"
 ```
 
 #### Testing dependencies
+
 ```console
 pip install "patpy[test]"
 ```
 
 #### MRVI sample representation method
+
 ```console
 pip install "patpy[mrvi]"
 ```
 
 #### PILOT sample representation method
+
 ```console
 pip install "patpy[pilot]"
 ```
 
 #### scPoli sample representation method
+
 ```console
 pip install "patpy[scpoli]"
 ```

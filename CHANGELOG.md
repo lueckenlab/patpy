@@ -74,7 +74,7 @@ and this project adheres to [Semantic Versioning][].
 
 ### Added
 
-- `evaluate_representation(..., method="permanova")` for categorical outcomes: PERMANOVA pseudo-F (single factor, same decomposition as ``vegan::adonis2``) with permutation p-values in pure Python
+- `evaluate_representation(..., method="permanova")` for categorical outcomes: PERMANOVA pseudo-F (single factor, same decomposition as `vegan::adonis2`) with permutation p-values in pure Python
 
 ### Changed
 
@@ -142,7 +142,7 @@ across all pairwise contrasts of a multi-dimensional condition space.
 
 - **`run_condition_combinations(model_cls, adata, condition_cols, **kwargs)`** — one-liner that takes any pertpy class with a `compare_groups` classmethod, enumerates all observed pairwise condition contrasts, runs the model for each, and returns a concatenated DataFrame with a `"contrast"` column.
 - **`ConditionComparison(model_cls, **defaults)`** — thin class wrapper around the above; stores the model class and default kwargs so the same configuration can be reused across multiple datasets or condition axes via `.run()`.
-- **`build_condition_combinations(adata, condition_cols)`** — returns a DataFrame of all *observed* (not Cartesian) combinations of multiple condition columns, with a joined `"label"` column.
+- **`build_condition_combinations(adata, condition_cols)`** — returns a DataFrame of all _observed_ (not Cartesian) combinations of multiple condition columns, with a joined `"label"` column.
 - **`build_all_pairwise_contrasts(adata, condition_cols)`** — returns a list of `{group, baseline, label}` dicts for every pairwise contrast of observed condition combinations.
 - **`filter_adata_to_conditions(adata, condition_col, groups)`** — subsets an AnnData to cells belonging to specific condition groups.
 
@@ -163,6 +163,7 @@ across all pairwise contrasts of a multi-dimensional condition space.
 ## 0.14.0
 
 ### Added
+
 - CLR-transformation to the composition baseline to bridge it with SETA: https://www.bioconductor.org/packages//release/bioc/html/SETA.html
 
 ## 0.13.0
@@ -237,6 +238,7 @@ across all pairwise contrasts of a multi-dimensional condition space.
 ## 0.11.0
 
 ### Added
+
 - Function `tl/evaluation/trajectory_correlation` to compute a corresponding SPARE metric
 - Function `tl/evaluation/knn_prediction_score` to compute a corresponding SPARE metric
 - Function `tl/evaluation/replicate_robustness` to compute a corresponding SPARE metric
@@ -349,11 +351,11 @@ across all pairwise contrasts of a multi-dimensional condition space.
 -   "cell type" is renamed to "cell group" everywhere to be more general
 -   Some representation methods are renamed accordingly:
 -   -   `CellTypesComposition` -> `CellGroupComposition`
--   -   `CellTypePseudobulk` -> `GroupedPseudobulk`
--   -   `TotalPseudobulk` -> `Pseudobulk`
--   `patient_representation` argument is renamed to `sample_representation`
--   "Patient representation" is now renamed to "Sample representation" eveywhere
--   The base class is now called `SampleRepresentationMethod` instead of `PatientRepresentationMethod`. This is important only for developers, users shouldn't use it anyway
+    -   -   `CellTypePseudobulk` -> `GroupedPseudobulk`
+        -   -   `TotalPseudobulk` -> `Pseudobulk`
+            -   `patient_representation` argument is renamed to `sample_representation`
+            -   "Patient representation" is now renamed to "Sample representation" eveywhere
+            -   The base class is now called `SampleRepresentationMethod` instead of `PatientRepresentationMethod`. This is important only for developers, users shouldn't use it anyway
 
 ### Deleted
 
