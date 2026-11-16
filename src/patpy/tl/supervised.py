@@ -919,8 +919,8 @@ class MixMIL(SupervisedSampleMethod):
             if self._has_metadata(cov):
                 vals = self._donor_col(cov).astype("float32")
                 covariate_list.append(torch.tensor(vals, dtype=dtype_torch).unsqueeze(1))
-            elif self.donor_data is not None and cov in self.donor_data.levels[self.unit_level].obsm:
-                units = self.donor_data.levels[self.unit_level]
+            elif self.ddata is not None and cov in self.ddata.levels[self.sample_level].obsm:
+                units = self.ddata.levels[self.sample_level]
                 rows = units.obs_names.get_indexer([str(s) for s in self.samples])
                 vals = np.asarray(units.obsm[cov], dtype="float32")[rows]
                 covariate_list.append(torch.from_numpy(vals.reshape(n_donors, -1)))
@@ -1115,7 +1115,7 @@ class PULSAR(SupervisedSampleMethod):
 
         cells = self.adata
         if self.label_keys[0] not in cells.obs.columns:
-            cells = self.donor_data.to_anndata(columns=[self.label_keys[0]])
+            cells = self.ddata.to_anndata(columns=[self.label_keys[0]])
 
         donor_embedding_collection = extract_donor_embeddings_from_h5ad(
             cells,

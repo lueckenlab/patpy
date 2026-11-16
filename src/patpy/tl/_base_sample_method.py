@@ -11,26 +11,23 @@ import seaborn as sns
 from patpy.pp import extract_metadata, fill_nan_distances
 
 
-def _split_donor_data(data):
-    """Return the cell-level AnnData and, when *data* is a DonorData, the DonorData itself."""
+def _is_donordata(obj) -> bool:
+    """Whether *obj* is a ``DonorData``, without requiring the donordata package."""
     try:
         from donordata import DonorData
     except ImportError:
-        return data, None
-    if isinstance(data, DonorData):
-        return data.C, data
-    return data, None
+        return False
+    return isinstance(obj, DonorData)
 
 
-def _unit_level(donor_data, sample_key: str) -> str:
-    """Level of *donor_data* whose units a method represents.
-
-    With a sample level the samples are the units, unless *sample_key* names the donor identifier,
-    in which case all samples of a donor are pooled.
-    """
-    if donor_data.sample_id is not None and sample_key != donor_data.donor_id:
+def _level_of(ddata, sample_key: str) -> str:
+    """Level of *ddata* whose identifier is *sample_key*."""
+    if sample_key == ddata.donor_id:
+        return "donor"
+    if ddata.sample_id is not None and sample_key == ddata.sample_id:
         return "sample"
-    return "donor"
+    identifiers = [i for i in (ddata.donor_id, ddata.sample_id) if i is not None]
+    raise ValueError(f"sample_key='{sample_key}' must be an identifier of the DonorData: {identifiers}.")
 
 
 def _create_colormap(df: pd.DataFrame, col: str, palette: str = "Spectral") -> pd.Series:
@@ -47,10 +44,9 @@ class BaseSampleMethod:
     Parameters
     ----------
     sample_key : str
-        Column in ``adata.obs`` containing sample (donor) identifiers. When a
-        ``DonorData`` is passed to :meth:`prepare_anndata`, its ``sample_id`` is used when it
-        has a sample level and its ``donor_id`` otherwise, or when ``sample_key`` is the
-        ``donor_id``.
+        Column in ``adata.obs`` containing sample (donor) identifiers. With a ``DonorData`` it is
+        its ``donor_id`` or its ``sample_id``, which chooses whether donors or samples are the
+        samples of the method.
     cell_group_key : str or None
         Column in ``adata.obs`` containing cell-type / cell-group labels.
         May be ``None`` when grouping is not required.
@@ -75,8 +71,8 @@ class BaseSampleMethod:
         self.seed = seed
 
         self.adata: sc.AnnData | None = None
-        self.donor_data = None
-        self.unit_level = "donor"
+        self.ddata = None
+        self.sample_level: str | None = None
         self.samples: np.ndarray | None = None
         self.cell_groups: np.ndarray | None = None
         self.embeddings: dict[str, np.ndarray] = {}
@@ -95,27 +91,19 @@ class BaseSampleMethod:
         ----------
         adata
             Single-cell AnnData that contains :attr:`sample_key` in ``.obs``, or a
-            ``DonorData``. With a ``DonorData`` the cells in ``C`` are used as
-            :attr:`adata`, and its samples, or its donors when it has no sample level, are
-            the units that get a representation. Their metadata is read from the sample
-            and donor tables first, and the object is kept in :attr:`donor_data` so
-            results can be written back with :meth:`to_donordata`.
+            ``DonorData`` whose ``donor_id`` or ``sample_id`` is :attr:`sample_key`. Its
+            donors or samples are then the samples of the method: its cells are used as
+            :attr:`adata`, sample metadata is read from its donor and sample tables, and
+            the results can be stored in it with :meth:`to_donordata`.
         """
-        adata, self.donor_data = _split_donor_data(adata)
-        if self.donor_data is not None:
-            dd = self.donor_data
-            self.unit_level = _unit_level(dd, self.sample_key)
-            key = dd.sample_id if self.unit_level == "sample" else dd.donor_id
-            if self.sample_key != key:
-                warnings.warn(
-                    f"Using the {self.unit_level} identifier '{key}' of the DonorData instead of "
-                    f"sample_key='{self.sample_key}'.",
-                    stacklevel=2,
-                )
-                self.sample_key = key
-            if key not in adata.obs.columns:
-                codes = dd.sample_codes if self.unit_level == "sample" else dd.donor_codes
-                adata.obs[key] = pd.Categorical.from_codes(codes, categories=dd.levels[self.unit_level].obs_names)
+        self.ddata, self.sample_level = None, None
+        if _is_donordata(adata):
+            self.ddata = adata
+            self.sample_level = _level_of(adata, self.sample_key)
+            if self.sample_key in adata.C.obs.columns:
+                adata = adata.C
+            else:
+                adata = adata.to_anndata(columns=[self.sample_key])
 
         if self.sample_key not in adata.obs.columns:
             raise ValueError(f"sample_key='{self.sample_key}' not found in adata.obs.")
@@ -178,79 +166,49 @@ class BaseSampleMethod:
         new_adata.obsm["X_old"] = self.adata.X
         return new_adata
 
-    def _unit_tables(self) -> list[tuple[str, pd.DataFrame]]:
-        """Tables of :attr:`donor_data` with one row per unit or per coarser unit, finest first."""
-        if self.donor_data is None:
+    def _metadata_level_columns(self, columns=None) -> list[str]:
+        """The *columns*, all by default, that the DonorData stores once per sample in its sample or donor table."""
+        if self.ddata is None:
             return []
-        levels = ["sample", "donor"] if self.unit_level == "sample" else ["donor"]
-        return [(level, self.donor_data.levels[level].obs) for level in levels]
-
-    def _unit_columns(self, columns) -> list[str]:
-        """The *columns* that the sample or donor tables of :attr:`donor_data` hold for :attr:`samples`."""
-        if self.donor_data is None:
-            return []
-        names = [str(s) for s in self.samples]
-        if not pd.Index(names).isin(self.donor_data.levels[self.unit_level].obs_names).all():
-            return []
-        known = {c for _, table in self._unit_tables() for c in table.columns}
+        levels = ["sample", "donor"] if self.sample_level == "sample" else ["donor"]
+        known = list(dict.fromkeys(c for level in levels for c in self.ddata.levels[level].obs.columns))
+        columns = known if columns is None else columns
         return [c for c in columns if c in known and c != self.sample_key]
-
-    def _unit_table(self, columns=None) -> pd.DataFrame:
-        """Metadata of :attr:`samples` from the tables of :attr:`donor_data`, with donor columns repeated for samples."""
-        if columns is None:
-            columns = list(dict.fromkeys(c for _, table in self._unit_tables() for c in table.columns))
-        columns = self._unit_columns(columns)
-        names = [str(s) for s in self.samples]
-        if columns:
-            table = self.donor_data.get_df(columns, level=self.unit_level).loc[names]
-        else:
-            table = pd.DataFrame(index=pd.Index(names))
-        return table.set_axis(pd.Index(self.samples, name=self.sample_key))
 
     def _extract_metadata(self, columns: list[str]) -> pd.DataFrame:
         """Return a DataFrame with *columns* aligned to :attr:`samples`.
 
-        Columns of the sample and donor tables of :attr:`donor_data` are taken from there, all
-        others are collapsed from ``adata.obs``.
+        Columns that a DonorData stores in its sample or donor table are read from there, all others
+        are collapsed from ``adata.obs``.
         """
-        unit_columns = self._unit_columns(columns)
-        if not unit_columns:
+        level_columns = self._metadata_level_columns(columns)
+        if not level_columns:
             return extract_metadata(self.adata, self.sample_key, columns, samples=self.samples)
-        table = self._unit_table(unit_columns)
-        cell_columns = [c for c in columns if c not in unit_columns]
+        table = self.ddata.get_df(level_columns, level=self.sample_level).loc[[str(s) for s in self.samples]]
+        table.index = pd.Index(self.samples, name=self.sample_key)
+        cell_columns = [c for c in columns if c not in level_columns]
         if cell_columns:
             cells = extract_metadata(self.adata, self.sample_key, cell_columns, samples=self.samples)
             table = pd.concat([table, cells.set_axis(table.index)], axis=1)
         return table[list(columns)]
 
     def _ensure_cell_columns(self, columns) -> None:
-        """Make sample-level covariates from the sample and donor tables available in ``adata.obs``.
+        """Attach sample covariates that a DonorData stores in its tables to the cells in :attr:`adata`.
 
-        Libraries such as scvi-tools or pilotpy read covariates per cell. With a ``DonorData`` the
-        covariates are stored once per sample or donor, so the missing ones are broadcast to the
-        cells of :attr:`donor_data` before the library is called.
+        Libraries such as scvi-tools or pilotpy read covariates from ``adata.obs``.
         """
         missing = [c for c in columns if c is not None and c not in self.adata.obs.columns]
         if not missing:
             return
-        sources, unknown = {}, []
-        for column in missing:
-            level = next((lv for lv, table in self._unit_tables() if column in table.columns), None)
-            if level is None:
-                unknown.append(column)
-            else:
-                sources.setdefault(level, []).append(column)
+        unknown = [c for c in missing if c not in self._metadata_level_columns(missing)]
         if unknown:
-            raise ValueError(f"Columns {unknown} not found in adata.obs or the tables of the DonorData.")
-        for level, level_columns in sources.items():
-            self.donor_data.push_obs(level_columns, level=level)
-        self.adata = self.donor_data.C
+            raise ValueError(f"Columns {unknown} not found in adata.obs or in the tables of the DonorData.")
+        attached = [c for c in self.adata.obs.columns if c not in self.ddata.C.obs.columns]
+        self.adata = self.ddata.to_anndata(columns=attached + missing)
 
     def _has_metadata(self, column: str) -> bool:
-        """Whether *column* exists in ``adata.obs`` or in the sample or donor table of :attr:`donor_data`."""
-        if column in self.adata.obs.columns:
-            return True
-        return any(column in table.columns for _, table in self._unit_tables())
+        """Whether *column* is in ``adata.obs`` or in the sample or donor table of the DonorData."""
+        return column in self.adata.obs.columns or bool(self._metadata_level_columns([column]))
 
     def _check_adata_loaded(self) -> None:
         """Raise :class:`RuntimeError` if :meth:`prepare_anndata` has not been called."""
@@ -448,8 +406,8 @@ class BaseSampleMethod:
             if use_uns_colors:
                 color_key = f"{col}{color_key_suffix}"
                 uns = self.adata.uns
-                if color_key not in uns and self.donor_data is not None:
-                    uns = self.donor_data.uns
+                if color_key not in uns and self.ddata is not None:
+                    uns = self.ddata.uns
                 if color_key in uns:
                     unique_vals = pd.unique(metadata_df[col].dropna())
                     colors = uns[color_key]
@@ -515,28 +473,25 @@ class BaseSampleMethod:
             rep = pd.DataFrame(rep, index=self.samples)
         return rep
 
-    def to_donordata(self, key: str | None = None, donor_data=None):
-        """Store the results of this method in a DonorData that holds the cells and the donor metadata.
+    def to_donordata(self, key: str | None = None, ddata=None):
+        """Store the results of this method in a DonorData.
 
-        Results go to the level whose units the method represents, the samples of a DonorData with
-        a sample level and its donors otherwise. The sample representation is stored in
-        ``obsm[key]`` of that level, the sample distance matrix in ``obsp[f"{key}_distances"]``,
-        distances resolved by cell group, which MrVI and GroupedPseudobulk compute, in
-        ``obsp[f"{key}_distances_{group}"]``, and every embedding computed with :meth:`embed` in
-        ``obsm[f"X_{method}_{key}"]``, for example ``obsm["X_umap_pseudobulk"]``. *key* is added to
-        ``uns["sample_representations"]``, the list the evaluation functions iterate over. Rows are
-        matched to units by name, units without a result are filled with ``NaN``. Because these
-        matrices are aligned to the units, they stay consistent when samples or donors are filtered
-        afterwards and are saved together with the cells and the metadata tables.
+        The results go to the level whose identifier is :attr:`sample_key`: the sample representation
+        to ``obsm[key]``, the distance matrix to ``obsp[f"{key}_distances"]``, distances per cell group,
+        which MrVI and GroupedPseudobulk compute, to ``obsp[f"{key}_distances_{group}"]``, and every
+        embedding computed with :meth:`embed` to ``obsm[f"X_{method}_{key}"]``. *key* is added to
+        ``uns["sample_representations"]``, the list the evaluation functions read. Rows are matched to
+        the donors or samples by name, and those without a result are filled with ``NaN``. The results
+        are subset with the donors or samples when they are selected, and saved with the DonorData.
 
         Parameters
         ----------
         key
             Prefix of the stored results. Defaults to the class name.
-        donor_data
-            DonorData to write into, for example when the method ran on a filtered copy of the
-            cells. Defaults to the DonorData passed to :meth:`prepare_anndata`, or a new one built
-            from :attr:`adata` with ``DonorData.from_anndata``.
+        ddata
+            DonorData to store the results in, for example when the method ran on a filtered copy of
+            the cells. Defaults to the DonorData passed to :meth:`prepare_anndata`, or one built from
+            :attr:`adata` with ``DonorData.from_anndata``.
 
         Returns
         -------
@@ -547,49 +502,47 @@ class BaseSampleMethod:
 
         self._check_adata_loaded()
         key = key or type(self).__name__
-        dd = donor_data if donor_data is not None else self.donor_data
-        if dd is None:
-            dd = DonorData.from_anndata(self.adata, self.sample_key)
-        level = self.unit_level if dd is self.donor_data else _unit_level(dd, self.sample_key)
-        units = dd.levels[level]
+        if ddata is None:
+            ddata = self.ddata if self.ddata is not None else DonorData.from_anndata(self.adata, self.sample_key)
+        units = ddata.levels[_level_of(ddata, self.sample_key)]
         positions = units.obs_names.get_indexer([str(s) for s in self.samples])
         found = positions >= 0
+
+        def aligned(matrix, square=False):
+            matrix = np.asarray(matrix)
+            shape = (units.n_obs, units.n_obs) if square else (units.n_obs, *matrix.shape[1:])
+            full = np.full(shape, np.nan)
+            if square:
+                full[np.ix_(positions[found], positions[found])] = matrix[np.ix_(found, found)]
+            else:
+                full[positions[found]] = matrix[found]
+            return full
 
         try:
             representation = self._get_sample_representation_frame()
         except (NotImplementedError, RuntimeError):
             representation = None
         if representation is not None:
-            frame = representation.copy()
-            frame.index = frame.index.astype(str)
-            frame.columns = frame.columns.astype(str)
-            units.obsm[key] = frame.reindex(units.obs_names)
+            frame = representation.set_axis(representation.index.astype(str), axis=0)
+            units.obsm[key] = frame.set_axis(frame.columns.astype(str), axis=1).reindex(units.obs_names)
 
         try:
             distances = self.calculate_distance_matrix()
         except (NotImplementedError, RuntimeError):
             distances = None
         if distances is not None:
-            full = np.full((units.n_obs, units.n_obs), np.nan)
-            full[np.ix_(positions[found], positions[found])] = np.asarray(distances)[np.ix_(found, found)]
-            units.obsp[f"{key}_distances"] = full
-
+            units.obsp[f"{key}_distances"] = aligned(distances, square=True)
         for group, group_distances in getattr(self, "group_distances", {}).items():
-            full = np.full((units.n_obs, units.n_obs), np.nan)
-            full[np.ix_(positions[found], positions[found])] = np.asarray(group_distances)[np.ix_(found, found)]
-            units.obsp[f"{key}_distances_{group}"] = full
-
+            units.obsp[f"{key}_distances_{group}"] = aligned(group_distances, square=True)
         for method, coordinates in self.embeddings.items():
-            full = np.full((units.n_obs, np.asarray(coordinates).shape[1]), np.nan)
-            full[positions[found]] = np.asarray(coordinates)[found]
-            units.obsm[f"X_{method.lower()}_{key}"] = full
+            units.obsm[f"X_{method.lower()}_{key}"] = aligned(coordinates)
 
-        registry = dd.uns.setdefault("sample_representations", [])
+        registry = ddata.uns.setdefault("sample_representations", [])
         if key not in registry:
             registry.append(key)
-        if self.donor_data is None:
-            self.donor_data = dd
-        return dd
+        if self.ddata is None:
+            self.ddata = ddata
+        return ddata
 
     def fit_linear_probe(
         self,

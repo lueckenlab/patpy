@@ -17,6 +17,14 @@ Take a look at examples on how to use patpy for your analysis
     notebooks/immune_aging_multiresolution_composition
 ```
 
+## Working with DonorData
+
+```{toctree}
+:maxdepth: 1
+
+donordata
+```
+
 ```{toctree}
 :maxdepth: 2
 :includehidden:

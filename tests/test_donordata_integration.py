@@ -7,7 +7,8 @@ import pandas as pd
 import pytest
 import scanpy as sc
 
-from patpy.datasets import DatasetInfo, as_donordata
+from patpy.datasets import DatasetInfo
+from patpy.pp import as_donordata
 from patpy.tl import CellGroupComposition, GroupedPseudobulk, MixMIL, PaSCient, Pseudobulk
 from patpy.tl.evaluation import knn_prediction_score, trajectory_correlation
 from patpy.tl.sample_representation import (
@@ -77,7 +78,7 @@ def test_labels_come_from_donor_table(dd, donor_table):
     model = _make_supervised(label_keys=["disease", "age"], tasks=["classification", "regression"])
     model.prepare_anndata(dd)
     assert model.adata is dd.C
-    assert model.donor_data is dd
+    assert model.ddata is dd
     assert "age" not in dd.C.obs.columns
     expected = donor_table.loc[[str(s) for s in model.samples], ["disease", "age"]]
     np.testing.assert_array_equal(model.labels.to_numpy(), expected.to_numpy())
@@ -94,11 +95,10 @@ def test_metadata_mixes_donor_table_and_cells(dd):
     assert metadata.loc["donor_01", "status"] == "case"
 
 
-def test_sample_key_follows_donor_id(dd):
+def test_sample_key_must_be_an_identifier_of_the_donordata(dd):
     model = _make_supervised(sample_key="patient")
-    with pytest.warns(UserWarning, match="donor_id"):
+    with pytest.raises(ValueError, match="identifier of the DonorData"):
         model.prepare_anndata(dd)
-    assert model.sample_key == "donor_id"
 
 
 def test_missing_label_raises(dd):
@@ -141,10 +141,10 @@ def test_to_donordata_from_plain_anndata(cells, donor_table):
     method = CellGroupComposition(sample_key="donor_id", cell_group_key="cell_type")
     method.prepare_anndata(flat)
     result = method.to_donordata()
-    assert result.G_type == "table"
+    assert result.D_type == "table"
     assert {"disease", "age", "site", "batch"} <= set(result.obs.columns)
     assert "CellGroupComposition_distances" in result.obsp
-    assert method.donor_data is result
+    assert method.ddata is result
 
 
 def test_mixmil_covariates_from_donor_table_and_obsm(dd):
@@ -260,10 +260,10 @@ def test_pascient_train_feeds_mil_batches_to_trainer(dd, monkeypatch):
 def test_to_donordata_into_given_object(dd, cells):
     method = Pseudobulk(sample_key="donor_id", cell_group_key="cell_type", layer="X_pca")
     method.prepare_anndata(cells[cells.obs["cell_type"] != "NK"].copy())
-    method.to_donordata("pb_no_nk", donor_data=dd)
+    method.to_donordata("pb_no_nk", ddata=dd)
     assert "pb_no_nk_distances" in dd.obsp
     assert dd.uns["sample_representations"] == ["pb_no_nk"]
-    assert method.donor_data is dd
+    assert method.ddata is dd
 
 
 def test_benchmark_on_pseudobulk_meta_adata(dd):
@@ -283,8 +283,6 @@ def test_benchmark_on_pseudobulk_meta_adata(dd):
     scores = knn_prediction_score(meta_adata, schema, representations=dd.uns["sample_representations"], n_neighbors=3)
     assert set(scores["representation"]) == {"composition", "pseudobulk"}
     assert scores["score"].between(-1, 1).all()
-    from_dd = knn_prediction_score(dd, schema, representations=dd.uns["sample_representations"], n_neighbors=3)
-    pd.testing.assert_frame_equal(scores, from_dd)
 
     pytest.importorskip("ehrapy")
     trajectory = trajectory_correlation(
@@ -303,10 +301,10 @@ def test_donor_covariates_reach_libraries_that_read_cells(dd):
 
     method = _NeedsStatus(sample_key="donor_id", cell_group_key="cell_type")
     method.prepare_anndata(dd)
-    assert "status" not in dd.C.obs.columns
     method.calculate_distance_matrix()
-    assert method.adata is dd.C
-    assert (dd.C.obs["status"].to_numpy() == dd.obs["status"].to_numpy()[dd.donor_codes]).all()
+    assert "status" not in dd.C.obs.columns
+    assert method.adata.X is dd.C.X
+    assert (method.adata.obs["status"].to_numpy() == dd.obs["status"].to_numpy()[dd.donor_codes]).all()
     with pytest.raises(ValueError, match="not found"):
         method._ensure_cell_columns(["unknown"])
 
@@ -332,12 +330,12 @@ def test_to_adata_takes_metadata_from_donor_table(dd):
     assert samples.obs["age"].tolist() == dd.obs.loc[[str(s) for s in method.samples], "age"].tolist()
 
 
-def test_correlation_helpers_accept_donordata(dd):
-    composition = correlate_composition(dd, cell_type_key="cell_type", target="age")
+def test_correlation_helpers_take_the_levels_of_a_donordata(dd):
+    donors = dd.levels["donor"]
+    composition = correlate_composition(donors, dd.C, "donor_id", "cell_type", "age")
     assert set(composition.index) == {"T", "B", "NK"}
-    expression = correlate_cell_type_expression(dd, cell_type_key="cell_type", target="age", min_sample_size=5)
+    expression = correlate_cell_type_expression(donors, dd.C, "donor_id", "cell_type", "age", min_sample_size=5)
     assert set(expression["cell_type"]) <= {"T", "B", "NK"}
-    assert "B_pseudobulk" in dd.obsm
 
 
 def test_dataset_as_donordata(cells, donor_table):
@@ -351,11 +349,12 @@ def test_dataset_as_donordata(cells, donor_table):
         cell_type_key="cell_type",
         sample_metadata_columns=["disease", "age", "site", "missing_column"],
     )
-    dd = as_donordata(flat, info)
-    assert set(dd.obs.columns) == {"disease", "age", "site"}
-    assert "age" in dd.C.obs.columns
-    meta = dd.pseudobulk(func="mean")
-    assert as_donordata(flat, info, meta_adata=meta).D_type == "anndata"
+    ddata = as_donordata(flat, info.sample_key, info.sample_metadata_columns)
+    assert set(ddata.obs.columns) == {"disease", "age", "site"}
+    assert "age" in ddata.C.obs.columns
+    meta = ddata.pseudobulk(func="mean")
+    assert as_donordata(flat, "donor_id", meta_adata=meta).D_type == "anndata"
+    assert as_donordata(flat, "donor_id").obs.columns.empty
 
 
 def test_pilot_reads_status_from_donor_table(dd):
@@ -366,7 +365,7 @@ def test_pilot_reads_status_from_donor_table(dd):
     method.prepare_anndata(dd)
     distances = method.calculate_distance_matrix()
     assert distances.shape == (N_DONORS, N_DONORS)
-    assert "status" in dd.C.obs.columns
+    assert "status" in method.adata.obs.columns
 
 
 @pytest.fixture
@@ -394,7 +393,7 @@ def dd3(donor_table):
 def test_samples_are_the_units_with_a_sample_level(dd3):
     method = CellGroupComposition(sample_key="sample_id", cell_group_key="cell_type")
     method.prepare_anndata(dd3)
-    assert method.unit_level == "sample"
+    assert method.sample_level == "sample"
     assert len(method.samples) == dd3.n_samples
     metadata = method._extract_metadata(["severity", "age", "visit"])
     names = [str(s) for s in method.samples]
@@ -413,26 +412,27 @@ def test_donor_key_pools_the_samples_of_a_donor(dd3):
     assert "donor_id" not in dd3.C.obs.columns
     method = Pseudobulk(sample_key="donor_id", cell_group_key="cell_type", layer="X_pca")
     method.prepare_anndata(dd3)
-    assert method.unit_level == "donor"
+    assert method.sample_level == "donor"
     assert len(method.samples) == N_DONORS
-    assert (dd3.C.obs["donor_id"].astype(str).to_numpy() == dd3.obs_names[dd3.donor_codes].to_numpy()).all()
+    assert "donor_id" not in dd3.C.obs.columns
+    assert (method.adata.obs["donor_id"].astype(str).to_numpy() == dd3.obs_names[dd3.donor_codes].to_numpy()).all()
     method.to_donordata("pseudobulk")
     assert dd3.obsp["pseudobulk_distances"].shape == (N_DONORS, N_DONORS)
 
 
-def test_other_sample_key_defaults_to_the_samples(dd3):
+def test_other_sample_key_raises(dd3):
     method = CellGroupComposition(sample_key="patient", cell_group_key="cell_type")
-    with pytest.warns(UserWarning, match="sample identifier 'sample_id'"):
+    with pytest.raises(ValueError, match="'donor_id', 'sample_id'"):
         method.prepare_anndata(dd3)
-    assert method.sample_key == "sample_id"
 
 
 def test_sample_and_donor_covariates_reach_the_cells(dd3):
     method = CellGroupComposition(sample_key="sample_id", cell_group_key="cell_type")
     method.prepare_anndata(dd3)
     method._ensure_cell_columns(["severity", "site"])
-    np.testing.assert_array_equal(dd3.C.obs["severity"], dd3.S["severity"].to_numpy()[dd3.sample_codes])
-    np.testing.assert_array_equal(dd3.C.obs["site"], dd3.obs["site"].to_numpy()[dd3.donor_codes])
+    np.testing.assert_array_equal(method.adata.obs["severity"], dd3.S["severity"].to_numpy()[dd3.sample_codes])
+    np.testing.assert_array_equal(method.adata.obs["site"], dd3.obs["site"].to_numpy()[dd3.donor_codes])
+    assert "severity" not in dd3.C.obs.columns
     assert method._has_metadata("visit")
     assert not method._has_metadata("unknown")
 
@@ -442,13 +442,15 @@ def test_scores_are_computed_per_sample(dd3):
     method.prepare_anndata(dd3)
     method.to_donordata("composition")
     schema = {"relevant": {"severity": "classification"}, "technical": {"site": "classification"}}
-    scores = knn_prediction_score(dd3, schema, n_neighbors=3)
+    samples = dd3.flatten().levels["donor"]
+    scores = knn_prediction_score(samples, schema, representations=dd3.uns["sample_representations"], n_neighbors=3)
     assert set(scores["covariate"]) == {"severity", "site"}
     assert (scores["n_observations"] == dd3.n_samples).all()
 
 
 def test_correlation_helpers_use_the_samples(dd3):
-    composition = correlate_composition(dd3, cell_type_key="cell_type", target="age")
+    samples = dd3.flatten().levels["donor"]
+    composition = correlate_composition(samples, dd3.C, "sample_id", "cell_type", "age")
     assert set(composition.index) == {"T", "B", "NK"}
-    correlate_cell_type_expression(dd3, cell_type_key="cell_type", target="visit", min_sample_size=5)
-    assert dd3.levels["sample"].obsm["B_pseudobulk"].shape == (dd3.n_samples, N_GENES)
+    correlate_cell_type_expression(samples, dd3.C, "sample_id", "cell_type", "visit", min_sample_size=5)
+    assert samples.obsm["B_pseudobulk"].shape == (dd3.n_samples, N_GENES)

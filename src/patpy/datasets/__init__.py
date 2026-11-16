@@ -1,6 +1,5 @@
 from ._datasets import (
     DatasetInfo,
-    as_donordata,
     combat,
     combat_stephenson,
     hlca,
@@ -13,7 +12,6 @@ from .synthetic import covid_19_hallmarks, process_adata, simulate_data
 
 __all__ = [
     "DatasetInfo",
-    "as_donordata",
     "combat",
     "combat_stephenson",
     "covid_19_hallmarks",
