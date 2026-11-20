@@ -519,3 +519,52 @@ def get_helical_embedding(
         raise ValueError(
             f"Unrecognized model '{model}'. Please choose one of: 'scgpt', 'geneformer', 'uce', or 'transcriptformer'."
         )
+
+
+def as_donordata(
+    adata,
+    sample_key: str,
+    sample_metadata_columns=None,
+    meta_adata=None,
+    keep_in_cells: bool = True,
+):
+    """Combine cells and their sample metadata into a ``DonorData``.
+
+    Parameters
+    ----------
+    adata
+        Annotated data object containing cells.
+    sample_key
+        Column in ``adata.obs`` with the sample of every cell, for example ``info.sample_key`` of a
+        ``DatasetInfo``.
+    sample_metadata_columns
+        Columns of ``adata.obs`` that hold one value per sample, for example
+        ``info.sample_metadata_columns``. They are moved into the sample table.
+    meta_adata
+        A sample-level AnnData, such as the one returned by ``patpy.datasets.combat(load_metadata=True)``,
+        used as the sample table instead of ``sample_metadata_columns``.
+    keep_in_cells
+        Keep the sample metadata in ``adata.obs`` as well, for methods that read it from the cells.
+
+    Returns
+    -------
+    donordata.DonorData
+        Holds the cells in ``ddata.C``, an AnnData, and one row per sample in ``ddata.D``, the sample
+        table, or ``meta_adata`` when given. ``ddata.obs`` is the sample table as a DataFrame, and
+        ``ddata.filter_donors`` selects samples together with their cells. Methods of ``patpy.tl``
+        accept it in place of ``adata`` with ``sample_key`` as their sample key.
+
+    Examples
+    --------
+    >>> adata, info = patpy.datasets.stephenson(return_dataset_info=True)
+    >>> ddata = patpy.pp.as_donordata(adata, info.sample_key, info.sample_metadata_columns)
+    """
+    try:
+        from donordata import DonorData
+    except ImportError as e:
+        raise ImportError("as_donordata needs the donordata package: pip install donordata") from e
+
+    if meta_adata is not None:
+        return DonorData(D=meta_adata, C=adata, donor_id=sample_key)
+    columns = [c for c in (sample_metadata_columns or []) if c in adata.obs.columns and c != sample_key]
+    return DonorData.from_anndata(adata, donor_id=sample_key, columns=columns, keep_in_cells=keep_in_cells)

@@ -495,7 +495,8 @@ class SampleRepresentationMethod(BaseSampleMethod):
         Parameters
         ----------
         metadata : Optional[pd.DataFrame] = None
-            Metadata about samples to be added to .obs of AnnData object. Should contain samples in index
+            Metadata about samples to be added to .obs of AnnData object. Should contain samples in index.
+            Defaults to the sample and donor tables when the method was prepared with a ``DonorData``.
         *args, **kwargs
             Additional arguments to pass to calculate_distance_matrix method
 
@@ -513,6 +514,8 @@ class SampleRepresentationMethod(BaseSampleMethod):
         else:
             representation = np.array(self.embed())
 
+        if metadata is None and self.ddata is not None:
+            metadata = self._extract_metadata(self._metadata_level_columns())
         self.samples_adata = sc.AnnData(
             X=representation,
             obs=metadata.loc[self.samples] if metadata is not None else None,
@@ -803,6 +806,7 @@ class MrVI(SampleRepresentationMethod):
         from scvi.external import MRVI
 
         super().prepare_anndata(adata=adata)
+        self._ensure_cell_columns([self.batch_key])
 
         assert is_count_data(self._get_data()), "`layer` must contain count data with integer numbers"
 
@@ -892,6 +896,10 @@ class MrVI(SampleRepresentationMethod):
 
         distances_to_average = distances["cell" if groupby is None else groupby].values
         avg_distances, sample_sizes = calculate_average_without_nans(distances_to_average, axis=0)
+        if groupby is not None:
+            grouped = distances[groupby]
+            labels = grouped.coords[grouped.dims[0]].values
+            self.group_distances = {str(label): grouped.values[i] for i, label in enumerate(labels)}
 
         self.adata.uns["mrvi_parameters"] = {
             "batch_size": batch_size,
@@ -1097,6 +1105,7 @@ class PILOTGMVAE(SampleRepresentationMethod):
     def prepare_anndata(self, adata):
         """Train PILOT GM VAE model"""
         super().prepare_anndata(adata)
+        self._ensure_cell_columns([self.sample_state_col])
 
         try:
             from pilotgm.core import train_gmvae
@@ -1267,6 +1276,7 @@ class PILOT(SampleRepresentationMethod):
         if distances is not None:
             return distances
 
+        self._ensure_cell_columns([self.sample_state_col])
         # This runs all the calculations and adds several keys to .uns
         pt.tl.wasserstein_distance(
             self.adata,
@@ -1362,6 +1372,7 @@ class GroupedPseudobulk(SampleRepresentationMethod):
             samples_distances = scipy.spatial.distance.pdist(cell_group_embeddings, metric=distance_metric)
             distances[i] = scipy.spatial.distance.squareform(samples_distances)
 
+        self.group_distances = {str(group): distances[i] for i, group in enumerate(self.cell_groups)}
         avg_distances, sample_sizes = calculate_average_without_nans(distances, axis=0)
 
         self._distances = avg_distances
