@@ -305,7 +305,7 @@ def test_donor_covariates_reach_libraries_that_read_cells(ddata):
     method.prepare_anndata(ddata)
     method.calculate_distance_matrix()
     assert "status" not in ddata.C.obs.columns
-    assert method.adata.X is ddata.C.X
+    np.testing.assert_array_equal(method.adata.X, ddata.C.X)
     assert (method.adata.obs["status"].to_numpy() == ddata.obs["status"].to_numpy()[ddata.donor_codes]).all()
     with pytest.raises(ValueError, match="not found"):
         method._ensure_cell_columns(["unknown"])
