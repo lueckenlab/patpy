@@ -5,6 +5,7 @@ patpy is a toolbox for single-cell data analysis on sample level.
 ![overview](./_static/patpy_pipeline.png)
 
 It provides:
+
 - 👨‍⚕️ Interface to sample representation methods (otherwise known as patient representation)
 - 📈 Analysis functions to get the most of your data
 - 📊 Metrics for sample representation evaluation
@@ -73,6 +74,7 @@ GitHub <https://github.com/lueckenlab/patpy>
 ## Citation
 
 For now, patpy can be cited as a repository:
+
 ```bibtex
 @misc{shitov_patpy_2024,
   author = {Shitov, Vladimir},
@@ -84,6 +86,7 @@ For now, patpy can be cited as a repository:
 ```
 
 If you use it for benchmarking sample representation methods, check out our paper at LMRL workshop at ICLR:
+
 ```bibtex
 @inproceedings{
     shitov2025benchmarking,
