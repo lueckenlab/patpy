@@ -8,4 +8,4 @@ dependencies:
   - python-igraph
   - pip
   - pip:
-    - patpy[helical]
+      - patpy[helical]

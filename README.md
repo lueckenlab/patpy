@@ -5,6 +5,7 @@
 patpy is a toolbox for single-cell data analysis on sample level.
 
 It provides:
+
 - 👨‍⚕️ Interface to sample representation methods (otherwise known as patient representation)
 - 📈 Analysis functions to get the most of your data
 - 📊 Metrics for sample representation evaluation
@@ -55,7 +56,6 @@ You need to have Python 3.9 or newer installed on your system. If you don't have
 Python installed, we recommend installing [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge).
 
 There are several alternative options to install patpy:
-
 
 1. Install the latest release of `patpy` from [`PyPI`](https://pypi.org/project/patpy/):
 
