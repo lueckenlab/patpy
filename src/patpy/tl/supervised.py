@@ -89,9 +89,9 @@ class SupervisedSampleMethod(BaseSampleMethod):
         ----------
         adata
             Single-cell AnnData that contains :attr:`sample_key` and all entries of
-            :attr:`label_keys` in ``.obs``, or a ``DonorData`` whose sample or donor
-            tables hold the labels. With a ``DonorData`` labels are stored once per
-            sample or donor instead of being repeated on every cell.
+            :attr:`label_keys` in ``.obs``, or a ``HiData`` whose subgroup or group
+            tables hold the labels. With a ``HiData`` labels are stored once per
+            subgroup or group instead of being repeated on every cell.
 
         Sets
         ----
@@ -423,7 +423,7 @@ class MixMIL(SupervisedSampleMethod):
         Adam learning rate.
     additional_covariates : list[str] or None, optional
         Extra numeric covariate columns from ``adata.obs`` or the tables of a
-        ``DonorData``, or keys of matrices in ``obsm`` of the level that is
+        ``HiData``, or keys of matrices in ``obsm`` of the level that is
         modelled, such as genotype principal components, to include as fixed
         effects.
     dtype : str, default ``"float32"``
@@ -919,8 +919,8 @@ class MixMIL(SupervisedSampleMethod):
             if self._has_metadata(cov):
                 vals = self._donor_col(cov).astype("float32")
                 covariate_list.append(torch.tensor(vals, dtype=dtype_torch).unsqueeze(1))
-            elif self.ddata is not None and cov in self.ddata.levels[self.sample_level].obsm:
-                units = self.ddata.levels[self.sample_level]
+            elif self.hdata is not None and cov in self.hdata.levels[self.sample_level].obsm:
+                units = self.hdata.levels[self.sample_level]
                 rows = units.obs_names.get_indexer([str(s) for s in self.samples])
                 vals = np.asarray(units.obsm[cov], dtype="float32")[rows]
                 covariate_list.append(torch.from_numpy(vals.reshape(n_donors, -1)))
@@ -1115,7 +1115,7 @@ class PULSAR(SupervisedSampleMethod):
 
         cells = self.adata
         if self.label_keys[0] not in cells.obs.columns:
-            cells = self.ddata.to_anndata(columns=[self.label_keys[0]])
+            cells = self.hdata.to_anndata(columns=[self.label_keys[0]])
 
         donor_embedding_collection = extract_donor_embeddings_from_h5ad(
             cells,
@@ -1647,7 +1647,7 @@ class PaSCient(SupervisedSampleMethod):
         Builds a :class:`~pascient.model.sample_predictor.SamplePredictor`
         (or reuses an existing one loaded from a checkpoint) and trains it
         with ``lightning.Trainer.fit`` on fixed-size donor bags drawn by
-        :class:`donordata.ml.MILDataset` and wrapped into PaSCient's
+        :class:`hidata.ml.MILDataset` and wrapped into PaSCient's
         ``SampleBatch`` format.
 
         Parameters
@@ -1734,7 +1734,7 @@ class PaSCient(SupervisedSampleMethod):
     def _training_loaders(self, adata: sc.AnnData, label_key: str, y_map: dict, task: str, batch_cls):
         """Build training and validation loaders of fixed-size donor bags.
 
-        Bags come from :class:`donordata.ml.MILDataset` over a DonorData that pairs the
+        Bags come from :class:`hidata.ml.MILDataset` over a HiData that pairs the
         encoded targets with the cells of *adata*, so every donor contributes
         :attr:`n_cells` subsampled or zero padded cells. Donors are split into
         training and validation sets with :attr:`val_fraction`.
@@ -1761,21 +1761,21 @@ class PaSCient(SupervisedSampleMethod):
         from torch.utils.data import DataLoader, random_split
 
         try:
-            from donordata import DonorData
-            from donordata.ml import MILDataset, mil_collate_fn
+            from hidata import HiData
+            from hidata.ml import MILDataset, mil_collate_fn
         except ImportError as e:
             raise ImportError(
-                "donordata is required for training PaSCient. Install with: pip install patpy[pascient]"
+                "hidata is required for training PaSCient. Install with: pip install patpy[pascient]"
             ) from e
 
         targets = pd.DataFrame(
             {"target": [y_map[d] for d in self.samples]},
             index=pd.Index([str(d) for d in self.samples], name=self.sample_key),
         )
-        bags = DonorData(D=targets, C=adata, donor_id=self.sample_key)
+        bags = HiData(G=targets, C=adata, group_id=self.sample_key)
         layer = None if self.layer in (None, "X") else self.layer
         dataset = MILDataset(
-            bags, cell_layer=layer, donor_labels_key="target", n_cells=self.n_cells, random_state=self.seed
+            bags, cell_layer=layer, group_labels_key="target", n_cells=self.n_cells, random_state=self.seed
         )
 
         def collate(items):
@@ -1783,7 +1783,7 @@ class PaSCient(SupervisedSampleMethod):
             x, padded_mask = batch["cell_x"].unsqueeze(1), batch["cell_mask"].unsqueeze(1)
             if self.normalize:
                 x, padded_mask = self._lognormalize(x, padded_mask)
-            y = batch["donor_y"].long() if task == "classification" else batch["donor_y"].float()
+            y = batch["group_y"].long() if task == "classification" else batch["group_y"].float()
             return batch_cls(
                 x=x,
                 padded_mask=padded_mask,

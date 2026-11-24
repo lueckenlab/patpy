@@ -521,14 +521,14 @@ def get_helical_embedding(
         )
 
 
-def as_donordata(
+def as_hidata(
     adata,
     sample_key: str,
     sample_metadata_columns=None,
     meta_adata=None,
     keep_in_cells: bool = True,
 ):
-    """Combine cells and their sample metadata into a ``DonorData``.
+    """Combine cells and their sample metadata into a ``HiData``.
 
     Parameters
     ----------
@@ -548,23 +548,23 @@ def as_donordata(
 
     Returns
     -------
-    donordata.DonorData
-        Holds the cells in ``ddata.C``, an AnnData, and one row per sample in ``ddata.D``, the sample
-        table, or ``meta_adata`` when given. ``ddata.obs`` is the sample table as a DataFrame, and
-        ``ddata.filter_donors`` selects samples together with their cells. Methods of ``patpy.tl``
+    hidata.HiData
+        Holds the cells in ``hdata.C``, an AnnData, and one row per sample in ``hdata.G``, the sample
+        table, or ``meta_adata`` when given. ``hdata.obs`` is the sample table as a DataFrame, and
+        ``hdata.filter_groups`` selects samples together with their cells. Methods of ``patpy.tl``
         accept it in place of ``adata`` with ``sample_key`` as their sample key.
 
     Examples
     --------
     >>> adata, info = patpy.datasets.stephenson(return_dataset_info=True)
-    >>> ddata = patpy.pp.as_donordata(adata, info.sample_key, info.sample_metadata_columns)
+    >>> hdata = patpy.pp.as_hidata(adata, info.sample_key, info.sample_metadata_columns)
     """
     try:
-        from donordata import DonorData
+        from hidata import HiData
     except ImportError as e:
-        raise ImportError("as_donordata needs the donordata package: pip install donordata") from e
+        raise ImportError("as_hidata needs the hidata package: pip install hidata") from e
 
     if meta_adata is not None:
-        return DonorData(D=meta_adata, C=adata, donor_id=sample_key)
+        return HiData(G=meta_adata, C=adata, group_id=sample_key)
     columns = [c for c in (sample_metadata_columns or []) if c in adata.obs.columns and c != sample_key]
-    return DonorData.from_anndata(adata, donor_id=sample_key, columns=columns, keep_in_cells=keep_in_cells)
+    return HiData.from_anndata(adata, group_id=sample_key, columns=columns, keep_in_cells=keep_in_cells)

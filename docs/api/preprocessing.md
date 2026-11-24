@@ -22,5 +22,5 @@
     pp.subsample
     pp.is_count_data
     pp.fill_nan_distances
-    pp.as_donordata
+    pp.as_hidata
 ```

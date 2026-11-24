@@ -1,5 +1,5 @@
 from .basic import (
-    as_donordata,
+    as_hidata,
     calculate_cell_qc_metrics,
     calculate_compositional_metrics,
     calculate_n_cells_per_sample,

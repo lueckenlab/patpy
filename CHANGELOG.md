@@ -12,10 +12,10 @@ and this project adheres to [Semantic Versioning][].
 
 ### Added
 
-- Methods of `patpy.tl` accept a `DonorData` (`pip install 'patpy[donordata]'`) in place of an AnnData; `to_donordata` stores their results in it.
-- `patpy.pp.as_donordata` builds a `DonorData` from an AnnData and its sample metadata columns.
-- `PaSCient` trains on fixed-size bags of cells drawn by `donordata.ml.MILDataset`.
-- `MixMIL` takes covariates from the sample and donor tables of a `DonorData` and from their `obsm`, such as genotype principal components.
+- Methods of `patpy.tl` accept a `HiData` (`pip install 'patpy[hidata]'`) in place of an AnnData; `to_hidata` stores their results in it.
+- `patpy.pp.as_hidata` builds a `HiData` from an AnnData and its sample metadata columns.
+- `PaSCient` trains on fixed-size bags of cells drawn by `hidata.ml.MILDataset`.
+- `MixMIL` takes covariates from the subgroup and group tables of a `HiData` and from their `obsm`, such as genotype principal components.
 - `knn_prediction_score` and `trajectory_correlation` are exported from `patpy.tl` and read distances from `obsp`.
 
 ## 0.16.7

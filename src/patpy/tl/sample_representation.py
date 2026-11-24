@@ -496,7 +496,7 @@ class SampleRepresentationMethod(BaseSampleMethod):
         ----------
         metadata : Optional[pd.DataFrame] = None
             Metadata about samples to be added to .obs of AnnData object. Should contain samples in index.
-            Defaults to the sample and donor tables when the method was prepared with a ``DonorData``.
+            Defaults to the subgroup and group tables when the method was prepared with a ``HiData``.
         *args, **kwargs
             Additional arguments to pass to calculate_distance_matrix method
 
@@ -514,7 +514,7 @@ class SampleRepresentationMethod(BaseSampleMethod):
         else:
             representation = np.array(self.embed())
 
-        if metadata is None and self.ddata is not None:
+        if metadata is None and self.hdata is not None:
             metadata = self._extract_metadata(self._metadata_level_columns())
         self.samples_adata = sc.AnnData(
             X=representation,
