@@ -15,7 +15,7 @@ Take a look at examples on how to use patpy for your analysis
     notebooks/synthetic_data_generation
     notebooks/distances_test_example
     notebooks/immune_aging_multiresolution_composition
-    notebooks/donordata_example
+    notebooks/hidata_example
 ```
 
 ```{toctree}
