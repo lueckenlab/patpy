@@ -767,6 +767,27 @@ def _get_col_from_adata(adata, col) -> pd.Series:
         return pd.Series(adata[:, col].X.toarray().flatten(), index=adata.obs_names)
 
 
+def _ensure_neighbors(meta_adata, representation: str, n_neighbors: int = 15) -> None:
+    """Compute the ``{representation}_neighbors`` graph from the stored distances when it is missing."""
+    neighbors_key = f"{representation}_neighbors"
+    if neighbors_key in meta_adata.uns:
+        return
+    distances_key = f"{representation}_distances"
+    n_neighbors = min(n_neighbors, meta_adata.n_obs - 1)
+    if distances_key in meta_adata.obsm:
+        sc.pp.neighbors(
+            meta_adata, use_rep=distances_key, key_added=neighbors_key, metric="precomputed", n_neighbors=n_neighbors
+        )
+        return
+    meta_adata.obsm[distances_key] = np.asarray(meta_adata.obsp[distances_key])
+    try:
+        sc.pp.neighbors(
+            meta_adata, use_rep=distances_key, key_added=neighbors_key, metric="precomputed", n_neighbors=n_neighbors
+        )
+    finally:
+        del meta_adata.obsm[distances_key]
+
+
 def trajectory_correlation(
     meta_adata, root_sample, trajectory_variable, representations=None, inverse_trajectory=False, force=False
 ):
@@ -775,7 +796,8 @@ def trajectory_correlation(
     Parameters
     ----------
     meta_adata: AnnData
-        The annotated data object with sample metadata
+        The annotated data object with sample metadata. Neighbor graphs ``{representation}_neighbors``
+        that are missing are computed from the distances in ``obsp`` or ``obsm``.
     root_sample: str
         The root sample to use for the diffusion pseudotime. It must be a presumable start of the trajectory.
         For example, the healthiest patient if trajectory is the disease severity or the youngest patient if trajectory is the age.
@@ -820,6 +842,7 @@ def trajectory_correlation(
 
             else:
                 print(f"Computing diffmap for {representation}")
+                _ensure_neighbors(meta_adata, representation)
                 ep.tl.diffmap(meta_adata, neighbors_key=f"{representation}_neighbors")
                 meta_adata.obsm[f"X_{representation}_diffmap"] = meta_adata.obsm["X_diffmap"]
                 ep.tl.dpt(meta_adata, neighbors_key=f"{representation}_neighbors")
@@ -851,7 +874,8 @@ def knn_prediction_score(
     Parameters
     ----------
     meta_adata: AnnData
-        The annotated data object with sample metadata
+        The annotated data object with sample metadata and the distances of every representation in
+        ``obsp`` or ``obsm`` under ``{representation}_distances``.
     benchmark_schema: dict
         The benchmark schema to use. Must have the following structure:
         - Keys must be "relevant", "technical", and "contextual".
@@ -900,7 +924,8 @@ def knn_prediction_score(
             for col in benchmark_schema[covariate_type]:
                 task = benchmark_schema[covariate_type][col]
                 try:
-                    distances = meta_adata.obsm[f"{representation}_distances"]
+                    key = f"{representation}_distances"
+                    distances = meta_adata.obsp[key] if key in meta_adata.obsp else meta_adata.obsm[key]
 
                     if isinstance(distances, pd.DataFrame):
                         distances = distances.loc[meta_adata.obs_names][meta_adata.obs_names].values

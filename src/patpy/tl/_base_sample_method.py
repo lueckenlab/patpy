@@ -11,6 +11,25 @@ import seaborn as sns
 from patpy.pp import extract_metadata, fill_nan_distances
 
 
+def _is_hidata(obj) -> bool:
+    """Whether *obj* is a ``HiData``, without requiring the hidata package."""
+    try:
+        from hidata import HiData
+    except ImportError:
+        return False
+    return isinstance(obj, HiData)
+
+
+def _level_of(hdata, sample_key: str) -> str:
+    """Level of *hdata* whose identifier is *sample_key*."""
+    if sample_key == hdata.group_id:
+        return "group"
+    if hdata.subgroup_id is not None and sample_key == hdata.subgroup_id:
+        return "subgroup"
+    identifiers = [i for i in (hdata.group_id, hdata.subgroup_id) if i is not None]
+    raise ValueError(f"sample_key='{sample_key}' must be an identifier of the HiData: {identifiers}.")
+
+
 def _create_colormap(df: pd.DataFrame, col: str, palette: str = "Spectral") -> pd.Series:
     """Map unique values of *col* to colours from *palette*."""
     unique_values = df[col].unique()
@@ -25,7 +44,9 @@ class BaseSampleMethod:
     Parameters
     ----------
     sample_key : str
-        Column in ``adata.obs`` containing sample (donor) identifiers.
+        Column in ``adata.obs`` containing sample (donor) identifiers. With a ``HiData`` it is
+        its ``group_id`` or its ``subgroup_id``, which chooses whether groups or subgroups are the
+        samples of the method.
     cell_group_key : str or None
         Column in ``adata.obs`` containing cell-type / cell-group labels.
         May be ``None`` when grouping is not required.
@@ -50,6 +71,8 @@ class BaseSampleMethod:
         self.seed = seed
 
         self.adata: sc.AnnData | None = None
+        self.hdata = None
+        self.sample_level: str | None = None
         self.samples: np.ndarray | None = None
         self.cell_groups: np.ndarray | None = None
         self.embeddings: dict[str, np.ndarray] = {}
@@ -58,7 +81,7 @@ class BaseSampleMethod:
         self.test_sample_labels: list | None = None
         self._fitted: bool = False
 
-    def prepare_anndata(self, adata: sc.AnnData) -> None:
+    def prepare_anndata(self, adata) -> None:
         """Store *adata* and populate :attr:`samples` / :attr:`cell_groups`.
 
         Subclasses must call ``super().prepare_anndata(adata)`` first,
@@ -67,8 +90,21 @@ class BaseSampleMethod:
         Parameters
         ----------
         adata
-            Single-cell AnnData.  Must contain :attr:`sample_key` in ``.obs``.
+            Single-cell AnnData that contains :attr:`sample_key` in ``.obs``, or a
+            ``HiData`` whose ``group_id`` or ``subgroup_id`` is :attr:`sample_key`. Its
+            groups or subgroups are then the samples of the method: its cells are used as
+            :attr:`adata`, sample metadata is read from its group and subgroup tables, and
+            the results can be stored in it with :meth:`to_hidata`.
         """
+        self.hdata, self.sample_level = None, None
+        if _is_hidata(adata):
+            self.hdata = adata
+            self.sample_level = _level_of(adata, self.sample_key)
+            if self.sample_key in adata.C.obs.columns:
+                adata = adata.C
+            else:
+                adata = adata.to_anndata(columns=[self.sample_key])
+
         if self.sample_key not in adata.obs.columns:
             raise ValueError(f"sample_key='{self.sample_key}' not found in adata.obs.")
 
@@ -130,9 +166,49 @@ class BaseSampleMethod:
         new_adata.obsm["X_old"] = self.adata.X
         return new_adata
 
+    def _metadata_level_columns(self, columns=None) -> list[str]:
+        """The *columns*, all by default, that the HiData stores once per sample in its subgroup or group table."""
+        if self.hdata is None:
+            return []
+        levels = ["subgroup", "group"] if self.sample_level == "subgroup" else ["group"]
+        known = list(dict.fromkeys(c for level in levels for c in self.hdata.levels[level].obs.columns))
+        columns = known if columns is None else columns
+        return [c for c in columns if c in known and c != self.sample_key]
+
     def _extract_metadata(self, columns: list[str]) -> pd.DataFrame:
-        """Return a DataFrame with *columns* aligned to :attr:`samples`."""
-        return extract_metadata(self.adata, self.sample_key, columns, samples=self.samples)
+        """Return a DataFrame with *columns* aligned to :attr:`samples`.
+
+        Columns that a HiData stores in its subgroup or group table are read from there, all others
+        are collapsed from ``adata.obs``.
+        """
+        level_columns = self._metadata_level_columns(columns)
+        if not level_columns:
+            return extract_metadata(self.adata, self.sample_key, columns, samples=self.samples)
+        table = self.hdata.get_df(level_columns, level=self.sample_level).loc[[str(s) for s in self.samples]]
+        table.index = pd.Index(self.samples, name=self.sample_key)
+        cell_columns = [c for c in columns if c not in level_columns]
+        if cell_columns:
+            cells = extract_metadata(self.adata, self.sample_key, cell_columns, samples=self.samples)
+            table = pd.concat([table, cells.set_axis(table.index)], axis=1)
+        return table[list(columns)]
+
+    def _ensure_cell_columns(self, columns) -> None:
+        """Attach sample covariates that a HiData stores in its tables to the cells in :attr:`adata`.
+
+        Libraries such as scvi-tools or pilotpy read covariates from ``adata.obs``.
+        """
+        missing = [c for c in columns if c is not None and c not in self.adata.obs.columns]
+        if not missing:
+            return
+        unknown = [c for c in missing if c not in self._metadata_level_columns(missing)]
+        if unknown:
+            raise ValueError(f"Columns {unknown} not found in adata.obs or in the tables of the HiData.")
+        attached = [c for c in self.adata.obs.columns if c not in self.hdata.C.obs.columns]
+        self.adata = self.hdata.to_anndata(columns=attached + missing)
+
+    def _has_metadata(self, column: str) -> bool:
+        """Whether *column* is in ``adata.obs`` or in the subgroup or group table of the HiData."""
+        return column in self.adata.obs.columns or bool(self._metadata_level_columns([column]))
 
     def _check_adata_loaded(self) -> None:
         """Raise :class:`RuntimeError` if :meth:`prepare_anndata` has not been called."""
@@ -329,9 +405,12 @@ class BaseSampleMethod:
             palette = None
             if use_uns_colors:
                 color_key = f"{col}{color_key_suffix}"
-                if color_key in self.adata.uns:
+                uns = self.adata.uns
+                if color_key not in uns and self.hdata is not None:
+                    uns = self.hdata.uns
+                if color_key in uns:
                     unique_vals = pd.unique(metadata_df[col].dropna())
-                    colors = self.adata.uns[color_key]
+                    colors = uns[color_key]
                     # Create a mapping from values to colors
                     palette = dict(zip(unique_vals, colors, strict=False))
 
@@ -388,8 +467,83 @@ class BaseSampleMethod:
                 "(and, for supervised methods, get_sample_representations) before fitting a probe."
             )
         if not isinstance(rep, pd.DataFrame):
-            rep = pd.DataFrame(np.asarray(rep), index=self.samples)
+            rep = np.asarray(rep)
+            if rep.ndim == 3:
+                rep = np.concatenate(list(rep), axis=1)
+            rep = pd.DataFrame(rep, index=self.samples)
         return rep
+
+    def to_hidata(self, key: str | None = None, hdata=None):
+        """Store the results of this method in a HiData.
+
+        The results go to the level whose identifier is :attr:`sample_key`: the sample representation
+        to ``obsm[key]``, the distance matrix to ``obsp[f"{key}_distances"]``, distances per cell group,
+        which MrVI and GroupedPseudobulk compute, to ``obsp[f"{key}_distances_{group}"]``, and every
+        embedding computed with :meth:`embed` to ``obsm[f"X_{method}_{key}"]``. *key* is added to
+        ``uns["sample_representations"]``, the list the evaluation functions read. Rows are matched to
+        the groups or subgroups by name, and those without a result are filled with ``NaN``. The results
+        are subset with the groups or subgroups when they are selected, and saved with the HiData.
+
+        Parameters
+        ----------
+        key
+            Prefix of the stored results. Defaults to the class name.
+        hdata
+            HiData to store the results in, for example when the method ran on a filtered copy of
+            the cells. Defaults to the HiData passed to :meth:`prepare_anndata`, or one built from
+            :attr:`adata` with ``HiData.from_anndata``.
+
+        Returns
+        -------
+        hidata.HiData
+            The HiData holding the results.
+        """
+        from hidata import HiData
+
+        self._check_adata_loaded()
+        key = key or type(self).__name__
+        if hdata is None:
+            hdata = self.hdata if self.hdata is not None else HiData.from_anndata(self.adata, self.sample_key)
+        level = _level_of(hdata, self.sample_key)
+        units = hdata.levels[level]
+        positions = units.obs_names.get_indexer([str(s) for s in self.samples])
+        found = positions >= 0
+
+        def aligned(matrix, square=False):
+            matrix = np.asarray(matrix)
+            shape = (units.n_obs, units.n_obs) if square else (units.n_obs, *matrix.shape[1:])
+            full = np.full(shape, np.nan)
+            if square:
+                full[np.ix_(positions[found], positions[found])] = matrix[np.ix_(found, found)]
+            else:
+                full[positions[found]] = matrix[found]
+            return full
+
+        try:
+            representation = self._get_sample_representation_frame()
+        except (NotImplementedError, RuntimeError):
+            representation = None
+        if representation is not None:
+            frame = representation.set_axis(representation.index.astype(str), axis=0)
+            units.obsm[key] = frame.set_axis(frame.columns.astype(str), axis=1).reindex(units.obs_names)
+
+        try:
+            distances = self.calculate_distance_matrix()
+        except (NotImplementedError, RuntimeError):
+            distances = None
+        if distances is not None:
+            units.obsp[f"{key}_distances"] = aligned(distances, square=True)
+        for group, group_distances in getattr(self, "group_distances", {}).items():
+            units.obsp[f"{key}_distances_{group}"] = aligned(group_distances, square=True)
+        for method, coordinates in self.embeddings.items():
+            units.obsm[f"X_{method.lower()}_{key}"] = aligned(coordinates)
+
+        registry = hdata.uns.setdefault("sample_representations", [])
+        if key not in registry:
+            registry.append(key)
+        if self.hdata is None:
+            self.hdata, self.sample_level = hdata, level
+        return hdata
 
     def fit_linear_probe(
         self,
@@ -412,7 +566,7 @@ class BaseSampleMethod:
         Parameters
         ----------
         target
-            Column in ``self.adata.obs`` to predict.
+            Column in ``self.adata.obs``, or in the subgroup or group table of a ``HiData``, to predict.
         task
             ``"classification"`` or ``"regression"``.
         test_size
@@ -471,8 +625,8 @@ class BaseSampleMethod:
         # is requested below.
         self._check_adata_loaded()
 
-        if target not in self.adata.obs.columns:
-            raise ValueError(f"target='{target}' not found in adata.obs.")
+        if not self._has_metadata(target):
+            raise ValueError(f"target='{target}' not found in adata.obs or the tables of the HiData.")
         if store and not hasattr(self, "_probes"):
             raise AttributeError(
                 "store=True is only supported for supervised methods that maintain a `_probes` registry."
